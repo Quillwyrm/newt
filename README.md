@@ -2,8 +2,6 @@
 
 ## API
 
-**Global Namespace**
-* `release(userdata)`
 
 **runtime (callbacks)**
 * `init()`
@@ -69,6 +67,8 @@
 * `filesystem.rename(old_path:string, new_path:string) -> (ok:boolean, err?:string)`
 * `filesystem.remove(path:string) -> (ok:boolean, err?:string)`
 
+**Global Namespace**
+* `release(userdata)`
 
 
 ## Status
