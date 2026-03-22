@@ -48,7 +48,7 @@ Luagame exposes the following functions to Lua.
 * `input.pressed(name: string) -> bool`
 * `input.repeated(name: string) -> bool`
 * `input.released(name: string) -> bool`
-* `input.get_mouse_position() -> (col:int, row:int)`
+* `input.get_mouse_position() -> (x:number, y:number)`
 * `input.get_mouse_wheel() -> (dx:number, dy:number)`
 * `input.start_text() -> nil`
 * `input.stop_text() -> nil`
