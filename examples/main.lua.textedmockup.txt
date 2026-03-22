@@ -1,0 +1,339 @@
+local runtime = monotome.runtime
+local draw    = monotome.draw
+local window  = monotome.window
+local font    = monotome.font
+
+-- Faces in the baked font set.
+local FACE_REG        = 1
+local FACE_BOLD       = 2
+local FACE_ITALIC     = 3
+local FACE_BOLDITALIC = 4
+
+-- Palette: dark editor-ish, still a bit 80s.
+local COLORS = {
+    bg          = { 5,  7, 12, 255 },
+    frame       = { 10, 14, 24, 255 },
+    panel       = { 12, 16, 28, 255 },
+    panel_alt   = { 8,  10, 20, 255 },
+
+    gutter_bg   = { 12, 16, 28, 255 },
+    cursor_line = { 16, 20, 36, 255 },
+
+    text_dim    = { 110, 130, 150, 255 },
+    text_mid    = { 160, 190, 210, 255 },
+    text_bright = { 220, 240, 255, 255 },
+
+    header_text = { 190, 220, 255, 255 },
+    accent_cyan = { 0,   255, 220, 255 },
+    accent_mag  = { 255, 120, 210, 255 },
+    accent_yel  = { 255, 210, 120, 255 },
+
+    mode_normal = { 40,  120, 60, 255 },
+    mode_text   = { 220, 255, 220, 255 },
+}
+
+-- Time / frame counters.
+local t       = 0
+local frame   = 0
+local last_dt = 0
+
+-- Fake file tree and buffer content ------------------------------------------
+
+local FILE_TREE_LINES = {
+    "monotome/",
+    "├─ lua/",
+    "│  ├─ main.lua",
+    "│  └─ theme.lua",
+    "├─ src/",
+    "│  ├─ monotome_engine.odin",
+    "│  ├─ monotome_fontsystem.odin",
+    "│  ├─ api_window.odin",
+    "│  └─ api_draw.odin",
+    "└─ assets/",
+    "   └─ fonts/",
+    "      ├─ JetBrainsMono-Regular.ttf",
+    "      ├─ JetBrainsMono-Bold.ttf",
+    "      ├─ JetBrainsMono-Italic.ttf",
+    "      └─ JetBrainsMono-BoldItalic.ttf",
+}
+
+
+local ACTIVE_TREE_LINE = 4 -- highlight “main.lua”
+
+local BUFFER_LINES = {
+    "local runtime = monotome.runtime",
+    "local draw    = monotome.draw",
+    "local window  = monotome.window",
+    "local font    = monotome.font",
+    "",
+    "-- Neovim-style mock buffer rendered by Monotome.",
+    "-- All of this is just text cells; no real editing yet.",
+    "",
+    "local FACE_REG        = 1",
+    "local FACE_BOLD       = 2",
+    "local FACE_ITALIC     = 3",
+    "local FACE_BOLDITALIC = 4",
+    "",
+    "local function draw_editor(...)",
+    "    -- see main.lua for implementation",
+    "end",
+    "",
+    "function runtime.init()",
+    "    font.init(24, {",
+    "        \"fonts/JetBrainsMono-Regular.ttf\",",
+    "        \"fonts/JetBrainsMono-Bold.ttf\",",
+    "        \"fonts/JetBrainsMono-Italic.ttf\",",
+    "        \"fonts/JetBrainsMono-BoldItalic.ttf\",",
+    "    })",
+    "    window.init(1120, 640, \"monotome / nvim mockup\", { \"resizable\" })",
+    "end",
+    "",
+    "-- Try resizing the window; grid is recomputed from the font cell size.",
+}
+
+-- “cursor” in buffer coordinates (1-based line/col).
+local CURSOR_LINE = 9
+local CURSOR_COL  = 7
+
+-- Helpers ---------------------------------------------------------------------
+
+local function clamp(x, a, b)
+    if x < a then return a end
+    if x > b then return b end
+    return x
+end
+
+local function draw_header(cols)
+    -- Top “tabline”/header row.
+    draw.rect(0, 0, cols, 1, COLORS.frame)
+
+
+
+    local file_label = "dev/monotome/lua/main.lua"
+    local x = 10
+    draw.text(x, 0, file_label, COLORS.header_text, FACE_REG)
+
+    local right = "[+]" .. "  " .. "utf-8[unix]"
+    local rx = cols - #right - 2
+    if rx < x + #file_label + 2 then
+        rx = x + #file_label + 2
+    end
+    draw.text(rx, 0, right, COLORS.text_mid, FACE_REG)
+end
+
+local function draw_statusline(cols, rows, cursor_line, cursor_col, last_dt)
+    local y = rows - 1
+    if y < 0 then return end
+
+    draw.rect(0, y, cols, 1, COLORS.frame)
+
+    -- Mode block on the left.
+    local mode_label = " NORMAL "
+    draw.text(1, y, mode_label, COLORS.mode_text, FACE_BOLD)
+
+    -- File info right after mode.
+    local file_info = " main.lua  lua  utf-8[unix] "
+    draw.text(#mode_label + 3, y, file_info, COLORS.text_mid, FACE_REG)
+
+    -- Right side: % through file, cursor pos, FPS.
+    local fps = 0
+    if last_dt > 0 then
+        fps = math.floor(1.0 / last_dt + 0.5)
+    end
+
+    local total_lines = #BUFFER_LINES
+    local pct = 0
+    if total_lines > 0 then
+        pct = math.floor((cursor_line / total_lines) * 100 + 0.5)
+    end
+
+    local right_text = string.format("%3d%%%%  %3d:%-3d  %3d fps", pct, cursor_line, cursor_col, fps)
+    local rx = cols - #right_text - 2
+    if rx < 0 then rx = 0 end
+    draw.text(rx, y, right_text, COLORS.text_mid, FACE_REG)
+end
+
+-- Tree view -------------------------------------------------------------------
+
+local function draw_tree(x, y, w, h)
+    if w <= 0 or h <= 0 then return end
+
+    draw.rect(x, y, w, h, COLORS.panel_alt)
+
+    -- Title bar.
+    draw.text(x + 1, y, " EXPLORER ", COLORS.accent_cyan, FACE_BOLD)
+
+    local base_y = y + 2
+    local max_lines = h - 2
+    local visible = math.min(max_lines, #FILE_TREE_LINES)
+
+    for i = 1, visible do
+        local line_y = base_y + (i - 1)
+        local line   = FILE_TREE_LINES[i]
+
+        local color = COLORS.text_dim
+        local face  = FACE_REG
+
+        if i == ACTIVE_TREE_LINE then
+            color = COLORS.text_bright
+            face  = FACE_BOLD
+        elseif line:find("", 1, true) then
+            color = COLORS.text_mid
+            face  = FACE_BOLD
+        end
+
+        draw.text(x + 1, line_y, line, color, face)
+    end
+end
+
+-- Editor buffer --------------------------------------------------------------
+
+local function draw_editor(x, y, w, h)
+    if w <= 0 or h <= 0 then return end
+
+    -- Editor body background.
+    draw.rect(x, y, w, h, COLORS.panel)
+
+    local total_lines = #BUFFER_LINES
+    if total_lines == 0 then return end
+
+    -- Line numbers: width = digits in total_lines.
+    local ln_digits = tostring(total_lines):len()
+    local gutter_w  = ln_digits + 2   -- one for sign, one for space.
+
+    if gutter_w + 4 > w then
+        gutter_w = math.max(3, w - 4)
+    end
+
+    -- Draw gutter background.
+    draw.rect(x, y, gutter_w, h, COLORS.gutter_bg)
+
+    local first_line = 1
+    local visible    = math.min(h, total_lines)
+
+    -- Highlight current line background if visible.
+    if CURSOR_LINE >= first_line and CURSOR_LINE < first_line + visible then
+        local hl_row = y + (CURSOR_LINE - first_line)
+        draw.rect(x, hl_row, w, 1, COLORS.cursor_line)
+    end
+
+    for i = 0, visible - 1 do
+        local line_index = first_line + i
+        local line_y     = y + i
+        local line       = BUFFER_LINES[line_index] or ""
+
+        -- Gutter: “  12 ” style.
+        local ln = tostring(line_index)
+        local pad = string.rep(" ", ln_digits - #ln) .. ln
+        local gutter_text = " " .. pad .. " "
+
+        local gutter_color = COLORS.text_dim
+        local gutter_face  = FACE_REG
+        if line_index == CURSOR_LINE then
+            gutter_color = COLORS.text_bright
+            gutter_face  = FACE_BOLD
+        end
+        draw.text(x, line_y, gutter_text, gutter_color, gutter_face)
+
+        -- Code text.
+        local text_x = x + gutter_w
+        local text_w = w - gutter_w - 1
+        if text_w < 0 then text_w = 0 end
+
+        local text_color = (line_index == CURSOR_LINE) and COLORS.text_bright or COLORS.text_mid
+        local text_face  = FACE_REG
+
+        local to_draw = line
+        if #to_draw > text_w then
+            to_draw = to_draw:sub(1, text_w)
+        end
+
+        draw.text(text_x, line_y, to_draw, text_color, text_face)
+    end
+
+    -- Blinking block cursor.
+    local blink_on = (math.floor(t * 2) % 2) == 0
+    if blink_on then
+        local buf_line = CURSOR_LINE
+        if buf_line >= first_line and buf_line < first_line + visible then
+            local line_y = y + (buf_line - first_line)
+
+            local ln = BUFFER_LINES[buf_line] or ""
+            local col = CURSOR_COL
+            if col < 1 then col = 1 end
+
+            -- Clamp cursor inside editor region.
+            local ln_len = #ln
+            if col > ln_len + 1 then
+                col = ln_len + 1
+            end
+
+            local cursor_x = x + gutter_w + (col - 1)
+            if cursor_x < x + gutter_w then
+                cursor_x = x + gutter_w
+            elseif cursor_x >= x + w then
+                cursor_x = x + w - 1
+            end
+
+            draw.text(cursor_x, line_y, "█", COLORS.text_bright, FACE_BOLD)
+        end
+    end
+end
+
+-- Layout / main draw ---------------------------------------------------------
+
+function runtime.init()
+    -- Configure font faces (paths relative to exe dir).
+
+
+    -- Lua owns window creation.
+    window.init(1120, 640, "monotome / nvim mockup", { "resizable" })
+end
+
+function runtime.update(dt)
+    t       = t + dt
+    frame   = frame + 1
+    last_dt = dt
+end
+
+function runtime.draw()
+    local cols = window.columns()
+    local rows = window.rows()
+
+    draw.clear(COLORS.bg)
+
+    if cols <= 0 or rows <= 2 then
+        return
+    end
+
+    -- Header + statusline eat 2 rows.
+    draw_header(cols)
+
+    local content_y = 1
+    local content_h = rows - 2
+    if content_h <= 0 then return end
+
+    -- Layout: [ tree | editor ]
+    local tree_w = math.floor(cols * 0.25)
+    if tree_w < 24 then tree_w = 24 end
+    if tree_w > cols - 32 then
+        tree_w = math.max(16, cols - 32)
+    end
+
+    local tree_x = 0
+    local editor_x = tree_w
+    local editor_w = cols - editor_x
+
+    -- Tree panel.
+    draw_tree(tree_x, content_y, tree_w, content_h)
+
+    -- Vertical split line (just a thin frame-colored strip).
+    draw.rect(editor_x, content_y, 1, content_h, COLORS.frame)
+
+    -- Editor panel.
+    draw_editor(editor_x + 1, content_y, editor_w - 1, content_h)
+
+    -- Statusline at bottom.
+    draw_statusline(cols, rows, CURSOR_LINE, CURSOR_COL, last_dt)
+end
+
