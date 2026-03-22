@@ -1,7 +1,7 @@
 # LUAGAME
 
 ## API
-
+Luagame exposes the following functions to Lua.
 
 **runtime (callbacks)**
 * `init()`
