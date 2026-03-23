@@ -196,6 +196,15 @@ main :: proc() {
     return
   }
   defer sdl.Quit()
+  
+  // ---------------------------------------------------------------------
+  // Audio
+  // ---------------------------------------------------------------------
+  if !audio_init() {
+    fmt.eprintln("Failed to initialize audio subsystem")
+    return
+  }
+  defer audio_shutdown()
 
   // ---------------------------------------------------------------------
   // Lua: load main.lua and run runtime.init()

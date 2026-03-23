@@ -30,6 +30,8 @@ local p_scale = 2.0
 local timer = 0
 local last_dt = 0
 
+
+
 runtime.init = function()
     window.init(1280, 720, "Full API & Movement Test", {"resizable"})
     
@@ -49,6 +51,8 @@ runtime.init = function()
     else
         print("Error loading atlas:", a_err)
     end
+    
+    print(window.is_cursor_visible())
 end
 
 runtime.update = function(dt)

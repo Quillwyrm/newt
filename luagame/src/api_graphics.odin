@@ -555,7 +555,7 @@ lua_image_gc :: proc "c" (L: ^lua.State) -> c.int {
 	// 2. Safety check: Ensure we haven't already destroyed this texture.
 	// This prevents a double-free crash if the user calls release() manually,
 	// and then Lua's GC eventually sweeps the leftover userdata pointer later.
-	if img != nil && img.texture != nil {
+	if img != nil {
 		sdl.DestroyTexture(img.texture)
 
 		// 3. Mark the texture as dead immediately.
@@ -570,7 +570,7 @@ lua_atlas_gc :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
     atlas := cast(^Atlas)lua.L_checkudata(L, 1, cstring("Atlas_Meta"))
 
-    if atlas != nil && atlas.image.texture != nil {
+    if atlas != nil {
         sdl.DestroyTexture(atlas.image.texture)
         atlas.image.texture = nil
     }

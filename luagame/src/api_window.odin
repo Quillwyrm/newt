@@ -154,11 +154,7 @@ lua_window_close :: proc "c" (L: ^lua.State) -> c.int {
 
 // window.should_close() -> bool
 lua_window_should_close :: proc "c" (L: ^lua.State) -> c.int {
-	b: b32 = b32(false)
-	if Quit_Requested {
-		b = b32(true)
-	}
-	lua.pushboolean(L, b)
+	lua.pushboolean(L, cast(b32)Quit_Requested)
 	return 1
 }
 
@@ -417,20 +413,14 @@ lua_window_cursor_hide :: proc "c" (L: ^lua.State) -> c.int {
 	return 0
 }
 
-// window.cursor_visible() -> bool
-lua_window_cursor_visible :: proc "c" (L: ^lua.State) -> c.int {
+// window.is_cursor_visible() -> bool
+lua_window_is_cursor_visible :: proc "c" (L: ^lua.State) -> c.int {
 	if Window == nil {
-		lua.L_error(L, cstring("window.cursor_visible: window not created"))
+		lua.L_error(L, cstring("window.is_cursor_visible: window not created"))
 		return 0
 	}
 
-	vis := sdl.CursorVisible()
-
-	b: b32 = b32(false)
-	if vis {
-		b = b32(true)
-	}
-	lua.pushboolean(L, b)
+	lua.pushboolean(L, cast(b32)sdl.CursorVisible())
 	return 1
 }
 
@@ -534,8 +524,8 @@ register_window_api :: proc(L: ^lua.State) {
 	lua.pushcfunction(L, lua_window_cursor_hide)
 	lua.setfield(L, -2, cstring("cursor_hide"))
 
-	lua.pushcfunction(L, lua_window_cursor_visible)
-	lua.setfield(L, -2, cstring("cursor_visible"))
+	lua.pushcfunction(L, lua_window_is_cursor_visible)
+	lua.setfield(L, -2, cstring("is_cursor_visible"))
 	
 		// clipboard
 	lua.pushcfunction(L, lua_window_get_clipboard)
