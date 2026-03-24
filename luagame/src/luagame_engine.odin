@@ -274,10 +274,6 @@ main :: proc() {
   perf_freq    := f64(sdl.GetPerformanceFrequency())
   last_counter := sdl.GetPerformanceCounter()
   
-  // --- THE FIX: START AUDIO ENGINE HERE ---
-	// The OS is done stalling. The window exists. Safe to process audio.
-	audio_start_engine()
-	// ----------------------------------------
 
   // ---------------------------------------------------------------------
   // Event loop

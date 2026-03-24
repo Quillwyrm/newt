@@ -6,6 +6,7 @@ import "core:c"
 import "base:runtime"
 import lua "luajit"
 import ma "vendor:miniaudio"
+import sdl "vendor:sdl3"
 
 // =============================================================================
 // Audio Data Structures
@@ -56,9 +57,6 @@ audio_init :: proc() -> bool {
 	// 1. Initialize the core Miniaudio engine
 	config := ma.engine_config_init()
 	
-	// Keep it suspended so it doesn't fight the OS during window creation.
-	config.noAutoStart = true
-	
 	result := ma.engine_init(&config, &audio_ctx.engine)
 	if result != .SUCCESS {
 		fmt.eprintf("Failed to initialize audio engine: %v\n", result)
@@ -95,26 +93,29 @@ audio_init :: proc() -> bool {
 	return true
 }
 
-audio_start_engine :: proc () {
-  ma.engine_start(&audio_ctx.engine)
-}
-
 // audio_shutdown uninitializes all active voices, tracks, and the miniaudio engine.
 // Must be called on application shutdown.
 audio_shutdown :: proc() {
-	// Clean up any voices that are currently playing
+	// 1. Halt and destroy all active voices.
+	// This gracefully drops the Master track's input to pure silence.
 	for i in 0..<MAX_VOICES {
 		if audio_ctx.voices[i].active {
+			ma.sound_stop(&audio_ctx.voices[i].node) 
 			ma.sound_uninit(&audio_ctx.voices[i].node)
 		}
 	}
 
-	// Uninitialize tracks in reverse order of creation (children before master)
-	for i := 7; i >= 0; i -= 1 {
+	// 2. The Hardware Flush.
+	// The core engine is still ticking. We sleep the main thread for 50ms to allow 
+	// the now-silent Master track to overwrite WASAPI's hardware ring buffer.
+	sdl.Delay(50)
+
+	// 3. Teardown tracks in reverse order of creation (children before master).
+	for i := MAX_TRACKS - 1; i >= 0; i -= 1 {
 		ma.sound_group_uninit(&audio_ctx.tracks[i].group)
 	}
 
-	// Kill the engine
+	// 4. Kill the core engine.
 	ma.engine_uninit(&audio_ctx.engine)
 }
 

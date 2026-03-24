@@ -87,7 +87,7 @@ runtime.update = function(dt)
 
     if input.down("q") then p_scale = p_scale - dt end
     if input.down("e") then p_scale = p_scale + dt end
-    if input.pressed("e") then audio.play(snd_sfx,2,.2,p_scale*2) end
+    --if input.pressed("e") then audio.play(snd_sfx,2,.2,p_scale*2) end
 
     if input.pressed("escape") then window.close() end
     
