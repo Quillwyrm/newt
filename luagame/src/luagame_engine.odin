@@ -70,6 +70,7 @@ register_lua_api :: proc() {
     register_graphics_api(Lua)
     register_window_api(Lua)
     register_input_api(Lua)
+    register_audio_api(Lua)
     
     // The 'runtime' table acts as a general-purpose namespace for engine-level 
     // metadata and lifecycle states that don't fit into specific sub-systems.
@@ -272,6 +273,11 @@ main :: proc() {
   // ---------------------------------------------------------------------
   perf_freq    := f64(sdl.GetPerformanceFrequency())
   last_counter := sdl.GetPerformanceCounter()
+  
+  // --- THE FIX: START AUDIO ENGINE HERE ---
+	// The OS is done stalling. The window exists. Safe to process audio.
+	audio_start_engine()
+	// ----------------------------------------
 
   // ---------------------------------------------------------------------
   // Event loop
@@ -301,6 +307,8 @@ main :: proc() {
     }
 
     input_end_frame()
+    
+    audio_update()
 
     if !call_lua_number(cstring("update"), dt) { break }
     if !call_lua_noargs(cstring("draw")) { break }

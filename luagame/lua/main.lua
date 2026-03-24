@@ -30,7 +30,8 @@ local p_scale = 2.0
 local timer = 0
 local last_dt = 0
 
-
+local snd_sfx = nil
+local snd_music = nil
 
 runtime.init = function()
     window.init(1280, 720, "Full API & Movement Test", {"resizable"})
@@ -52,7 +53,26 @@ runtime.init = function()
         print("Error loading atlas:", a_err)
     end
     
-    print(window.is_cursor_visible())
+
+    
+    -- Audio Test
+    local sfx, sfx_err = audio.load_sound("test_sfx.wav", "static")
+    if sfx then 
+        snd_sfx = sfx 
+        print("Static SFX Loaded to RAM")
+    else 
+        print("SFX Error:", sfx_err) 
+    end
+
+    local bgm, bgm_err = audio.load_sound("test_bgm.ogg", "stream")
+    if bgm then 
+        snd_music = bgm 
+        print("Stream BGM Ready")
+    else 
+        print("BGM Error:", bgm_err) 
+    end
+    
+    audio.play(bgm,1,.5,.8)
 end
 
 runtime.update = function(dt)
@@ -67,8 +87,19 @@ runtime.update = function(dt)
 
     if input.down("q") then p_scale = p_scale - dt end
     if input.down("e") then p_scale = p_scale + dt end
+    if input.pressed("e") then audio.play(snd_sfx,2,.2,p_scale*2) end
 
     if input.pressed("escape") then window.close() end
+    
+    -- Test manual release vs GC sweep
+    if input.pressed("backspace") then
+        if snd_sfx then
+            print("Manually releasing SFX...")
+            release(snd_sfx)
+            snd_sfx = nil -- Remove Lua's reference so GC ignores it later
+        end
+    end
+    
 end
 
 runtime.draw = function()
