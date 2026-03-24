@@ -501,36 +501,49 @@ lua_graphics_get_image_size :: proc "c" (L: ^lua.State) -> c.int {
 	return 2
 }
 
-//TRANSFORMATION
 
+// DRAW TRANSFORMATION
+
+
+// lua_graphics_set_draw_rotation: graphics.set_draw_rotation(angle: number = 0)
 lua_graphics_set_draw_rotation :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
-    gfx_ctx.pending.rotation = cast(f32)lua.L_checknumber(L, 1)
-    return 0
+	context = runtime.default_context()
+	gfx_ctx.pending.rotation = cast(f32)lua.L_optnumber(L, 1, 0.0)
+	return 0
 }
 
+// lua_graphics_set_draw_scale: graphics.set_draw_scale(sx: number = 1, sy: number = sx)
 lua_graphics_set_draw_scale :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
-    gfx_ctx.pending.scale.x = cast(f32)lua.L_checknumber(L, 1)
-    gfx_ctx.pending.scale.y = cast(f32)lua.L_checknumber(L, 2)
-    return 0
+	context = runtime.default_context()
+	sx := lua.L_optnumber(L, 1, 1.0)
+	// If sy isn't provided, we default to sx to perform a uniform scale.
+	sy := lua.L_optnumber(L, 2, sx) 
+	
+	gfx_ctx.pending.scale.x = cast(f32)sx
+	gfx_ctx.pending.scale.y = cast(f32)sy
+	return 0
 }
 
+// lua_graphics_set_draw_origin: graphics.set_draw_origin(ox: number = 0, oy: number = 0)
 lua_graphics_set_draw_origin :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
-    gfx_ctx.pending.origin.x = cast(f32)lua.L_checknumber(L, 1)
-    gfx_ctx.pending.origin.y = cast(f32)lua.L_checknumber(L, 2)
-    return 0
+	context = runtime.default_context()
+	gfx_ctx.pending.origin.x = cast(f32)lua.L_optnumber(L, 1, 0.0)
+	gfx_ctx.pending.origin.y = cast(f32)lua.L_optnumber(L, 2, 0.0)
+	return 0
 }
 
+// lua_graphics_begin_transform_group: graphics.begin_transform_group()
 lua_graphics_begin_transform_group :: proc "c" (L: ^lua.State) -> c.int {
-    gfx_ctx.group_depth += 1
-    return 0
+	gfx_ctx.group_depth += 1
+	return 0
 }
 
+// lua_graphics_end_transform_group: graphics.end_transform_group()
 lua_graphics_end_transform_group :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 	gfx_ctx.group_depth = math.max(0, gfx_ctx.group_depth - 1)
+	
+	// If we've popped the last group, reset the pen to neutral defaults.
 	if gfx_ctx.group_depth == 0 {
 		reset_pending_transforms()
 	}
