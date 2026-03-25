@@ -21,10 +21,10 @@ Lua 		 : ^lua.State
 // ENGINE GLOBAL API
 //=========================================================================================
 
-// lua_engine_global_release implements: release(userdata)
+// lua_engine_global_free implements: free(userdata)
 // This is the universal garbage disposal verb. It looks up the __gc metamethod
 // of any userdata passed to it and executes it immediately, freeing backend resources.
-lua_engine_global_release :: proc "c" (L: ^lua.State) -> c.int {
+lua_engine_global_free :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	// 1. Ensure the user actually passed a Userdata object. Ignore everything else.
@@ -49,11 +49,11 @@ lua_engine_global_release :: proc "c" (L: ^lua.State) -> c.int {
 	return 0
 }
 
-// register_engine_global_api registers top-level engine builtins like `release`.
+// register_engine_global_api registers top-level engine builtins like `free`.
 // These are injected directly into the global namespace, side-by-side with `print`.
 register_engine_global_api :: proc(L: ^lua.State) {
-	lua.pushcfunction(L, lua_engine_global_release)
-	lua.setglobal(L, cstring("release"))
+	lua.pushcfunction(L, lua_engine_global_free)
+	lua.setglobal(L, cstring("free"))
 }
 
 //========================================================================================================================================
@@ -186,48 +186,46 @@ prepend_package_path :: proc(L: ^lua.State, exe_dir: string) {
 //========================================================================================================================================
 main :: proc() {
   context = runtime.default_context()
-  
 
   // ---------------------------------------------------------------------
   // SDL
   // ---------------------------------------------------------------------
-
+  // Initialize the platform layer. VIDEO is required for window and renderer creation.
   if !sdl.Init({.VIDEO}) {
     fmt.eprintln("SDL_Init failed:", sdl.GetError())
     return
   }
   defer sdl.Quit()
-  
-  // ---------------------------------------------------------------------
-  // Audio
-  // ---------------------------------------------------------------------
-  if !audio_init() {
-    fmt.eprintln("Failed to initialize audio subsystem")
-    return
-  }
-  defer audio_shutdown()
 
   // ---------------------------------------------------------------------
-  // Lua: load main.lua and run runtime.init()
+  // Lua: Initialization & API Binding
   // ---------------------------------------------------------------------
+  // Spin up the LuaJIT virtual machine state.
   Lua = lua.L_newstate()
   if Lua == nil {
     fmt.eprintln("Lua L_newstate failed")
     return
   }
-  defer lua.close(Lua)
-
+  
+  // Load standard libraries (math, table, string, etc.) and bind engine modules.
   lua.L_openlibs(Lua)
   register_lua_api()
 
+  // Resolve the executable path to ensure relative asset loading works across different OS environments.
   exe_dir, err := os.get_executable_directory(context.temp_allocator)
   if err != os.ERROR_NONE {
     fmt.eprintln("get_executable_directory failed:", err)
     return
   }
   
+  // Inject the local /lua/ folder into the Lua package search path.
   prepend_package_path(Lua, exe_dir)
 
+  // ---------------------------------------------------------------------
+  // Pre-Flight Configuration (Captures audio config from global scope)
+  // ---------------------------------------------------------------------
+  // Execute the top-level scope of main.lua. This allows scripts to define 
+  // hardware-level settings (like audio buffer sizes) before the hardware is actually opened.
   main_path, err2 := os.join_path({exe_dir, "lua", "main.lua"}, context.temp_allocator)
   if err2 != os.ERROR_NONE {
     fmt.eprintln("join_path for main.lua failed:", err2)
@@ -244,37 +242,42 @@ main :: proc() {
   }
   lua.settop(Lua, 0)
 
-  // Handled by free_all in loop start, but kept for clarity here
+  // Explicitly wipe boot-time temporary strings before entering the main systems.
   mem.free_all(context.temp_allocator)
 
+  // ---------------------------------------------------------------------
+  // Hardware Subsystems Boot
+  // ---------------------------------------------------------------------
+  // Open the audio device and initialize mixing groups using the config captured above.
+  if !audio_init() {
+    fmt.eprintln("Failed to initialize audio subsystem")
+    return
+  }
+  
+  input_init()
+
+  // ---------------------------------------------------------------------
+  // Client Application Initialization
+  // ---------------------------------------------------------------------
+  // Hand control to the user's runtime.init() for asset loading and window creation.
   if !call_lua_noargs(cstring("init")) { return }
 
-  // runtime.init() must call window.init(...)
+  // Structural Guard: Ensure the user's script actually initialized a valid graphics context.
   if Window == nil || Renderer == nil {
     fmt.eprintln("runtime.init() did not call window.init(...)")
     return
   }
   
-  //setup base texture for rect draws + other gfx_ctx bookeeping
+  // Finalize internal graphics state (e.g., base rect textures and default filtering).
   init_graphics_state()
-
-
-  // Window/module owns window teardown. Host calls once.
-  defer window_shutdown()
-  
-  // ---------------------------------------------------------------------
-  // Input
-  // ---------------------------------------------------------------------
-  input_init()
-  defer input_shutdown()
 
   // ---------------------------------------------------------------------
   // Timing
   // ---------------------------------------------------------------------
+  // Query OS-level clock frequency for high-precision frame timing.
   perf_freq    := f64(sdl.GetPerformanceFrequency())
   last_counter := sdl.GetPerformanceCounter()
   
-
   // ---------------------------------------------------------------------
   // Event loop
   // ---------------------------------------------------------------------
@@ -282,19 +285,22 @@ main :: proc() {
   running := true
 
   for running {
-    // Consolidated temp cleanup
+    // Wipe all temporary allocations from the previous frame to maintain zero-leak steady state.
     mem.free_all(context.temp_allocator)
 
+    // Calculate frame delta time (dt) by comparing performance counter ticks.
     now_counter := sdl.GetPerformanceCounter()
     delta_ticks := now_counter - last_counter
     last_counter = now_counter
     dt := f64(delta_ticks) / perf_freq
 
-    // Safety clamp: prevents OS spikes from breaking game math
+    // Hard limit on DT: Prevents systemic "teleportation" errors if the OS stalls.
     if dt > 0.1 { dt = 0.1 }
     
+    // Begin input frame to swap current/previous key states.
     input_begin_frame()
 
+    // Process OS messages and handle window events.
     for sdl.PollEvent(&event) {
       if event.type == .QUIT || event.type == .WINDOW_CLOSE_REQUESTED {
         Quit_Requested = true
@@ -304,14 +310,26 @@ main :: proc() {
 
     input_end_frame()
     
+    // Perform internal audio voice reclamation.
     audio_update()
 
+    // Execute user logic and draw commands.
     if !call_lua_number(cstring("update"), dt) { break }
     if !call_lua_noargs(cstring("draw")) { break }
 
+    // Flip the backbuffer to the physical display.
     sdl.RenderPresent(Renderer)
 
     if Quit_Requested { running = false }
   }
+  
+  // ---------------------------------------------------------------------
+  // SUBSYSTEM TEARDOWN STACK (Executes Bottom-to-Top / LIFO)
+  // ---------------------------------------------------------------------
+  // We declare these here to ensure Lua clears its assets (Sounds/Images)
+  // while the Audio and Graphics backends are still valid.
+  defer audio_shutdown()
+  defer input_shutdown()
+  defer window_shutdown()
+  defer lua.close(Lua)   
 }
-

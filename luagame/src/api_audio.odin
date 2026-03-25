@@ -11,10 +11,15 @@ import sdl "vendor:sdl3"
 
 // # Audio API - audio.function()
 //
-// ### Global Listener State
+// ### Engine Configuration (Call BEFORE Engine Init)
+// - `.config_track_delay_times(table)` — e.g., { [1] = 0.5, [4] = 2.0 }
+//
+// ### Global Listener & Defaults
 // - `.set_listener_position(x, y)`
 // - `.set_listener_rotation(degrees)`
 // - `.set_listener_velocity(vx, vy)`
+// - `.set_default_falloff(min_px, max_px?)`
+// - `.set_default_falloff_mode(mode)` — modes: "none", "inverse", "linear", "exponential"
 //
 // ### Asset Management
 // - `.load_sound(filepath, mode?)` — returns a `Sound` object
@@ -28,32 +33,36 @@ import sdl "vendor:sdl3"
 // - `.set_voice_pitch(handle, pitch)`
 // - `.set_voice_pan(handle, pan)`
 // - `.set_voice_looping(handle, is_looping)`
-// - `.seek_voice(handle, offset, unit?)` — `unit` defaults to `"seconds"`, also accepts `"samples"`.
+// - `.seek_voice(handle, offset, unit?)` — units: "seconds" (default), "samples"
 // - `.fade_voice(handle, target_volume, duration)`
+// - `.get_voice_info(handle)` — returns `time_in_seconds`, `duration_in_seconds`
+// - `.is_voice_playing(handle)` — returns `bool`
 //
 // ### Instance Control (Spatial)
 // - `.set_voice_position(handle, x, y)`
 // - `.set_voice_velocity(handle, vx, vy)`
-// - `.set_voice_min_distance(handle, pixels)`
-// - `.set_voice_max_distance(handle, pixels)`
+// - `.set_voice_falloff(handle, min_px, max_px?)`
 // - `.set_voice_rolloff(handle, factor)`
-// - `.set_voice_falloff_mode(handle, mode)` — modes: `"none"`, `"inverse"`, `"linear"`, `"exponential"`
-// - `.set_voice_pan_mode(handle, mode)` — modes: `"balance"`, `"pan"`
+// - `.set_voice_falloff_mode(handle, mode)`
+// - `.set_voice_pan_mode(handle, mode)` — modes: "balance", "pan"
 //
 // ### Instance Lifecycle
 // - `.pause_voice(handle)`
 // - `.resume_voice(handle)`
-// - `.stop_voice(handle)` — uninitializes and reclaims the voice slot
+// - `.stop_voice(handle)` — halts and reclaims the voice slot
 //
-// ### Track Mixing & Control
+// ### Track Mixing
 // - `.set_track_volume(track_id, volume)`
 // - `.set_track_pitch(track_id, pitch)`
 // - `.set_track_pan(track_id, pan)`
-// - `.set_track_filters(track_id, lpf_hz, hpf_hz)` — updates persistent DSP nodes for the track.
 // - `.fade_track(track_id, target_volume, duration)`
+// - `.set_track_lpf(track_id, hz)`
+// - `.set_track_hpf(track_id, hz)`
+// - `.set_track_delay_mix(track_id, wet, dry?)`
+// - `.set_track_delay_feedback(track_id, amount)`
 // - `.pause_track(track_id)`
 // - `.resume_track(track_id)`
-// - `.stop_track(track_id)` — halts the track and destroys all active voices on it
+// - `.stop_track(track_id)` — halts track and destroys all active voices on it
 
 
 
@@ -95,7 +104,7 @@ Voice :: struct {
 // Global Audio Context
 // =============================================================================
 
-// audio_ctx is the singleton holding the engine, mixing buses, and voice pool.
+// Global Audio Context
 audio_ctx: struct {
 	engine: ma.engine,
 	tracks: [MAX_TRACKS]Track,
@@ -105,6 +114,9 @@ audio_ctx: struct {
 	default_min_dist: f32, 
 	default_max_dist: f32,
 	default_attenuation_model: ma.attenuation_model,
+	
+	// Config state populated by Lua before audio_init() runs
+	track_delay_times: [MAX_TRACKS]f32,
 }
 
 // =============================================================================
@@ -146,8 +158,10 @@ audio_init :: proc() -> bool {
 			return false
 		}
 
-		// Init Delay (Locked at ~250ms, Starts with 0 decay/feedback)
-		delay_frames := u32(f32(sample_rate) * 0.25)
+		// Init Delay (Reads from Lua config, fallback to 250ms)
+		delay_sec := audio_ctx.track_delay_times[i]
+		if delay_sec <= 0.0 do delay_sec = 0.25 
+		delay_frames := u32(delay_sec * f32(sample_rate))
 		delay_cfg := ma.delay_node_config_init(channels, sample_rate, delay_frames, 0.0)
 		result = ma.delay_node_init(graph, &delay_cfg, nil, &audio_ctx.tracks[i].delay)
 		if result != .SUCCESS {
@@ -594,9 +608,9 @@ lua_audio_stop_voice :: proc "c" (L: ^lua.State) -> c.int {
 
 //Voice Distance & Physics
 
-// lua_audio_set_default_distance: audio.set_default_distance(min_px: number, max_px?: number)
+// lua_audio_set_default_falloff: audio.set_default_falloff(min_px: number, max_px?: number)
 // Sets the global default radius for all FUTURE play_at calls.
-lua_audio_set_default_distance :: proc "c" (L: ^lua.State) -> c.int {
+lua_audio_set_default_falloff :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 	
 	// Arg 1: min_px (Required)
@@ -816,9 +830,9 @@ lua_audio_set_track_hpf :: proc "c" (L: ^lua.State) -> c.int {
 	return 0
 }
 
-// lua_audio_set_track_delay: audio.set_track_echo(track: int, amount: number)
+// lua_audio_set_track_delay_feedback: audio.set_track_delay_feedback(track: int, amount: number)
 // amount is the decay feedback (0.0 to 1.0). 0.0 is off, 0.5 is a medium echo tail.
-lua_audio_set_track_delay :: proc "c" (L: ^lua.State) -> c.int {
+lua_audio_set_track_delay_feedback :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 	idx := lua.L_checkinteger(L, 1)
 	if idx <= 0 || idx >= MAX_TRACKS do return 0
@@ -830,6 +844,54 @@ lua_audio_set_track_delay :: proc "c" (L: ^lua.State) -> c.int {
 
 	ma.delay_node_set_decay(&audio_ctx.tracks[idx].delay, amount)
 	return 0
+}
+
+// lua_audio_set_track_delay_mix: audio.set_track_delay_mix(track: int, wet: number, dry?: number)
+lua_audio_set_track_delay_mix :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+    
+    // 1. Fetch and validate track index
+    idx := lua.L_checkinteger(L, 1)
+    if idx <= 0 || idx >= MAX_TRACKS do return 0 // Silently reject Track 0 or out-of-bounds
+
+    // 2. Fetch wet mix (required) and dry mix (optional, defaults to 1.0)
+    wet := f32(lua.L_checknumber(L, 2))
+    dry := f32(lua.L_optnumber(L, 3, 1.0)) 
+
+    // 3. Mutate the active miniaudio node
+    ma.delay_node_set_wet(&audio_ctx.tracks[idx].delay, wet)
+    ma.delay_node_set_dry(&audio_ctx.tracks[idx].delay, dry)
+
+    return 0
+}
+
+// lua_audio_config_track_delay_times: audio.config_track_delay_times({ [1] = 0.5, [4] = 2.0 })
+lua_audio_config_track_delay_times :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+    
+    // 1. Validate the input is a table
+    lua.L_checktype(L, 1, lua.TTABLE)
+
+    // 2. Iterate only over valid sub-tracks (Master track 0 has no delay node)
+    for i in 1..<MAX_TRACKS {
+        // Push the integer key we want to look up (e.g., 1, then 2, etc.)
+        lua.pushinteger(L, lua.Integer(i))
+        
+        // gettable pops the key we just pushed, and pushes the value at table[key]
+        // The table is at absolute index 1 on the Lua stack
+        lua.gettable(L, 1)
+
+        // 3. Check if the value exists and is a number
+        // -1 is the top of the stack (the value we just fetched)
+        if lua.type(L, -1) == lua.TNUMBER {
+            audio_ctx.track_delay_times[i] = f32(lua.tonumber(L, -1))
+        }
+        
+        // 4. Clean up the stack
+        // Pop the value so the stack is perfectly clean for the next loop iteration
+        lua.pop(L, 1)
+    }
+    return 0
 }
 
 // lua_audio_pause_track: audio.pause_track(track_idx: int)
@@ -947,96 +1009,99 @@ setup_audio_metatables :: proc(L: ^lua.State) {
 
 // register_audio_api exposes the full audio module to the Lua environment.
 register_audio_api :: proc(L: ^lua.State) {
-	setup_audio_metatables(L)
+    setup_audio_metatables(L)
 
-	lua.newtable(L)
+    lua.newtable(L)
 
-	// --- Global Listener State ---
-	lua.pushcfunction(L, lua_audio_set_listener_position)
-	lua.setfield(L, -2, cstring("set_listener_position"))
-	lua.pushcfunction(L, lua_audio_set_listener_rotation)
-	lua.setfield(L, -2, cstring("set_listener_rotation"))
-	lua.pushcfunction(L, lua_audio_set_listener_velocity)
-	lua.setfield(L, -2, cstring("set_listener_velocity"))
+    // --- Engine Configuration (Call BEFORE Engine Init) ---
+    lua.pushcfunction(L, lua_audio_config_track_delay_times)
+    lua.setfield(L, -2, cstring("config_track_delay_times"))
 
-	// --- Asset Management ---
-	lua.pushcfunction(L, lua_audio_load_sound)
-	lua.setfield(L, -2, cstring("load_sound"))
+    // --- Global Listener & Defaults ---
+    lua.pushcfunction(L, lua_audio_set_listener_position)
+    lua.setfield(L, -2, cstring("set_listener_position"))
+    lua.pushcfunction(L, lua_audio_set_listener_rotation)
+    lua.setfield(L, -2, cstring("set_listener_rotation"))
+    lua.pushcfunction(L, lua_audio_set_listener_velocity)
+    lua.setfield(L, -2, cstring("set_listener_velocity"))
+    lua.pushcfunction(L, lua_audio_set_default_falloff)
+    lua.setfield(L, -2, cstring("set_default_falloff"))
+    lua.pushcfunction(L, lua_audio_set_default_falloff_mode)
+    lua.setfield(L, -2, cstring("set_default_falloff_mode"))
 
-	// --- Playback Entry Points ---
-	lua.pushcfunction(L, lua_audio_play)
-	lua.setfield(L, -2, cstring("play"))
-	lua.pushcfunction(L, lua_audio_play_at)
-	lua.setfield(L, -2, cstring("play_at"))
+    // --- Asset Management ---
+    lua.pushcfunction(L, lua_audio_load_sound)
+    lua.setfield(L, -2, cstring("load_sound"))
 
-	// --- Instance Control (Common) ---
-	lua.pushcfunction(L, lua_audio_set_voice_volume)
-	lua.setfield(L, -2, cstring("set_voice_volume"))
-	lua.pushcfunction(L, lua_audio_set_voice_pitch)
-	lua.setfield(L, -2, cstring("set_voice_pitch"))
-	lua.pushcfunction(L, lua_audio_set_voice_pan)
-	lua.setfield(L, -2, cstring("set_voice_pan"))
-	lua.pushcfunction(L, lua_audio_set_voice_looping)
-	lua.setfield(L, -2, cstring("set_voice_looping"))
-	lua.pushcfunction(L, lua_audio_seek_voice)
-	lua.setfield(L, -2, cstring("seek_voice"))
-	lua.pushcfunction(L, lua_audio_fade_voice)
-	lua.setfield(L, -2, cstring("fade_voice"))
+    // --- Playback Entry Points ---
+    lua.pushcfunction(L, lua_audio_play)
+    lua.setfield(L, -2, cstring("play"))
+    lua.pushcfunction(L, lua_audio_play_at)
+    lua.setfield(L, -2, cstring("play_at"))
 
-	// --- Instance Control (Spatial) ---
-	lua.pushcfunction(L, lua_audio_set_voice_position)
-	lua.setfield(L, -2, cstring("set_voice_position"))
-	lua.pushcfunction(L, lua_audio_set_voice_velocity)
-	lua.setfield(L, -2, cstring("set_voice_velocity"))
-  lua.pushcfunction(L, lua_audio_set_default_distance)
-	lua.setfield(L, -2, cstring("set_default_distance"))
-	lua.pushcfunction(L, lua_audio_set_voice_falloff)
-	lua.setfield(L, -2, cstring("set_voice_falloff"))
-	lua.pushcfunction(L, lua_audio_set_voice_rolloff)
-	lua.setfield(L, -2, cstring("set_voice_rolloff"))
-	lua.pushcfunction(L, lua_audio_set_default_falloff_mode)
-	lua.setfield(L, -2, cstring("set_default_falloff_mode"))
-	lua.pushcfunction(L, lua_audio_set_voice_falloff_mode)
-	lua.setfield(L, -2, cstring("set_voice_falloff_mode"))
-	lua.pushcfunction(L, lua_audio_set_voice_pan_mode)
-	lua.setfield(L, -2, cstring("set_voice_pan_mode"))
+    // --- Instance Control (Common) ---
+    lua.pushcfunction(L, lua_audio_set_voice_volume)
+    lua.setfield(L, -2, cstring("set_voice_volume"))
+    lua.pushcfunction(L, lua_audio_set_voice_pitch)
+    lua.setfield(L, -2, cstring("set_voice_pitch"))
+    lua.pushcfunction(L, lua_audio_set_voice_pan)
+    lua.setfield(L, -2, cstring("set_voice_pan"))
+    lua.pushcfunction(L, lua_audio_set_voice_looping)
+    lua.setfield(L, -2, cstring("set_voice_looping"))
+    lua.pushcfunction(L, lua_audio_seek_voice)
+    lua.setfield(L, -2, cstring("seek_voice"))
+    lua.pushcfunction(L, lua_audio_fade_voice)
+    lua.setfield(L, -2, cstring("fade_voice"))
+    lua.pushcfunction(L, lua_audio_get_voice_info)
+    lua.setfield(L, -2, cstring("get_voice_info"))
+    lua.pushcfunction(L, lua_audio_is_voice_playing)
+    lua.setfield(L, -2, cstring("is_voice_playing"))
 
-	// --- Instance Lifecycle ---
-	lua.pushcfunction(L, lua_audio_pause_voice)
-	lua.setfield(L, -2, cstring("pause_voice"))
-	lua.pushcfunction(L, lua_audio_resume_voice)
-	lua.setfield(L, -2, cstring("resume_voice"))
-	lua.pushcfunction(L, lua_audio_stop_voice)
-	lua.setfield(L, -2, cstring("stop_voice"))
+    // --- Instance Control (Spatial) ---
+    lua.pushcfunction(L, lua_audio_set_voice_position)
+    lua.setfield(L, -2, cstring("set_voice_position"))
+    lua.pushcfunction(L, lua_audio_set_voice_velocity)
+    lua.setfield(L, -2, cstring("set_voice_velocity"))
+    lua.pushcfunction(L, lua_audio_set_voice_falloff)
+    lua.setfield(L, -2, cstring("set_voice_falloff"))
+    lua.pushcfunction(L, lua_audio_set_voice_rolloff)
+    lua.setfield(L, -2, cstring("set_voice_rolloff"))
+    lua.pushcfunction(L, lua_audio_set_voice_falloff_mode)
+    lua.setfield(L, -2, cstring("set_voice_falloff_mode"))
+    lua.pushcfunction(L, lua_audio_set_voice_pan_mode)
+    lua.setfield(L, -2, cstring("set_voice_pan_mode"))
 
-	// --- Track Mixing & Control ---
-	lua.pushcfunction(L, lua_audio_set_track_volume)
-	lua.setfield(L, -2, cstring("set_track_volume"))
-	lua.pushcfunction(L, lua_audio_set_track_pitch)
-	lua.setfield(L, -2, cstring("set_track_pitch"))
-	lua.pushcfunction(L, lua_audio_set_track_pan)
-	lua.setfield(L, -2, cstring("set_track_pan"))
-  lua.pushcfunction(L, lua_audio_set_track_lpf)
-	lua.setfield(L, -2, cstring("set_track_lpf"))
-	lua.pushcfunction(L, lua_audio_set_track_hpf)
-	lua.setfield(L, -2, cstring("set_track_hpf"))
-	lua.pushcfunction(L, lua_audio_fade_track)
-	lua.setfield(L, -2, cstring("fade_track"))
-	lua.pushcfunction(L, lua_audio_pause_track)
-	lua.setfield(L, -2, cstring("pause_track"))
-	lua.pushcfunction(L, lua_audio_resume_track)
-	lua.setfield(L, -2, cstring("resume_track"))
-	lua.pushcfunction(L, lua_audio_stop_track)
-	lua.setfield(L, -2, cstring("stop_track"))
-	
-	lua.pushcfunction(L, lua_audio_set_track_delay)
-	lua.setfield(L, -2, cstring("set_track_delay"))
-	
-	lua.pushcfunction(L, lua_audio_get_voice_info)
-	lua.setfield(L, -2, cstring("get_voice_info"))
+    // --- Instance Lifecycle ---
+    lua.pushcfunction(L, lua_audio_pause_voice)
+    lua.setfield(L, -2, cstring("pause_voice"))
+    lua.pushcfunction(L, lua_audio_resume_voice)
+    lua.setfield(L, -2, cstring("resume_voice"))
+    lua.pushcfunction(L, lua_audio_stop_voice)
+    lua.setfield(L, -2, cstring("stop_voice"))
 
-	lua.pushcfunction(L, lua_audio_is_voice_playing)
-	lua.setfield(L, -2, cstring("is_voice_playing"))
+    // --- Track Mixing & DSP ---
+    lua.pushcfunction(L, lua_audio_set_track_volume)
+    lua.setfield(L, -2, cstring("set_track_volume"))
+    lua.pushcfunction(L, lua_audio_set_track_pitch)
+    lua.setfield(L, -2, cstring("set_track_pitch"))
+    lua.pushcfunction(L, lua_audio_set_track_pan)
+    lua.setfield(L, -2, cstring("set_track_pan"))
+    lua.pushcfunction(L, lua_audio_fade_track)
+    lua.setfield(L, -2, cstring("fade_track"))
+    lua.pushcfunction(L, lua_audio_set_track_lpf)
+    lua.setfield(L, -2, cstring("set_track_lpf"))
+    lua.pushcfunction(L, lua_audio_set_track_hpf)
+    lua.setfield(L, -2, cstring("set_track_hpf"))
+    lua.pushcfunction(L, lua_audio_set_track_delay_mix)
+    lua.setfield(L, -2, cstring("set_track_delay_mix"))
+    lua.pushcfunction(L, lua_audio_set_track_delay_feedback)
+    lua.setfield(L, -2, cstring("set_track_delay_feedback"))
+    lua.pushcfunction(L, lua_audio_pause_track)
+    lua.setfield(L, -2, cstring("pause_track"))
+    lua.pushcfunction(L, lua_audio_resume_track)
+    lua.setfield(L, -2, cstring("resume_track"))
+    lua.pushcfunction(L, lua_audio_stop_track)
+    lua.setfield(L, -2, cstring("stop_track"))
 
-	lua.setglobal(L, cstring("audio"))
+    lua.setglobal(L, cstring("audio"))
 }
