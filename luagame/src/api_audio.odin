@@ -9,6 +9,8 @@ import lua "luajit"
 import ma "vendor:miniaudio"
 import sdl "vendor:sdl3"
 
+//TODO: look into reverb/distortion. figure out if 'stop' is a bad word. GROUP/BUS/TRACK what to call them?
+
 // # Audio API - audio.function()
 //
 // ### Engine Configuration (Call BEFORE Engine Init)
@@ -23,6 +25,7 @@ import sdl "vendor:sdl3"
 //
 // ### Asset Management
 // - `.load_sound(filepath, mode?)` — returns a `Sound` object
+// - `.get_sound_info(sound)` — returns `duration`, `path`, `mode`
 //
 // ### Playback Entry Points
 // - `.play(sound, track_id, volume?, pitch?, pan?)` — returns an integer `handle`
@@ -63,8 +66,7 @@ import sdl "vendor:sdl3"
 // - `.pause_track(track_id)`
 // - `.resume_track(track_id)`
 // - `.stop_track(track_id)` — halts track and destroys all active voices on it
-
-
+// - `.stop_all_voices()`
 
 // =============================================================================
 // Audio Data Structures
@@ -123,92 +125,95 @@ audio_ctx: struct {
 // Audio Core Procedures
 // =============================================================================
 
-// audio_init initializes the miniaudio engine, master/sub tracks, and voice pool.
-// Returns true if initialization succeeds, false otherwise.
+// =============================================================================
+// Audio Core Procedures
+// =============================================================================
+
 // audio_init initializes the miniaudio engine, master/sub tracks, and voice pool.
 // Returns true if initialization succeeds, false otherwise.
 audio_init :: proc() -> bool {
-	// 1. Initialize the core Miniaudio engine
-	config := ma.engine_config_init()
-	
-	result := ma.engine_init(&config, &audio_ctx.engine)
-	if result != .SUCCESS {
-		fmt.eprintf("Failed to initialize audio engine: %v\n", result)
-		return false
-	}
+  // 1. Initialize the core Miniaudio engine
+  config := ma.engine_config_init()
+  
+  result := ma.engine_init(&config, &audio_ctx.engine)
+  if result != .SUCCESS {
+    fmt.eprintf("Failed to initialize audio engine: %v\n", result)
+    return false
+  }
 
-	// 2. Initialize the Tracks (Mixing Buses)
-	// Track 0 is the Master Track. It attaches directly to the engine output.
-	result = ma.sound_group_init(&audio_ctx.engine, {}, nil, &audio_ctx.tracks[0].group)
-	if result != .SUCCESS {
-		fmt.eprintf("Failed to initialize Master Track: %v\n", result)
-		return false
-	}
+  // 2. Initialize the Tracks (Mixing Buses)
+  channels    := ma.engine_get_channels(&audio_ctx.engine)
+  sample_rate := ma.engine_get_sample_rate(&audio_ctx.engine)
+  graph       := ma.engine_get_node_graph(&audio_ctx.engine)
+  endpoint    := ma.engine_get_endpoint(&audio_ctx.engine)
 
-	channels    := ma.engine_get_channels(&audio_ctx.engine)
-	sample_rate := ma.engine_get_sample_rate(&audio_ctx.engine)
-	graph       := ma.engine_get_node_graph(&audio_ctx.engine)
+  // Tracks 0-7 all get DSP filters.
+  for i in 0..<MAX_TRACKS {
+    // Init Group (Starts unattached so we can manually wire the chain)
+    result = ma.sound_group_init(&audio_ctx.engine, {}, nil, &audio_ctx.tracks[i].group)
+    if result != .SUCCESS {
+      fmt.eprintf("Failed to initialize Track %d Group: %v\n", i, result)
+      return false
+    }
 
-	// Tracks 1-7 attach to Track 0 (Master) as sub-buses via DSP filters.
-	for i in 1..<MAX_TRACKS {
-		// Init Group (Starts unattached so we can manually wire the chain)
-		result = ma.sound_group_init(&audio_ctx.engine, {}, nil, &audio_ctx.tracks[i].group)
-		if result != .SUCCESS {
-			fmt.eprintf("Failed to initialize Track %d Group: %v\n", i, result)
-			return false
-		}
+    // Init Delay (Reads from Lua config, fallback to 250ms)
+    delay_sec := audio_ctx.track_delay_times[i]
+    if delay_sec <= 0.0 do delay_sec = 0.25 
+    delay_frames := u32(delay_sec * f32(sample_rate))
+    delay_cfg := ma.delay_node_config_init(channels, sample_rate, delay_frames, 0.0)
+    result = ma.delay_node_init(graph, &delay_cfg, nil, &audio_ctx.tracks[i].delay)
+    if result != .SUCCESS {
+      fmt.eprintf("Failed to initialize Track %d Delay: %v\n", i, result)
+      return false
+    }
 
-		// Init Delay (Reads from Lua config, fallback to 250ms)
-		delay_sec := audio_ctx.track_delay_times[i]
-		if delay_sec <= 0.0 do delay_sec = 0.25 
-		delay_frames := u32(delay_sec * f32(sample_rate))
-		delay_cfg := ma.delay_node_config_init(channels, sample_rate, delay_frames, 0.0)
-		result = ma.delay_node_init(graph, &delay_cfg, nil, &audio_ctx.tracks[i].delay)
-		if result != .SUCCESS {
-			fmt.eprintf("Failed to initialize Track %d Delay: %v\n", i, result)
-			return false
-		}
+    // Init HPF (Starts at 10Hz to prevent NaN singularity)
+    hpf_cfg := ma.hpf_node_config_init(channels, sample_rate, 10.0, 2)
+    result = ma.hpf_node_init(graph, &hpf_cfg, nil, &audio_ctx.tracks[i].hpf)
+    if result != .SUCCESS {
+      fmt.eprintf("Failed to initialize Track %d HPF: %v\n", i, result)
+      return false
+    }
 
-		// Init HPF (Starts at 10Hz to prevent NaN singularity)
-		hpf_cfg := ma.hpf_node_config_init(channels, sample_rate, 10.0, 2)
-		result = ma.hpf_node_init(graph, &hpf_cfg, nil, &audio_ctx.tracks[i].hpf)
-		if result != .SUCCESS {
-			fmt.eprintf("Failed to initialize Track %d HPF: %v\n", i, result)
-			return false
-		}
+    // Init LPF (Starts fully open at 20000Hz)
+    lpf_cfg := ma.lpf_node_config_init(channels, sample_rate, 20000.0, 2)
+    result = ma.lpf_node_init(graph, &lpf_cfg, nil, &audio_ctx.tracks[i].lpf)
+    if result != .SUCCESS {
+      fmt.eprintf("Failed to initialize Track %d LPF: %v\n", i, result)
+      return false
+    }
 
-		// Init LPF (Starts fully open at 20000Hz)
-		lpf_cfg := ma.lpf_node_config_init(channels, sample_rate, 20000.0, 2)
-		result = ma.lpf_node_init(graph, &lpf_cfg, nil, &audio_ctx.tracks[i].lpf)
-		if result != .SUCCESS {
-			fmt.eprintf("Failed to initialize Track %d LPF: %v\n", i, result)
-			return false
-		}
+    // Daisy Chain Wiring: Group -> Delay -> HPF -> LPF
+    base_group  := cast(^ma.node)&audio_ctx.tracks[i].group
+    base_delay  := cast(^ma.node)&audio_ctx.tracks[i].delay
+    base_hpf    := cast(^ma.node)&audio_ctx.tracks[i].hpf
+    base_lpf    := cast(^ma.node)&audio_ctx.tracks[i].lpf
 
-		// Daisy Chain Wiring: Group -> Delay -> HPF -> LPF -> Master
-		base_group  := cast(^ma.node)&audio_ctx.tracks[i].group
-		base_delay  := cast(^ma.node)&audio_ctx.tracks[i].delay
-		base_hpf    := cast(^ma.node)&audio_ctx.tracks[i].hpf
-		base_lpf    := cast(^ma.node)&audio_ctx.tracks[i].lpf
-		base_master := cast(^ma.node)&audio_ctx.tracks[0].group
+    ma.node_attach_output_bus(base_group, 0, base_delay, 0)
+    ma.node_attach_output_bus(base_delay, 0, base_hpf,   0)
+    ma.node_attach_output_bus(base_hpf,   0, base_lpf,   0)
 
-		ma.node_attach_output_bus(base_group, 0, base_delay, 0)
-		ma.node_attach_output_bus(base_delay, 0, base_hpf,   0)
-		ma.node_attach_output_bus(base_hpf,   0, base_lpf,   0)
-		ma.node_attach_output_bus(base_lpf,   0, base_master, 0)
-	}
+    if i == 0 {
+      // Track 0 is the Master Track. It attaches directly to the engine output.
+      ma.node_attach_output_bus(base_lpf, 0, endpoint, 0)
+    } else {
+      // Tracks 1-7 attach to Track 0 (Master) as sub-buses via DSP filters.
+      base_master := cast(^ma.node)&audio_ctx.tracks[0].group
+      ma.node_attach_output_bus(base_lpf, 0, base_master, 0)
+    }
+  }
 
-	// 3. Set Voice pool to inactive
-	for i in 0..<MAX_VOICES {
-		audio_ctx.voices[i].active = false
-	}
+  // 3. Set Voice pool to inactive
+  for i in 0..<MAX_VOICES {
+    audio_ctx.voices[i].active = false
+  }
 
-	// Default to 100px Inner Sphere, 10,000px Max (Infinite for 2D)
-	audio_ctx.default_min_dist = 100.0 * AUDIO_SCALE
-	audio_ctx.default_max_dist = 10000.0 * AUDIO_SCALE
-	audio_ctx.default_attenuation_model = .inverse 
+  // Default to 100px Inner Sphere, 10,000px Max (Infinite for 2D)
+  audio_ctx.default_min_dist = 100.0 * AUDIO_SCALE
+  audio_ctx.default_max_dist = 10000.0 * AUDIO_SCALE
+  audio_ctx.default_attenuation_model = .inverse 
 
-	return true
+  return true
 }
 
 // audio_shutdown uninitializes all active voices, tracks, and the miniaudio engine.
@@ -229,12 +234,12 @@ audio_shutdown :: proc() {
 	sdl.Delay(50)
 
 	// 3. Teardown tracks in reverse order
-	for i := MAX_TRACKS - 1; i >= 1; i -= 1 {
-		ma.lpf_node_uninit(&audio_ctx.tracks[i].lpf, nil)
-		ma.hpf_node_uninit(&audio_ctx.tracks[i].hpf, nil)
-		ma.delay_node_uninit(&audio_ctx.tracks[i].delay, nil)
-		ma.sound_group_uninit(&audio_ctx.tracks[i].group)
-	}
+	for i := MAX_TRACKS - 1; i >= 0; i -= 1 {
+    ma.lpf_node_uninit(&audio_ctx.tracks[i].lpf, nil)
+    ma.hpf_node_uninit(&audio_ctx.tracks[i].hpf, nil)
+    ma.delay_node_uninit(&audio_ctx.tracks[i].delay, nil)
+    ma.sound_group_uninit(&audio_ctx.tracks[i].group)
+  }
 	ma.sound_group_uninit(&audio_ctx.tracks[0].group)
 	ma.engine_uninit(&audio_ctx.engine)
 }
@@ -372,12 +377,22 @@ lua_audio_play :: proc "c" (L: ^lua.State) -> c.int {
 	voice.generation = (voice.generation + 1) & 0xFFFF 
 	voice.track_idx = int(track_idx)
 
-	// 3. Initialize Miniaudio Sound
-	flags: ma.sound_flags = {}
-	if sound.is_stream do flags += {.STREAM}
+	// ---------------------------------------------------------------------
+  // 3. Initialize Miniaudio Sound
+  // ---------------------------------------------------------------------
+  result: ma.result
+  flags: ma.sound_flags = {}
+  if sound.is_stream do flags += {.STREAM}
 
-	result := ma.sound_init_from_file(&audio_ctx.engine, sound.filepath, flags, &audio_ctx.tracks[track_idx].group, nil, &voice.node)
-	if result != .SUCCESS do return 0
+  if sound.is_stream {
+    // Streams need a new file handle/unique read head
+    result = ma.sound_init_from_file(&audio_ctx.engine, sound.filepath, flags, &audio_ctx.tracks[track_idx].group, nil, &voice.node)
+  } else {
+    // Static sounds just "clone" the existing RAM buffer (Instant/No String Hashing)
+    result = ma.sound_init_copy(&audio_ctx.engine, &sound.cache_ref, flags, &audio_ctx.tracks[track_idx].group, &voice.node)
+  }
+
+  if result != .SUCCESS do return 0
 
 	// 4. Mode Setup: 2D Global
 	ma.sound_set_spatialization_enabled(&voice.node, false)
@@ -430,12 +445,22 @@ lua_audio_play_at :: proc "c" (L: ^lua.State) -> c.int {
 	voice.generation = (voice.generation + 1) & 0xFFFF 
 	voice.track_idx = int(track_idx)
 
-	// 3. Initialize Miniaudio Sound
-	flags: ma.sound_flags = {}
-	if sound.is_stream do flags += {.STREAM}
+	// ---------------------------------------------------------------------
+  // 3. Initialize Miniaudio Sound
+  // ---------------------------------------------------------------------
+  result: ma.result
+  flags: ma.sound_flags = {}
+  if sound.is_stream do flags += {.STREAM}
 
-	result := ma.sound_init_from_file(&audio_ctx.engine, sound.filepath, flags, &audio_ctx.tracks[track_idx].group, nil, &voice.node)
-	if result != .SUCCESS do return 0
+  if sound.is_stream {
+    // Streams need a new file handle/unique read head
+    result = ma.sound_init_from_file(&audio_ctx.engine, sound.filepath, flags, &audio_ctx.tracks[track_idx].group, nil, &voice.node)
+  } else {
+    // Static sounds just "clone" the existing RAM buffer (Instant/No String Hashing)
+    result = ma.sound_init_copy(&audio_ctx.engine, &sound.cache_ref, flags, &audio_ctx.tracks[track_idx].group, &voice.node)
+  }
+
+  if result != .SUCCESS do return 0
 
   // 4. Mode Setup: 3D Spatial
 	ma.sound_set_spatialization_enabled(&voice.node, true)
@@ -784,7 +809,7 @@ lua_audio_set_track_pan :: proc "c" (L: ^lua.State) -> c.int {
 lua_audio_set_track_lpf :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 	idx := lua.L_checkinteger(L, 1)
-	if idx <= 0 || idx >= MAX_TRACKS do return 0
+	if idx < 0 || idx >= MAX_TRACKS do return 0
 
 	hz := f64(lua.L_checknumber(L, 2))
 	
@@ -809,7 +834,7 @@ lua_audio_set_track_lpf :: proc "c" (L: ^lua.State) -> c.int {
 lua_audio_set_track_hpf :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 	idx := lua.L_checkinteger(L, 1)
-	if idx <= 0 || idx >= MAX_TRACKS do return 0
+	if idx < 0 || idx >= MAX_TRACKS do return 0
 
 	hz := f64(lua.L_checknumber(L, 2))
 	
@@ -835,7 +860,7 @@ lua_audio_set_track_hpf :: proc "c" (L: ^lua.State) -> c.int {
 lua_audio_set_track_delay_feedback :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 	idx := lua.L_checkinteger(L, 1)
-	if idx <= 0 || idx >= MAX_TRACKS do return 0
+	if idx < 0 || idx >= MAX_TRACKS do return 0
 
 	amount := f32(lua.L_checknumber(L, 2))
 	
@@ -852,7 +877,7 @@ lua_audio_set_track_delay_mix :: proc "c" (L: ^lua.State) -> c.int {
     
     // 1. Fetch and validate track index
     idx := lua.L_checkinteger(L, 1)
-    if idx <= 0 || idx >= MAX_TRACKS do return 0 // Silently reject Track 0 or out-of-bounds
+    if idx < 0 || idx >= MAX_TRACKS do return 0 // Silently reject Track 0 or out-of-bounds
 
     // 2. Fetch wet mix (required) and dry mix (optional, defaults to 1.0)
     wet := f32(lua.L_checknumber(L, 2))
@@ -873,7 +898,7 @@ lua_audio_config_track_delay_times :: proc "c" (L: ^lua.State) -> c.int {
     lua.L_checktype(L, 1, lua.TTABLE)
 
     // 2. Iterate only over valid sub-tracks (Master track 0 has no delay node)
-    for i in 1..<MAX_TRACKS {
+    for i in 0..<MAX_TRACKS {
         // Push the integer key we want to look up (e.g., 1, then 2, etc.)
         lua.pushinteger(L, lua.Integer(i))
         
@@ -971,6 +996,40 @@ lua_audio_is_voice_playing :: proc "c" (L: ^lua.State) -> c.int {
 	return 1
 }
 
+// lua_audio_stop_all_voices: audio.stop_all_voices()
+// Immediately halts and destroys every active voice in the engine.
+lua_audio_stop_all_voices :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+
+  for i in 0..<MAX_VOICES {
+    voice := &audio_ctx.voices[i]
+    if voice.active {
+      ma.sound_stop(&voice.node)
+      ma.sound_uninit(&voice.node)
+      voice.active = false
+    }
+  }
+
+  return 0
+}
+
+// lua_audio_get_sound_info: audio.get_sound_info(sound) -> (path, duration, is_stream)
+lua_audio_get_sound_info :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  sound := cast(^Sound)lua.L_checkudata(L, 1, cstring("Sound_Meta"))
+  if sound == nil do return 0
+
+  duration: f32
+  // Queries length from your pinned cache_ref instance
+  ma.sound_get_length_in_seconds(&sound.cache_ref, &duration)
+
+  lua.pushstring(L, sound.filepath)
+  lua.pushnumber(L, lua.Number(duration)) // <--- Fixed Cast
+  lua.pushboolean(L, b32(sound.is_stream))
+
+  return 3
+}
+
 // =============================================================================
 // Memory Management & Metatables
 // =============================================================================
@@ -1032,6 +1091,8 @@ register_audio_api :: proc(L: ^lua.State) {
     // --- Asset Management ---
     lua.pushcfunction(L, lua_audio_load_sound)
     lua.setfield(L, -2, cstring("load_sound"))
+    lua.pushcfunction(L, lua_audio_get_sound_info)
+    lua.setfield(L, -2, cstring("get_sound_info"))
 
     // --- Playback Entry Points ---
     lua.pushcfunction(L, lua_audio_play)
@@ -1102,6 +1163,9 @@ register_audio_api :: proc(L: ^lua.State) {
     lua.setfield(L, -2, cstring("resume_track"))
     lua.pushcfunction(L, lua_audio_stop_track)
     lua.setfield(L, -2, cstring("stop_track"))
+    
+    lua.pushcfunction(L, lua_audio_stop_all_voices)
+		lua.setfield(L, -2, cstring("stop_all_voices"))
 
     lua.setglobal(L, cstring("audio"))
 }

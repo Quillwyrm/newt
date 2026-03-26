@@ -38,11 +38,19 @@ set_draw_blendmode(mode)
 pixelmap = load_pixelmap(image_path)
 
 --read/write
-get_pixel(x, y, pixelmap)
-set_pixel(x, y, pixelmap)
+get_pixel(pixelmap,clr,x,y)
+set_pixel(pixelmap,x,y) -> clr
+set_pixelmap(srcmap, dstmap)
+
+  --bad names 
+  --but the idea of circ/rect writers
+write_circ
+write_rect
+
 
 -- conversion
 new_image_from_pixelmap(pixelmap)
+update_image_from_pixelmap(image, pixelmap)
 
 --saving
 save_pixelmap(pixelmap, output_name)
