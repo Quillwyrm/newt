@@ -138,30 +138,21 @@ audio_init :: proc() -> bool {
     fmt.eprintf("Failed to initialize audio engine: %v\n", result)
     return false
   }
-  
-  // --- AUDIO LATENCY DIAGNOSTICS ---
-	device := ma.engine_get_device(&audio_ctx.engine)
-	ctx    := ma.device_get_context(device)
-	
-	fmt.eprintln("--- AUDIO DEVICE INFO ---")
-	fmt.eprintf("Backend: %v\n", ctx.backend)
-	fmt.eprintf("Sample Rate: %v Hz\n", device.sampleRate)
-	
-	// Calculate the actual hardware latency period in milliseconds
-	period_frames := device.playback.internalPeriodSizeInFrames
-	latency_ms := (f32(period_frames) / f32(device.sampleRate)) * 1000.0
-	
-	fmt.eprintf("Period Size: %v frames (%.2f ms latency)\n", period_frames, latency_ms)
-	fmt.eprintln("-------------------------")
 
   // 2. Initialize the Tracks (Mixing Buses)
   channels    := ma.engine_get_channels(&audio_ctx.engine)
   sample_rate := ma.engine_get_sample_rate(&audio_ctx.engine)
   graph       := ma.engine_get_node_graph(&audio_ctx.engine)
   endpoint    := ma.engine_get_endpoint(&audio_ctx.engine)
+  
+  result = ma.sound_group_init(&audio_ctx.engine, {}, nil, &audio_ctx.tracks[0].group)
+  if result != .SUCCESS {
+    fmt.eprintf("Failed to initialize Master Track: %v\n", result)
+    return false
+  }
 
-  // Tracks 0-7 all get DSP filters.
-  for i in 0..<MAX_TRACKS {
+  // Tracks 1-7 all get DSP filters.
+  for i in 1..<MAX_TRACKS {
     // Init Group (Starts unattached so we can manually wire the chain)
     result = ma.sound_group_init(&audio_ctx.engine, {}, nil, &audio_ctx.tracks[i].group)
     if result != .SUCCESS {
@@ -247,7 +238,7 @@ audio_shutdown :: proc() {
 	sdl.Delay(50)
 
 	// 3. Teardown tracks in reverse order
-	for i := MAX_TRACKS - 1; i >= 0; i -= 1 {
+	for i := MAX_TRACKS - 1; i >= 1; i -= 1 {
     ma.lpf_node_uninit(&audio_ctx.tracks[i].lpf, nil)
     ma.hpf_node_uninit(&audio_ctx.tracks[i].hpf, nil)
     ma.delay_node_uninit(&audio_ctx.tracks[i].delay, nil)
@@ -822,7 +813,7 @@ lua_audio_set_track_pan :: proc "c" (L: ^lua.State) -> c.int {
 lua_audio_set_track_lpf :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 	idx := lua.L_checkinteger(L, 1)
-	if idx < 0 || idx >= MAX_TRACKS do return 0
+	if idx <= 0 || idx >= MAX_TRACKS do return 0
 
 	hz := f64(lua.L_checknumber(L, 2))
 	
@@ -847,7 +838,7 @@ lua_audio_set_track_lpf :: proc "c" (L: ^lua.State) -> c.int {
 lua_audio_set_track_hpf :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 	idx := lua.L_checkinteger(L, 1)
-	if idx < 0 || idx >= MAX_TRACKS do return 0
+	if idx <= 0 || idx >= MAX_TRACKS do return 0
 
 	hz := f64(lua.L_checknumber(L, 2))
 	
@@ -873,7 +864,7 @@ lua_audio_set_track_hpf :: proc "c" (L: ^lua.State) -> c.int {
 lua_audio_set_track_delay_feedback :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 	idx := lua.L_checkinteger(L, 1)
-	if idx < 0 || idx >= MAX_TRACKS do return 0
+	if idx <= 0 || idx >= MAX_TRACKS do return 0
 
 	amount := f32(lua.L_checknumber(L, 2))
 	
@@ -890,7 +881,7 @@ lua_audio_set_track_delay_mix :: proc "c" (L: ^lua.State) -> c.int {
     
     // 1. Fetch and validate track index
     idx := lua.L_checkinteger(L, 1)
-    if idx < 0 || idx >= MAX_TRACKS do return 0 // Silently reject Track 0 or out-of-bounds
+    if idx <= 0 || idx >= MAX_TRACKS do return 0 // Silently reject Track 0 or out-of-bounds
 
     // 2. Fetch wet mix (required) and dry mix (optional, defaults to 1.0)
     wet := f32(lua.L_checknumber(L, 2))
@@ -911,7 +902,7 @@ lua_audio_config_track_delay_times :: proc "c" (L: ^lua.State) -> c.int {
     lua.L_checktype(L, 1, lua.TTABLE)
 
     // 2. Iterate only over valid sub-tracks (Master track 0 has no delay node)
-    for i in 0..<MAX_TRACKS {
+    for i in 1..<MAX_TRACKS {
         // Push the integer key we want to look up (e.g., 1, then 2, etc.)
         lua.pushinteger(L, lua.Integer(i))
         
