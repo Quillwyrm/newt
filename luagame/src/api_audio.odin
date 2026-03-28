@@ -11,10 +11,12 @@ import sdl "vendor:sdl3"
 
 //TODO: look into reverb/distortion. figure out if 'stop' is a bad word. GROUP/BUS/TRACK what to call them?
 
+//
+
 // # Audio API - audio.function()
 //
 // ### Engine Configuration (Call BEFORE Engine Init)
-// - `.config_track_delay_times(table)` — e.g., { [1] = 0.5, [4] = 2.0 }
+// - `.config_bus_delay_times(table)` — e.g., { [1] = 0.5, [4] = 2.0 }
 //
 // ### Global Listener & Defaults
 // - `.set_listener_position(x, y)`
@@ -28,8 +30,8 @@ import sdl "vendor:sdl3"
 // - `.get_sound_info(sound)` — returns `duration`, `path`, `mode`
 //
 // ### Playback Entry Points
-// - `.play(sound, track_id, volume?, pitch?, pan?)` — returns an integer `handle`
-// - `.play_at(sound, track_id, x, y, volume?, pitch?)` — returns an integer `handle`
+// - `.play(sound, bus_id, volume?, pitch?, pan?)` — returns an integer `handle`
+// - `.play_at(sound, bus_id, x, y, volume?, pitch?)` — returns an integer `handle`
 //
 // ### Instance Control (Common)
 // - `.set_voice_volume(handle, volume)`
@@ -45,8 +47,8 @@ import sdl "vendor:sdl3"
 // - `.set_voice_position(handle, x, y)`
 // - `.set_voice_velocity(handle, vx, vy)`
 // - `.set_voice_falloff(handle, min_px, max_px?)`
-// - `.set_voice_rolloff(handle, factor)`
-// - `.set_voice_falloff_mode(handle, mode)`
+// - `.set_voice_falloff_intensity(handle, factor)`                                      ~~~NAME? amount?
+// - `.set_voice_falloff_mode(handle, mode)`                                             ~~~NAME? shape/curve ?
 // - `.set_voice_pan_mode(handle, mode)` — modes: "balance", "pan"
 //
 // ### Instance Lifecycle
@@ -55,17 +57,17 @@ import sdl "vendor:sdl3"
 // - `.stop_voice(handle)` — halts and reclaims the voice slot
 //
 // ### Track Mixing
-// - `.set_track_volume(track_id, volume)`
-// - `.set_track_pitch(track_id, pitch)`
-// - `.set_track_pan(track_id, pan)`
-// - `.fade_track(track_id, target_volume, duration)`
-// - `.set_track_lpf(track_id, hz)`
-// - `.set_track_hpf(track_id, hz)`
-// - `.set_track_delay_mix(track_id, wet, dry?)`
-// - `.set_track_delay_feedback(track_id, amount)`
-// - `.pause_track(track_id)`
-// - `.resume_track(track_id)`
-// - `.stop_track(track_id)` — halts track and destroys all active voices on it
+// - `.set_bus_volume(bus_id, volume)`
+// - `.set_bus_pitch(bus_id, pitch)`
+// - `.set_bus_pan(bus_id, pan)`
+// - `.fade_bus(bus_id, target_volume, duration)`
+// - `.set_bus_lpf(bus_id, hz)`
+// - `.set_bus_hpf(bus_id, hz)`
+// - `.set_bus_delay_mix(bus_id, wet, dry?)`
+// - `.set_bus_delay_feedback(bus_id, amount)`
+// - `.pause_bus(bus_id)`
+// - `.resume_bus(bus_id)`
+// - `.stop_bus(bus_id)` — halts bus and destroys all active voices on it
 // - `.stop_all_voices()`
 
 // =============================================================================
@@ -125,10 +127,6 @@ audio_ctx: struct {
 // Audio Core Procedures
 // =============================================================================
 
-// =============================================================================
-// Audio Core Procedures
-// =============================================================================
-
 // audio_init initializes the miniaudio engine, master/sub tracks, and voice pool.
 // Returns true if initialization succeeds, false otherwise.
 audio_init :: proc() -> bool {
@@ -140,6 +138,21 @@ audio_init :: proc() -> bool {
     fmt.eprintf("Failed to initialize audio engine: %v\n", result)
     return false
   }
+  
+  // --- AUDIO LATENCY DIAGNOSTICS ---
+	device := ma.engine_get_device(&audio_ctx.engine)
+	ctx    := ma.device_get_context(device)
+	
+	fmt.eprintln("--- AUDIO DEVICE INFO ---")
+	fmt.eprintf("Backend: %v\n", ctx.backend)
+	fmt.eprintf("Sample Rate: %v Hz\n", device.sampleRate)
+	
+	// Calculate the actual hardware latency period in milliseconds
+	period_frames := device.playback.internalPeriodSizeInFrames
+	latency_ms := (f32(period_frames) / f32(device.sampleRate)) * 1000.0
+	
+	fmt.eprintf("Period Size: %v frames (%.2f ms latency)\n", period_frames, latency_ms)
+	fmt.eprintln("-------------------------")
 
   // 2. Initialize the Tracks (Mixing Buses)
   channels    := ma.engine_get_channels(&audio_ctx.engine)
@@ -1169,3 +1182,4 @@ register_audio_api :: proc(L: ^lua.State) {
 
     lua.setglobal(L, cstring("audio"))
 }
+

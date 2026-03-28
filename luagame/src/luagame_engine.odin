@@ -49,11 +49,41 @@ lua_engine_global_free :: proc "c" (L: ^lua.State) -> c.int {
 	return 0
 }
 
+CORE_LUA_HELPERS :: `
+local bit = require("bit")
+local type = type
+local tonumber = tonumber
+
+function rgba(a, b, c, d)
+    local t = type(a)
+    if t == "number" then
+        if not b then
+            if a <= 0xFFFFFF then
+                return bit.bor(bit.lshift(a, 8), 255)
+            end
+            return a
+        end
+        return bit.bor(bit.lshift(a, 24), bit.lshift(b, 16), bit.lshift(c, 8), d or 255)
+    elseif t == "string" then
+        local hex = string.byte(a, 1) == 35 and string.sub(a, 2) or a
+        if #hex == 6 then hex = hex .. "FF" end
+        return tonumber(hex, 16) or 0xFFFFFFFF
+    end
+    return 0xFFFFFFFF
+end
+`
+
 // register_engine_global_api registers top-level engine builtins like `free`.
 // These are injected directly into the global namespace, side-by-side with `print`.
 register_engine_global_api :: proc(L: ^lua.State) {
 	lua.pushcfunction(L, lua_engine_global_free)
 	lua.setglobal(L, cstring("free"))
+	
+	// Inject core lua-side primitives
+	if lua.L_dostring(L, cstring(CORE_LUA_HELPERS)) != lua.OK {
+		fmt.eprintln("Failed to load core Lua helpers:\n", lua.tostring(L, -1))
+		lua.pop(L, 1)
+	}
 }
 
 //========================================================================================================================================

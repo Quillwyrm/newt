@@ -4,7 +4,7 @@ local gfx = graphics
 -- Engine Configuration (MUST BE BEFORE ENGINE INIT)
 -- =============================================================================
 audio.config_track_delay_times({ 
-    [1] = 0.25, 
+    [1] = 0, 
     [3] = 0.1,  
     [4] = 0.5, 
     [5] = 0.8   
@@ -15,14 +15,14 @@ audio.config_track_delay_times({
 -- =============================================================================
 
 local C = {
-    BG          = {25, 25, 30, 255},
-    WHITE       = {255, 255, 255, 255},
-    RED         = {255, 50, 50, 255},
-    YELLOW      = {255, 220, 50, 255},
-    CYAN        = {50, 255, 255, 255},
-    MAGENTA     = {255, 50, 200, 255},
-    UI_TEXT     = {180, 180, 180, 255},
-    BAR_BG      = {15, 15, 20, 230},
+    BG          = rgba(25, 25, 30, 255),
+    WHITE       = rgba(255, 255, 255, 255),
+    RED         = rgba(255, 50, 50, 255),
+    YELLOW      = rgba(255, 220, 50, 255),
+    CYAN        = rgba(50, 255, 255, 255),
+    MAGENTA     = rgba(255, 50, 200, 255),
+    UI_TEXT     = rgba(180, 180, 180, 255),
+    BAR_BG      = rgba(15, 15, 20, 230),
 }
 
 local player_img = nil
