@@ -13,9 +13,20 @@ import lua "luajit"
 
 //TODO:
 // raster ops - Pixelmap API
-// draw command cacheing, ysort (start_sort()), 
-// blend modes for draw (add, mul ect)
-// 
+
+// Primitives: draw_line, 1px unfilled rects, and draw_poly (plus unfilled variant).
+
+// Pixelmaps (CPU Read/Write): load_pixelmap, get_pixel, set_pixel, new_image_from_pixelmap, and save_pixelmap.
+
+// Render Targets: Support for rendering to textures.
+
+// Blend Modes: Global or per-draw blending control.
+
+// Camera: A dedicated abstraction or module for view transforms.
+
+// Text & Fonts: Integration with SDL_ttf for font loading and text rendering.
+
+// Animation System: Logic for handling sprite/atlas frames over time.
 
 //=========================================================================================
 // GRAPHICS API: STATE, TYPES & HELPERS

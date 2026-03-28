@@ -98,10 +98,11 @@ Track :: struct {
 
 // Voice represents an active, playing sound node.
 Voice :: struct {
-	node:   ma.sound,
-	active: bool,
-	generation:     u32, // <--- Identity tracking
-	track_idx: int,
+	node:         ma.sound,
+	active:       bool,
+	generation:   u64, // <--- Identity tracking
+	track_idx:    int,
+	source_sound: ^Sound,
 }
 
 // =============================================================================
@@ -121,6 +122,9 @@ audio_ctx: struct {
 	
 	// Config state populated by Lua before audio_init() runs
 	track_delay_times: [MAX_TRACKS]f32,
+	
+	// Generation counter
+	next_generation: u64, 
 }
 
 // =============================================================================
@@ -258,6 +262,7 @@ audio_update :: proc() {
 		if bool(ma.sound_at_end(&voice.node)) {
 			ma.sound_uninit(&voice.node)
 			voice.active = false
+			voice.source_sound = nil // <--- Clear the dangling pointer
 		}
 	}
 }
@@ -265,16 +270,86 @@ audio_update :: proc() {
 // get_voice safely validates a packed handle from Lua and returns the Voice pointer.
 // Returns nil if the voice is dead or the handle is stale.
 get_voice :: proc(handle: u32) -> ^Voice {
-	index := handle & 0xFFFF
-	gen   := handle >> 16
+  index := handle & 0xFFFF
+  gen   := handle >> 16
 
-	if index >= MAX_VOICES do return nil
-	
-	voice := &audio_ctx.voices[index]
-	if voice.active && voice.generation == gen {
-		return voice
-	}
-	return nil
+  if index >= MAX_VOICES do return nil
+  
+  voice := &audio_ctx.voices[index]
+  
+  // Mask the 64-bit generation down to 16 bits to compare against Lua's stamp
+  if voice.active && u32(voice.generation & 0xFFFF) == gen {
+      return voice
+  }
+  return nil
+}
+
+// claim_and_init_voice handles pool allocation, voice stealing, and MA node initialization.
+// Returns (nil, 0) if the pool is pathologically full (all streams) or if MA fails to init.
+claim_and_init_voice :: proc(sound: ^Sound, track_idx: int) -> (^Voice, u32) {
+    voice_idx := -1
+    oldest_idx := -1
+    oldest_gen: u64 = ~u64(0) // Max u64 value
+
+    // 1. Scan for free slot or oldest stealable target
+    for i in 0..<MAX_VOICES {
+        v := &audio_ctx.voices[i]
+        
+        if !v.active {
+            voice_idx = i
+            break
+        }
+        
+        if !v.source_sound.is_stream {
+            if v.generation < oldest_gen {
+                oldest_gen = v.generation
+                oldest_idx = i
+            }
+        }
+    }
+
+    // 2. Execute Voice Stealing if pool is full
+    if voice_idx == -1 {
+        if oldest_idx != -1 {
+            voice_idx = oldest_idx
+            stolen := &audio_ctx.voices[voice_idx]
+            
+            ma.sound_stop(&stolen.node)
+            ma.sound_uninit(&stolen.node)
+            stolen.active = false
+            stolen.source_sound = nil
+        } else {
+            // Pathological edge case: 64 streams playing simultaneously.
+            return nil, 0 
+        }
+    }
+
+    // 3. Claim the slot
+    voice := &audio_ctx.voices[voice_idx]
+    voice.node = {} // Zero state
+    voice.track_idx = track_idx
+    voice.source_sound = sound
+
+    // 4. Initialize Miniaudio Node
+    result: ma.result
+    flags: ma.sound_flags = {}
+    if sound.is_stream do flags += {.STREAM}
+
+    if sound.is_stream {
+        result = ma.sound_init_from_file(&audio_ctx.engine, sound.filepath, flags, &audio_ctx.tracks[track_idx].group, nil, &voice.node)
+    } else {
+        result = ma.sound_init_copy(&audio_ctx.engine, &sound.cache_ref, flags, &audio_ctx.tracks[track_idx].group, &voice.node)
+    }
+
+    if result != .SUCCESS do return nil, 0
+
+    // 5. Assign chronological generation and pack handle
+    audio_ctx.next_generation += 1
+    voice.generation = audio_ctx.next_generation
+    voice.active = true 
+
+    handle := (u32(voice.generation & 0xFFFF) << 16) | u32(voice_idx)
+    return voice, handle
 }
 
 // =============================================================================
@@ -350,143 +425,76 @@ lua_audio_set_listener_velocity :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_play: audio.play(sound: Sound, track: int, vol?: num, pitch?: num, pan?: num) -> handle
 lua_audio_play :: proc "c" (L: ^lua.State) -> c.int {
-	context = runtime.default_context()
+    context = runtime.default_context()
 
-	// 1. Fetch & Validate Lua Arguments
-	sound := cast(^Sound)lua.L_checkudata(L, 1, cstring("Sound_Meta"))
-	track_idx := lua.L_checkinteger(L, 2)
-	
-	if track_idx < 0 || track_idx >= MAX_TRACKS {
-		lua.L_error(L, cstring("Invalid track index."))
-		return 0
-	}
+    // 1. Fetch & Validate Lua Arguments
+    sound := cast(^Sound)lua.L_checkudata(L, 1, cstring("Sound_Meta"))
+    track_idx := lua.L_checkinteger(L, 2)
+    
+    if track_idx < 0 || track_idx >= MAX_TRACKS {
+        lua.L_error(L, cstring("Invalid track index."))
+        return 0
+    }
 
-	vol   := f32(lua.L_optnumber(L, 3, 1.0))
-	pitch := f32(lua.L_optnumber(L, 4, 1.0))
-	pan   := f32(lua.L_optnumber(L, 5, 0.0))
+    vol   := f32(lua.L_optnumber(L, 3, 1.0))
+    pitch := f32(lua.L_optnumber(L, 4, 1.0))
+    pan   := f32(lua.L_optnumber(L, 5, 0.0))
 
-	// 2. Allocate Voice Node
-	voice_idx := -1
-	for i in 0..<MAX_VOICES {
-		if !audio_ctx.voices[i].active {
-			voice_idx = i
-			break
-		}
-	}
-	if voice_idx == -1 do return 0
+    // 2. Delegate Allocation & MA Graph Initialization
+    voice, handle := claim_and_init_voice(sound, int(track_idx))
+    if voice == nil do return 0
 
-	voice := &audio_ctx.voices[voice_idx]
-	voice.node = {}        
-  // Mask to 16 bits so it safely wraps from 65535 back to 0
-	voice.generation = (voice.generation + 1) & 0xFFFF 
-	voice.track_idx = int(track_idx)
+    // 3. Mode Setup: 2D Global
+    ma.sound_set_spatialization_enabled(&voice.node, false)
+    ma.sound_set_pan(&voice.node, pan)
 
-	// ---------------------------------------------------------------------
-  // 3. Initialize Miniaudio Sound
-  // ---------------------------------------------------------------------
-  result: ma.result
-  flags: ma.sound_flags = {}
-  if sound.is_stream do flags += {.STREAM}
+    // 4. Shared Setup & Playback
+    ma.sound_set_volume(&voice.node, vol)
+    ma.sound_set_pitch(&voice.node, pitch)
+    ma.sound_start(&voice.node)
 
-  if sound.is_stream {
-    // Streams need a new file handle/unique read head
-    result = ma.sound_init_from_file(&audio_ctx.engine, sound.filepath, flags, &audio_ctx.tracks[track_idx].group, nil, &voice.node)
-  } else {
-    // Static sounds just "clone" the existing RAM buffer (Instant/No String Hashing)
-    result = ma.sound_init_copy(&audio_ctx.engine, &sound.cache_ref, flags, &audio_ctx.tracks[track_idx].group, &voice.node)
-  }
-
-  if result != .SUCCESS do return 0
-
-	// 4. Mode Setup: 2D Global
-	ma.sound_set_spatialization_enabled(&voice.node, false)
-	ma.sound_set_pan(&voice.node, pan)
-
-	// 5. Shared Setup & Playback
-	ma.sound_set_volume(&voice.node, vol)
-	ma.sound_set_pitch(&voice.node, pitch)
-	ma.sound_start(&voice.node)
-
-	// 6. Update Engine State & Return Handle
-	voice.active = true
-
-	handle := (voice.generation << 16) | u32(voice_idx)
-	lua.pushinteger(L, lua.Integer(handle))
-	return 1
+    lua.pushinteger(L, lua.Integer(handle))
+    return 1
 }
 
 // lua_audio_play_at: audio.play_at(sound: Sound, track: int, x: num, y: num, vol?: num, pitch?: num) -> handle
 lua_audio_play_at :: proc "c" (L: ^lua.State) -> c.int {
-	context = runtime.default_context()
+    context = runtime.default_context()
 
-	// 1. Fetch & Validate Lua Arguments
-	sound := cast(^Sound)lua.L_checkudata(L, 1, cstring("Sound_Meta"))
-	track_idx := lua.L_checkinteger(L, 2)
-	
-	if track_idx < 0 || track_idx >= MAX_TRACKS {
-		lua.L_error(L, cstring("Invalid track index."))
-		return 0
-	}
+    // 1. Fetch & Validate Lua Arguments
+    sound := cast(^Sound)lua.L_checkudata(L, 1, cstring("Sound_Meta"))
+    track_idx := lua.L_checkinteger(L, 2)
+    
+    if track_idx < 0 || track_idx >= MAX_TRACKS {
+        lua.L_error(L, cstring("Invalid track index."))
+        return 0
+    }
 
-	x     := f32(lua.L_checknumber(L, 3))
-	y     := f32(lua.L_checknumber(L, 4))
-	vol   := f32(lua.L_optnumber(L, 5, 1.0))
-	pitch := f32(lua.L_optnumber(L, 6, 1.0))
+    x     := f32(lua.L_checknumber(L, 3))
+    y     := f32(lua.L_checknumber(L, 4))
+    vol   := f32(lua.L_optnumber(L, 5, 1.0))
+    pitch := f32(lua.L_optnumber(L, 6, 1.0))
 
-	// 2. Allocate Voice Node
-	voice_idx := -1
-	for i in 0..<MAX_VOICES {
-		if !audio_ctx.voices[i].active {
-			voice_idx = i
-			break
-		}
-	}
-	if voice_idx == -1 do return 0
+    // 2. Delegate Allocation & MA Graph Initialization
+    voice, handle := claim_and_init_voice(sound, int(track_idx))
+    if voice == nil do return 0
 
-	voice := &audio_ctx.voices[voice_idx]
-	voice.node = {}
-  // Mask to 16 bits so it safely wraps from 65535 back to 0
-	voice.generation = (voice.generation + 1) & 0xFFFF 
-	voice.track_idx = int(track_idx)
+    // 3. Mode Setup: 3D Spatial
+    ma.sound_set_spatialization_enabled(&voice.node, true)
+    ma.sound_set_position(&voice.node, x * AUDIO_SCALE, y * AUDIO_SCALE, 0)
+    
+    // Apply engine defaults automatically
+    ma.sound_set_min_distance(&voice.node, audio_ctx.default_min_dist)
+    ma.sound_set_max_distance(&voice.node, audio_ctx.default_max_dist)
+    ma.sound_set_attenuation_model(&voice.node, audio_ctx.default_attenuation_model) 
 
-	// ---------------------------------------------------------------------
-  // 3. Initialize Miniaudio Sound
-  // ---------------------------------------------------------------------
-  result: ma.result
-  flags: ma.sound_flags = {}
-  if sound.is_stream do flags += {.STREAM}
+    // 4. Shared Setup & Playback
+    ma.sound_set_volume(&voice.node, vol)
+    ma.sound_set_pitch(&voice.node, pitch)
+    ma.sound_start(&voice.node)
 
-  if sound.is_stream {
-    // Streams need a new file handle/unique read head
-    result = ma.sound_init_from_file(&audio_ctx.engine, sound.filepath, flags, &audio_ctx.tracks[track_idx].group, nil, &voice.node)
-  } else {
-    // Static sounds just "clone" the existing RAM buffer (Instant/No String Hashing)
-    result = ma.sound_init_copy(&audio_ctx.engine, &sound.cache_ref, flags, &audio_ctx.tracks[track_idx].group, &voice.node)
-  }
-
-  if result != .SUCCESS do return 0
-
-  // 4. Mode Setup: 3D Spatial
-	ma.sound_set_spatialization_enabled(&voice.node, true)
-	ma.sound_set_position(&voice.node, x * AUDIO_SCALE, y * AUDIO_SCALE, 0)
-	
-  // Apply engine defaults automatically
-	ma.sound_set_min_distance(&voice.node, audio_ctx.default_min_dist)
-	ma.sound_set_max_distance(&voice.node, audio_ctx.default_max_dist)
-	ma.sound_set_attenuation_model(&voice.node, audio_ctx.default_attenuation_model) 
-
-	
-	// 5. Shared Setup & Playback
-	ma.sound_set_volume(&voice.node, vol)
-	ma.sound_set_pitch(&voice.node, pitch)
-	ma.sound_start(&voice.node)
-
-	// 6. Update Engine State & Return Handle
-	voice.active = true
-
-	handle := (voice.generation << 16) | u32(voice_idx)
-	lua.pushinteger(L, lua.Integer(handle))
-	return 1
+    lua.pushinteger(L, lua.Integer(handle))
+    return 1
 }
 
 //VOICE
@@ -630,6 +638,7 @@ lua_audio_stop_voice :: proc "c" (L: ^lua.State) -> c.int {
 		ma.sound_stop(&voice.node)   // 1. Thread-safe halt
 		ma.sound_uninit(&voice.node) // 2. Safe memory destruction
 		voice.active = false         // 3. Reclaim pool slot
+		voice.source_sound = nil     // 4. Clear the dangling pointer
 	}
 	
 	return 0
@@ -687,7 +696,7 @@ lua_audio_set_default_falloff_mode :: proc "c" (L: ^lua.State) -> c.int {
 	case:
 		lua.L_error(L, cstring("Invalid distance curve. Use 'none', 'inverse', 'linear', or 'exponential'."))
 	}
-
+	
 	return 0
 }
 
@@ -957,6 +966,7 @@ lua_audio_stop_track :: proc "c" (L: ^lua.State) -> c.int {
 			ma.sound_stop(&voice.node)
 			ma.sound_uninit(&voice.node)
 			voice.active = false
+			voice.source_sound = nil // <--- Clear the dangling pointer
 		}
 	}
 
@@ -1023,9 +1033,10 @@ lua_audio_get_sound_info :: proc "c" (L: ^lua.State) -> c.int {
   sound := cast(^Sound)lua.L_checkudata(L, 1, cstring("Sound_Meta"))
   if sound == nil do return 0
 
-  duration: f32
-  // Queries length from your pinned cache_ref instance
-  ma.sound_get_length_in_seconds(&sound.cache_ref, &duration)
+  duration: f32 = 0.0
+  if !sound.is_stream {
+      ma.sound_get_length_in_seconds(&sound.cache_ref, &duration)
+  }
 
   lua.pushstring(L, sound.filepath)
   lua.pushnumber(L, lua.Number(duration)) // <--- Fixed Cast
@@ -1039,18 +1050,29 @@ lua_audio_get_sound_info :: proc "c" (L: ^lua.State) -> c.int {
 // =============================================================================
 
 // lua_sound_gc is triggered by Lua's GC or manual release().
-// It unpins the RAM cache and frees the cloned filepath string.
 lua_sound_gc :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 	sound := cast(^Sound)lua.L_checkudata(L, 1, cstring("Sound_Meta"))
 
 	if sound != nil && sound.filepath != nil {
-		// 1. Unpin RAM cache if static
+		
+		// 1. THE SWEEP: Detach any active voices using this sound's memory
+		for i in 0..<MAX_VOICES {
+			voice := &audio_ctx.voices[i]
+			if voice.active && voice.source_sound == sound {
+				ma.sound_stop(&voice.node)
+				ma.sound_uninit(&voice.node)
+				voice.active = false
+				voice.source_sound = nil
+			}
+		}
+
+		// 2. Unpin RAM cache if static
 		if !sound.is_stream {
 			ma.sound_uninit(&sound.cache_ref)
 		}
 
-		// 2. Free the heap-allocated cstring
+		// 3. Free the heap-allocated cstring
 		delete(sound.filepath)
 		sound.filepath = nil 
 	}
