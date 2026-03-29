@@ -176,23 +176,116 @@ draw_image_pixels :: proc(tex: ^sdl.Texture, src_rect: ^sdl.FRect, x, y, w, h: f
   check_transform_consumption()
 }
 
-//---------------------------------------------
-// - PIXELMAP/SDLSURFACE HELPERS
-//---------------------------------------------
+// ---------------------------------------------------------
+// PIXELMAP GEOMETRY & INTERNAL HELPERS
+// ---------------------------------------------------------
 
-// internal SDLsurface (pixelmap) mutator
-surface_set_pixel :: proc(surface: ^sdl.Surface, x, y: c.int, color: sdl.Color) {
-    if x < 0 || x >= surface.w || y < 0 || y >= surface.h do return
-    
-    // 1. Calculate the exact byte offset (pitch is in bytes, RGBA is 4 bytes per pixel)
-    byte_offset := (y * surface.pitch) + (x * 4)
-    
-    // 2. Cast the raw pointer to a byte array so we can index it safely
-    pixels := cast([^]u8)surface.pixels
-    
-    // 3. Grab the address of the starting byte, cast it to a Color pointer, and assign the struct
-    target_pixel := cast(^sdl.Color)(&pixels[byte_offset])
-    target_pixel^ = color
+// Helper to flip Lua's 0xRRGGBBAA to the physical 0xAABBGGRR memory layout.
+// This compiles down to a single CPU bswap instruction.
+u32_rgba_to_abgr :: #force_inline proc(c: u32) -> u32 {
+	return (c >> 24) | ((c >> 8) & 0xFF00) | ((c << 8) & 0x00FF0000) | (c << 24)
+}
+
+// Inline helper for drawing clamped horizontal lines directly to surface memory.
+// Used exclusively by the circle algorithm to fill spans without per-pixel bounds checks.
+write_surface_span :: #force_inline proc(surf: ^sdl.Surface, x1, x2, y: int, mem_color: u32) {
+	if y < 0 || y >= int(surf.h) do return
+	
+	start_x := max(0, min(x1, x2))
+	end_x   := min(int(surf.w) - 1, max(x1, x2))
+	
+	if start_x > end_x do return
+
+	pixels := cast([^]u32)surf.pixels
+	stride := int(surf.pitch) / 4
+	row_idx := y * stride
+
+	// Tight memory loop
+	for col in start_x..=end_x {
+		pixels[row_idx + col] = mem_color
+	}
+}
+
+// ---------------------------------------------------------
+// PIXELMAP ARRAY-TO-ARRAY HELPERS & MATH
+// ---------------------------------------------------------
+PixelmapBlendMode :: enum {
+  Replace,
+  Blend,
+  Add,
+  Multiply,
+  Erase,
+  Mask,
+}
+
+parse_blend_mode :: #force_inline proc(mode_str: cstring) -> PixelmapBlendMode {
+  if mode_str == "replace"  do return .Replace
+  if mode_str == "add"      do return .Add
+  if mode_str == "multiply" do return .Multiply
+  if mode_str == "erase"    do return .Erase
+  if mode_str == "mask"     do return .Mask
+  return .Blend
+}
+
+blend_memory_colors :: #force_inline proc(dst, src: u32, mode: PixelmapBlendMode) -> u32 {
+  sa := (src >> 24) & 0xFF
+  if sa == 0 && mode != .Replace do return dst // Fast path
+
+  sr := src & 0xFF
+  sg := (src >> 8) & 0xFF
+  sb := (src >> 16) & 0xFF
+
+  dr := dst & 0xFF
+  dg := (dst >> 8) & 0xFF
+  db := (dst >> 16) & 0xFF
+  da := (dst >> 24) & 0xFF
+
+  nr, ng, nb, na: u32
+
+  switch mode {
+  case .Replace:
+    return src
+  case .Blend:
+    inv_alpha := 255 - sa
+    nr = (sr * sa + dr * inv_alpha) / 255
+    ng = (sg * sa + dg * inv_alpha) / 255
+    nb = (sb * sa + db * inv_alpha) / 255
+    na = sa + da - (sa * da) / 255
+  case .Add:
+    nr = min(255, dr + sr)
+    ng = min(255, dg + sg)
+    nb = min(255, db + sb)
+    na = min(255, da + sa)
+  case .Multiply:
+    nr = (dr * sr) / 255
+    ng = (dg * sg) / 255
+    nb = (db * sb) / 255
+    na = da // Standard multiply ignores dest alpha
+  case .Erase:
+    nr, ng, nb = dr, dg, db
+    na = (da * (255 - sa)) / 255
+  case .Mask:
+    nr, ng, nb = dr, dg, db
+    na = (da * sa) / 255
+  }
+
+  return nr | (ng << 8) | (nb << 16) | (na << 24)
+}
+
+// Internal math: Shortest distance squared from point P to segment AB
+dist_sq_to_segment :: #force_inline proc(p, a, b: [2]f32) -> f32 {
+  l2 := math.pow(a.x - b.x, 2) + math.pow(a.y - b.y, 2)
+  if l2 == 0 do return math.pow(p.x - a.x, 2) + math.pow(p.y - a.y, 2)
+  
+  t := ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2
+  t = math.clamp(t, 0, 1)
+  
+  proj := [2]f32{
+    a.x + t * (b.x - a.x),
+    a.y + t * (b.y - a.y),
+  }
+  
+  return math.pow(p.x - proj.x, 2) + math.pow(p.y - proj.y, 2)
 }
 
 //=========================================================================================
@@ -564,35 +657,703 @@ lua_graphics_end_transform_group :: proc "c" (L: ^lua.State) -> c.int {
 }
 
 //---------------------------------------------
-// PIXELMAP [WIP]
+// PIXELMAP API
 //---------------------------------------------
+// Valid Blend Modes: "replace", "blend", "add", "multiply", "erase", "mask"
 
 // -- IO & Allocation
-// .load_pixelmap("file.png") -> pmap, w, h
-// .new_pixelmap(w, h) -> pmap
-// .get_pixelmap_size(pmap) - > w, h
-// .save_pixelmap(pmap, "out.png")
+// .load_pixelmap(path: string) -> pmap, w, h | nil, err
+// .new_pixelmap(w, h: number) -> pmap
+// .get_pixelmap_size(pmap) -> w, h
+// .save_pixelmap(pmap, path: string) -> ok, err?
 
-// -- Atomic Math
-// .get_pixel(pmap, x, y) -> r, g, b, a
-// .set_pixel(pmap, x, y, color)
+// -- Atomic Math & Queries
+// .pixelmap_get_pixel(pmap, x, y: number) -> color_u32
+// .pixelmap_set_pixel(pmap, x, y: number, color: u32)
+// .pixelmap_raycast(pmap, x1, y1, x2, y2: number) -> hit(bool), hx, hy, color_u32
 
-// -- Geometric drawing
-// .pixelmap_fill_rect(pmap, x, y, w, h, color)
-// .pixelmap_fill_circle(pmap, x, y, radius, color)
+// -- Geometric Blitting (CPU Shapes)
+// .blit_rect(pmap, x, y, w, h: number, color: u32, [mode: string = "replace"])
+// .blit_circle(pmap, cx, cy, radius: number, color: u32, [mode: string = "replace"])
+// .blit_line(pmap, x1, y1, x2, y2: number, color: u32, [mode: string = "replace"])          // 1px thick
+// .blit_capsule(pmap, x1, y1, x2, y2, radius: number, color: u32, [mode: string = "replace"]) // Thick rounded line
 
-// -- Array-to-Array operations
-// .pixelmap_blit(dst_map, src_map, dest_x, dest_y, blend_mode?) -- Modes: "blend", "replace", "add", "multiply"
-// .pixelmap_erase(dst_map, mask_map, dest_x, dest_y)            -- Implicitly uses your custom Destructive Masking mode
+// -- Array-to-Array Blitting (CPU Maps)
+// .blit(dst, src, dx, dy: number, [mode: string = "blend"]) 
+// .blit_region(dst, src, sx, sy, w, h, dx, dy: number, [mode: string = "blend"])
 
-// -- VRAM Sync
+// -- VRAM Sync (CPU -> GPU)
 // .new_image_from_pixelmap(pmap) -> img
-// .update_image_from_pixelmap(img, pmap, dx?, dy?, dw?, dh?)
+// .update_image_from_pixelmap(img, pmap, [dx, dy: number = 0])
+// .update_image_region_from_pixelmap(img, pmap, sx, sy, w, h, dx, dy)
 
 // -- FFI
-// .get_pixelmap_rawdata()
+// .get_pixelmap_cptr(pmap) 
 // .pixelmap_clone(pmap)
 
+//---------------------------------------------
+// - PIXELMAP IO
+//---------------------------------------------
+
+
+// lua_graphics_new_pixelmap implements: graphics.new_pixelmap(w, h) -> pmap
+lua_graphics_new_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	w := cast(c.int)lua.L_checkinteger(L, 1)
+	h := cast(c.int)lua.L_checkinteger(L, 2)
+
+	// Allocate a CPU-side surface with a strict 32-bit RGBA layout.
+	surface := sdl.CreateSurface(w, h, sdl.PixelFormat.RGBA32)
+	if surface == nil {
+		lua.pushnil(L)
+		lua.pushstring(L, sdl.GetError())
+		return 2
+	}
+
+	// Initialize to transparent black.
+	sdl.FillSurfaceRect(surface, nil, 0x00000000)
+
+	pmap := cast(^Pixelmap)lua.newuserdata(L, size_of(Pixelmap))
+	pmap^ = Pixelmap{surface = surface}
+
+	lua.L_getmetatable(L, cstring("Pixelmap_Meta"))
+	lua.setmetatable(L, -2)
+
+	return 1
+}
+
+// lua_graphics_load_pixelmap implements: graphics.load_pixelmap(path) -> pmap, w, h | nil, err
+lua_graphics_load_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+    path_cstr := cast(cstring)lua.L_checklstring(L, 1, nil)
+
+    w, h, channels: c.int
+    pixels := stbi.load(path_cstr, &w, &h, &channels, 4) // Force RGBA
+    if pixels == nil {
+        lua.pushnil(L)
+        lua.pushstring(L, cstring("stb_image failed to load pixelmap"))
+        return 2
+    }
+    defer stbi.image_free(pixels)
+
+    // Create a new SDL surface that owns its memory, preventing use-after-free bugs.
+    surface := sdl.CreateSurface(w, h, sdl.PixelFormat.RGBA32)
+    if surface == nil {
+        lua.pushnil(L)
+        lua.pushstring(L, sdl.GetError())
+        return 2
+    }
+
+    // Copy the STBI bytes into the SDL surface. 
+    // Pitch is width * 4 bytes per pixel.
+    runtime.mem_copy(surface.pixels, pixels, int(surface.pitch * h))
+
+    // 1. Push userdata
+    pmap := cast(^Pixelmap)lua.newuserdata(L, size_of(Pixelmap))
+    pmap^ = Pixelmap{surface = surface}
+
+    lua.L_getmetatable(L, cstring("Pixelmap_Meta"))
+    lua.setmetatable(L, -2)
+
+    // 2. Push width and height
+    lua.pushinteger(L, cast(lua.Integer)w)
+    lua.pushinteger(L, cast(lua.Integer)h)
+
+    // Return all 3 values
+    return 3
+}
+
+// lua_graphics_get_pixelmap_size implements: graphics.get_pixelmap_size(pmap) -> w, h
+lua_graphics_get_pixelmap_size :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	
+	if lua.type(L, 1) != lua.Type.USERDATA do return 0
+
+	pmap := cast(^Pixelmap)lua.L_testudata(L, 1, cstring("Pixelmap_Meta"))
+	if pmap == nil || pmap.surface == nil do return 0
+
+	lua.pushinteger(L, cast(lua.Integer)pmap.surface.w)
+	lua.pushinteger(L, cast(lua.Integer)pmap.surface.h)
+	return 2
+}
+
+// lua_graphics_save_pixelmap implements: graphics.save_pixelmap(pmap, path) -> ok, err?
+lua_graphics_save_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+	path_cstr := cast(cstring)lua.L_checklstring(L, 2, nil)
+
+	if pmap == nil || pmap.surface == nil {
+		lua.pushboolean(L, b32(false))
+		lua.pushstring(L, cstring("Invalid pixelmap"))
+		return 2
+	}
+
+	// Route the raw surface bytes into the stb_image_write PNG encoder.
+	res := stbi.write_png(
+		path_cstr,
+		pmap.surface.w,
+		pmap.surface.h,
+		4,
+		pmap.surface.pixels,
+		pmap.surface.pitch,
+	)
+
+	if res == 0 {
+		lua.pushboolean(L, b32(false))
+		lua.pushstring(L, cstring("stb_image_write failed to save file"))
+		return 2
+	}
+
+	lua.pushboolean(L, b32(true))
+	return 1
+}
+
+//---------------------------------------------
+// - PIXELMAP ATOMIC OPS
+//---------------------------------------------
+
+// lua_graphics_pixelmap_set_pixel implements: graphics.pixelmap_set_pixel(pmap, x, y, color)
+lua_graphics_pixelmap_set_pixel :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+	if pmap == nil || pmap.surface == nil do return 0
+
+	x := cast(c.int)lua.L_checkinteger(L, 2)
+	y := cast(c.int)lua.L_checkinteger(L, 3)
+	color_u32 := cast(u32)lua.L_checkinteger(L, 4)
+
+	surf := pmap.surface
+	if x < 0 || x >= surf.w || y < 0 || y >= surf.h do return 0
+
+	pixels := cast([^]u32)surf.pixels
+	stride := cast(int)surf.pitch / 4
+	
+	pixels[y * cast(c.int)stride + x] = u32_rgba_to_abgr(color_u32)
+	
+	return 0
+}
+
+// lua_graphics_pixelmap_get_pixel implements: graphics.pixelmap_get_pixel(pmap, x, y) -> color
+lua_graphics_pixelmap_get_pixel :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+	if pmap == nil || pmap.surface == nil {
+		lua.pushinteger(L, 0)
+		return 1
+	}
+
+	x := cast(c.int)lua.L_checkinteger(L, 2)
+	y := cast(c.int)lua.L_checkinteger(L, 3)
+
+	surf := pmap.surface
+	if x < 0 || x >= surf.w || y < 0 || y >= surf.h {
+		lua.pushinteger(L, 0)
+		return 1
+	}
+
+	pixels := cast([^]u32)surf.pixels
+	stride := cast(int)surf.pitch / 4
+	
+	mem_color := pixels[y * cast(c.int)stride + x]
+	
+	// Byte-swapping is symmetric: ABGR -> RGBA
+	logical_color := u32_rgba_to_abgr(mem_color)
+	
+	lua.pushinteger(L, cast(lua.Integer)logical_color)
+	return 1
+}
+
+//---------------------------------------------
+// - PIXELMAP GEOMETRY
+//---------------------------------------------
+
+// lua_graphics_blit_rect implements: graphics.blit_rect(pmap, x, y, w, h, color, [mode])
+lua_graphics_blit_rect :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  x := cast(int)lua.L_checkinteger(L, 2)
+  y := cast(int)lua.L_checkinteger(L, 3)
+  w := cast(int)lua.L_checkinteger(L, 4)
+  h := cast(int)lua.L_checkinteger(L, 5)
+  color_u32 := cast(u32)lua.L_checkinteger(L, 6)
+  mode := parse_blend_mode(lua.L_optstring(L, 7, "replace"))
+
+  if w <= 0 || h <= 0 do return 0
+  surf := pmap.surface
+  
+  start_x, start_y := max(0, x), max(0, y)
+  end_x, end_y     := min(int(surf.w), x + w), min(int(surf.h), y + h)
+  if start_x >= end_x || start_y >= end_y do return 0
+
+  mem_color := u32_rgba_to_abgr(color_u32)
+  pixels    := cast([^]u32)surf.pixels
+  stride    := int(surf.pitch) / 4
+
+  if mode == .Replace {
+    for row in start_y..<end_y {
+      row_idx := row * stride
+      for col in start_x..<end_x { pixels[row_idx + col] = mem_color }
+    }
+  } else {
+    for row in start_y..<end_y {
+      row_idx := row * stride
+      for col in start_x..<end_x {
+        idx := row_idx + col
+        pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
+      }
+    }
+  }
+  return 0
+}
+
+// lua_graphics_blit_circle implements: graphics.blit_circle(pmap, cx, cy, radius, color, [mode])
+lua_graphics_blit_circle :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  cx := cast(int)lua.L_checkinteger(L, 2)
+  cy := cast(int)lua.L_checkinteger(L, 3)
+  radius := cast(int)lua.L_checkinteger(L, 4)
+  color_u32 := cast(u32)lua.L_checkinteger(L, 5)
+  mode := parse_blend_mode(lua.L_optstring(L, 6, "replace"))
+
+  if radius <= 0 do return 0
+  surf := pmap.surface
+  
+  start_x, start_y := max(0, cx - radius), max(0, cy - radius)
+  end_x, end_y     := min(int(surf.w), cx + radius + 1), min(int(surf.h), cy + radius + 1)
+  if start_x >= end_x || start_y >= end_y do return 0
+
+  mem_color := u32_rgba_to_abgr(color_u32)
+  pixels    := cast([^]u32)surf.pixels
+  stride    := int(surf.pitch) / 4
+  r_sq      := radius * radius
+
+  if mode == .Replace {
+    for y in start_y..<end_y {
+      dy := y - cy
+      dy2 := dy * dy
+      row_idx := y * stride
+      for x in start_x..<end_x {
+        dx := x - cx
+        if (dx * dx + dy2) <= r_sq do pixels[row_idx + x] = mem_color
+      }
+    }
+  } else {
+    for y in start_y..<end_y {
+      dy := y - cy
+      dy2 := dy * dy
+      row_idx := y * stride
+      for x in start_x..<end_x {
+        dx := x - cx
+        if (dx * dx + dy2) <= r_sq {
+          idx := row_idx + x
+          pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
+        }
+      }
+    }
+  }
+  return 0
+}
+
+// lua_graphics_blit_capsule implements: graphics.blit_capsule(pmap, x1, y1, x2, y2, radius, color, [mode])
+lua_graphics_blit_capsule :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  x1 := cast(f32)lua.L_checknumber(L, 2)
+  y1 := cast(f32)lua.L_checknumber(L, 3)
+  x2 := cast(f32)lua.L_checknumber(L, 4)
+  y2 := cast(f32)lua.L_checknumber(L, 5)
+  r  := cast(f32)lua.L_checknumber(L, 6)
+  color_u32 := cast(u32)lua.L_checkinteger(L, 7)
+  mode := parse_blend_mode(lua.L_optstring(L, 8, "replace"))
+
+  surf := pmap.surface
+  mem_color := u32_rgba_to_abgr(color_u32)
+  r_sq := r * r
+
+  min_x, min_y := cast(int)math.floor(min(x1, x2) - r), cast(int)math.floor(min(y1, y2) - r)
+  max_x, max_y := cast(int)math.ceil(max(x1, x2) + r),  cast(int)math.ceil(max(y1, y2) + r)
+
+  start_x, start_y := max(0, min_x), max(0, min_y)
+  end_x, end_y     := min(int(surf.w), max_x + 1), min(int(surf.h), max_y + 1)
+  if start_x >= end_x || start_y >= end_y do return 0
+
+  pixels := cast([^]u32)surf.pixels
+  stride := int(surf.pitch) / 4
+  a, b := [2]f32{x1, y1}, [2]f32{x2, y2}
+
+  if mode == .Replace {
+    for y_px in start_y..<end_y {
+      row_idx := y_px * stride
+      for x_px in start_x..<end_x {
+        if dist_sq_to_segment({f32(x_px), f32(y_px)}, a, b) <= r_sq {
+          pixels[row_idx + x_px] = mem_color
+        }
+      }
+    }
+  } else {
+    for y_px in start_y..<end_y {
+      row_idx := y_px * stride
+      for x_px in start_x..<end_x {
+        if dist_sq_to_segment({f32(x_px), f32(y_px)}, a, b) <= r_sq {
+          idx := row_idx + x_px
+          pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
+        }
+      }
+    }
+  }
+  return 0
+}
+
+// lua_graphics_blit_line implements: graphics.blit_line(pmap, x1, y1, x2, y2, color, [mode])
+// Uses Bresenham's line algorithm for thin 1px lines.
+lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  x0 := cast(int)lua.L_checkinteger(L, 2)
+  y0 := cast(int)lua.L_checkinteger(L, 3)
+  x1 := cast(int)lua.L_checkinteger(L, 4)
+  y1 := cast(int)lua.L_checkinteger(L, 5)
+  color_u32 := cast(u32)lua.L_checkinteger(L, 6)
+  mode := parse_blend_mode(lua.L_optstring(L, 7, "replace"))
+
+  surf := pmap.surface
+  mem_color := u32_rgba_to_abgr(color_u32)
+  pixels := cast([^]u32)surf.pixels
+  stride := int(surf.pitch) / 4
+
+  dx := abs(x1 - x0)
+  sx := x0 < x1 ? 1 : -1
+  dy := -abs(y1 - y0)
+  sy := y0 < y1 ? 1 : -1
+  err := dx + dy
+
+  if mode == .Replace {
+    for {
+      if x0 >= 0 && x0 < int(surf.w) && y0 >= 0 && y0 < int(surf.h) {
+        pixels[y0 * stride + x0] = mem_color
+      }
+      if x0 == x1 && y0 == y1 do break
+      e2 := 2 * err
+      if e2 >= dy { err += dy; x0 += sx }
+      if e2 <= dx { err += dx; y0 += sy }
+    }
+  } else {
+    for {
+      if x0 >= 0 && x0 < int(surf.w) && y0 >= 0 && y0 < int(surf.h) {
+        idx := y0 * stride + x0
+        pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
+      }
+      if x0 == x1 && y0 == y1 do break
+      e2 := 2 * err
+      if e2 >= dy { err += dy; x0 += sx }
+      if e2 <= dx { err += dx; y0 += sy }
+    }
+  }
+  return 0
+}
+
+// lua_graphics_pixelmap_raycast implements: graphics.pixelmap_raycast(pmap, x1, y1, x2, y2) -> hit(bool), x, y, color
+lua_graphics_pixelmap_raycast :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil {
+    lua.pushboolean(L, false)
+    return 1
+  }
+
+  x0 := cast(int)lua.L_checkinteger(L, 2)
+  y0 := cast(int)lua.L_checkinteger(L, 3)
+  x1 := cast(int)lua.L_checkinteger(L, 4)
+  y1 := cast(int)lua.L_checkinteger(L, 5)
+
+  surf := pmap.surface
+  pixels := cast([^]u32)surf.pixels
+  stride := int(surf.pitch) / 4
+
+  dx := abs(x1 - x0)
+  sx := x0 < x1 ? 1 : -1
+  dy := -abs(y1 - y0)
+  sy := y0 < y1 ? 1 : -1
+  err := dx + dy
+
+  for {
+    if x0 >= 0 && x0 < int(surf.w) && y0 >= 0 && y0 < int(surf.h) {
+      mem_color := pixels[y0 * stride + x0]
+      alpha := (mem_color >> 24) & 0xFF
+      if alpha > 0 {
+        lua.pushboolean(L, true)
+        lua.pushinteger(L, cast(lua.Integer)x0)
+        lua.pushinteger(L, cast(lua.Integer)y0)
+        lua.pushinteger(L, cast(lua.Integer)u32_rgba_to_abgr(mem_color))
+        return 4
+      }
+    }
+    if x0 == x1 && y0 == y1 do break
+    e2 := 2 * err
+    if e2 >= dy { err += dy; x0 += sx }
+    if e2 <= dx { err += dx; y0 += sy }
+  }
+
+  // Missed
+  lua.pushboolean(L, false)
+  return 1
+}
+
+//---------------------------------------------
+// - PIXELMAP MAP-TO-MAP/BLIT
+//---------------------------------------------
+
+// lua_graphics_blit implements: graphics.blit(dst_map, src_map, dx, dy, [mode])
+lua_graphics_blit :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  dst_pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  src_pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, cstring("Pixelmap_Meta"))
+  if dst_pmap == nil || dst_pmap.surface == nil || src_pmap == nil || src_pmap.surface == nil do return 0
+
+  dest_x := cast(int)lua.L_checkinteger(L, 3)
+  dest_y := cast(int)lua.L_checkinteger(L, 4)
+  mode := parse_blend_mode(lua.L_optstring(L, 5, "blend"))
+
+  dst_surf, src_surf := dst_pmap.surface, src_pmap.surface
+  
+  start_x, start_y := max(0, -dest_x), max(0, -dest_y)
+  end_x, end_y     := min(int(src_surf.w), int(dst_surf.w) - dest_x), min(int(src_surf.h), int(dst_surf.h) - dest_y)
+  if start_x >= end_x || start_y >= end_y do return 0
+  
+  dst_pixels := cast([^]u32)dst_surf.pixels
+  src_pixels := cast([^]u32)src_surf.pixels
+  dst_stride, src_stride := int(dst_surf.pitch) / 4, int(src_surf.pitch) / 4
+  
+  // Hoisted loops for cache efficiency
+  if mode == .Replace {
+    for y in start_y..<end_y {
+      src_row, dst_row := y * src_stride, (dest_y + y) * dst_stride
+      for x in start_x..<end_x {
+        dst_pixels[dst_row + (dest_x + x)] = src_pixels[src_row + x]
+      }
+    }
+  } else {
+    for y in start_y..<end_y {
+      src_row, dst_row := y * src_stride, (dest_y + y) * dst_stride
+      for x in start_x..<end_x {
+        src_idx, dst_idx := src_row + x, dst_row + (dest_x + x)
+        dst_pixels[dst_idx] = blend_memory_colors(dst_pixels[dst_idx], src_pixels[src_idx], mode)
+      }
+    }
+  }
+  return 0
+}
+
+// lua_graphics_blit_region implements: graphics.blit_region(dst, src, sx, sy, w, h, dx, dy, [mode])
+lua_graphics_blit_region :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  dst_pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  src_pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, cstring("Pixelmap_Meta"))
+  if dst_pmap == nil || dst_pmap.surface == nil || src_pmap == nil || src_pmap.surface == nil do return 0
+
+  src_x := cast(int)lua.L_checkinteger(L, 3)
+  src_y := cast(int)lua.L_checkinteger(L, 4)
+  bw    := cast(int)lua.L_checkinteger(L, 5)
+  bh    := cast(int)lua.L_checkinteger(L, 6)
+  dst_x := cast(int)lua.L_checkinteger(L, 7)
+  dst_y := cast(int)lua.L_checkinteger(L, 8)
+  mode  := parse_blend_mode(lua.L_optstring(L, 9, "blend"))
+
+  dst_surf, src_surf := dst_pmap.surface, src_pmap.surface
+  if bw <= 0 || bh <= 0 do return 0
+
+  if src_x < 0 { bw += src_x; dst_x -= src_x; src_x = 0 }
+  if src_y < 0 { bh += src_y; dst_y -= src_y; src_y = 0 }
+  if dst_x < 0 { bw += dst_x; src_x -= dst_x; dst_x = 0 }
+  if dst_y < 0 { bh += dst_y; src_y -= dst_y; dst_y = 0 }
+
+  if src_x + bw > int(src_surf.w) do bw = int(src_surf.w) - src_x
+  if src_y + bh > int(src_surf.h) do bh = int(src_surf.h) - src_y
+  if dst_x + bw > int(dst_surf.w) do bw = int(dst_surf.w) - dst_x
+  if dst_y + bh > int(dst_surf.h) do bh = int(dst_surf.h) - dst_y
+  if bw <= 0 || bh <= 0 do return 0
+  
+  dst_pixels := cast([^]u32)dst_surf.pixels
+  src_pixels := cast([^]u32)src_surf.pixels
+  dst_stride, src_stride := int(dst_surf.pitch) / 4, int(src_surf.pitch) / 4
+  
+  if mode == .Replace {
+    for y in 0..<bh {
+      src_row, dst_row := (src_y + y) * src_stride, (dst_y + y) * dst_stride
+      for x in 0..<bw {
+        dst_pixels[dst_row + (dst_x + x)] = src_pixels[src_row + (src_x + x)]
+      }
+    }
+  } else {
+    for y in 0..<bh {
+      src_row, dst_row := (src_y + y) * src_stride, (dst_y + y) * dst_stride
+      for x in 0..<bw {
+        src_idx, dst_idx := src_row + (src_x + x), dst_row + (dst_x + x)
+        dst_pixels[dst_idx] = blend_memory_colors(dst_pixels[dst_idx], src_pixels[src_idx], mode)
+      }
+    }
+  }
+  return 0
+}
+
+//---------------------------------------------
+// - VRAM SYNC/ IMAGE MUTATION
+//---------------------------------------------
+
+// lua_graphics_new_image_from_pixelmap implements: graphics.new_image_from_pixelmap(pmap) -> img
+lua_graphics_new_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+	if pmap == nil || pmap.surface == nil do return 0
+
+	surf := pmap.surface
+
+	texture := sdl.CreateTextureFromSurface(Renderer, surf)
+	if texture == nil {
+		lua.pushnil(L)
+		lua.pushstring(L, sdl.GetError())
+		return 2
+	}
+	
+	sdl.SetTextureBlendMode(texture, {.BLEND})
+	sdl.SetTextureScaleMode(texture, gfx_ctx.default_scale_mode)
+
+	img := cast(^Image)lua.newuserdata(L, size_of(Image))
+	img^ = Image{
+		texture = texture, 
+		width   = f32(surf.w), 
+		height  = f32(surf.h),
+	}
+
+	lua.L_getmetatable(L, cstring("Image_Meta"))
+	lua.setmetatable(L, -2)
+
+	return 1
+}
+
+// lua_graphics_update_image_from_pixelmap implements: graphics.update_image_from_pixelmap(img, pmap, [dx, dy])
+// Syncs the entire CPU pixelmap to the GPU image at an optional destination offset.
+lua_graphics_update_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	
+	img  := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, cstring("Pixelmap_Meta"))
+	
+	if img == nil || img.texture == nil || pmap == nil || pmap.surface == nil do return 0
+
+	surf := pmap.surface
+	
+	dx := cast(c.int)lua.L_optinteger(L, 3, 0)
+	dy := cast(c.int)lua.L_optinteger(L, 4, 0)
+
+	// We define the destination rectangle to match the exact size of the incoming CPU buffer
+	dst_rect := sdl.Rect{dx, dy, surf.w, surf.h}
+
+	sdl.UpdateTexture(img.texture, &dst_rect, surf.pixels, surf.pitch)
+
+	return 0
+}
+
+// lua_graphics_update_image_region_from_pixelmap implements: graphics.update_image_region_from_pixelmap(img, pmap, sx, sy, w, h, dx, dy)
+// Pushes a specific snip of CPU memory across the PCI-e bus to a specific location on the GPU texture.
+lua_graphics_update_image_region_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	
+	img  := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, cstring("Pixelmap_Meta"))
+	
+	if img == nil || img.texture == nil || pmap == nil || pmap.surface == nil do return 0
+
+	sx := cast(c.int)lua.L_checkinteger(L, 3)
+	sy := cast(c.int)lua.L_checkinteger(L, 4)
+	w  := cast(c.int)lua.L_checkinteger(L, 5)
+	h  := cast(c.int)lua.L_checkinteger(L, 6)
+	dx := cast(c.int)lua.L_checkinteger(L, 7)
+	dy := cast(c.int)lua.L_checkinteger(L, 8)
+
+	surf := pmap.surface
+
+	// Guard against reading physical CPU memory out of bounds
+	if sx < 0 || sy < 0 || sx + w > surf.w || sy + h > surf.h || w <= 0 || h <= 0 {
+		return 0
+	}
+
+	dst_rect := sdl.Rect{dx, dy, w, h}
+
+	// Calculate pointer offset to the top-left pixel of our source snip.
+	// Pitch is bytes-per-row. x * 4 is bytes-per-column.
+	byte_offset := (int(sy) * int(surf.pitch)) + (int(sx) * 4)
+	src_ptr := rawptr(uintptr(surf.pixels) + uintptr(byte_offset))
+
+	// By passing surf.pitch, SDL knows how to step to the next row in memory 
+	// even though we are pointing to the middle of the array.
+	sdl.UpdateTexture(img.texture, &dst_rect, src_ptr, surf.pitch)
+
+	return 0
+}
+
+//---------------------------------------------
+// - FFI UTILS
+//---------------------------------------------
+
+// lua_graphics_pixelmap_get_cptr implements: graphics.pixelmap_get_cptr(pmap) -> lightuserdata
+lua_graphics_pixelmap_get_cptr :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil {
+    lua.pushnil(L)
+    return 1
+  }
+
+  // Push as lightuserdata (raw C pointer)
+  lua.pushlightuserdata(L, pmap.surface.pixels)
+  return 1
+}
+
+// lua_graphics_pixelmap_clone implements: graphics.pixelmap_clone(pmap) -> new_pmap
+lua_graphics_pixelmap_clone :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  clone_surf := sdl.DuplicateSurface(pmap.surface)
+  if clone_surf == nil {
+    lua.pushnil(L)
+    lua.pushstring(L, sdl.GetError())
+    return 2
+  }
+
+  new_pmap := cast(^Pixelmap)lua.newuserdata(L, size_of(Pixelmap))
+  new_pmap^ = Pixelmap{surface = clone_surf}
+
+  lua.L_getmetatable(L, cstring("Pixelmap_Meta"))
+  lua.setmetatable(L, -2)
+
+  return 1
+}
 
 //=========================================================================================
 // MEMORY MANAGEMENT & METATABLES
@@ -669,60 +1430,121 @@ setup_graphics_metatables :: proc(L: ^lua.State) {
 // register_graphics_api initializes the internal graphics state and binds
 // the 'graphics' table to the Lua global environment.
 register_graphics_api :: proc(L: ^lua.State) {
-    setup_graphics_metatables(L)
+	setup_graphics_metatables(L)
 
-    lua.newtable(L) // [graphics]
+	lua.newtable(L) // [graphics]
 
-    // RENDERING VERBS
-    lua.pushcfunction(L, lua_graphics_clear)
-    lua.setfield(L, -2, cstring("clear"))
+	// RENDERING VERBS
+	lua.pushcfunction(L, lua_graphics_clear)
+	lua.setfield(L, -2, cstring("clear"))
 
-    lua.pushcfunction(L, lua_graphics_draw_rect)
-    lua.setfield(L, -2, cstring("draw_rect"))
+	lua.pushcfunction(L, lua_graphics_draw_rect)
+	lua.setfield(L, -2, cstring("draw_rect"))
 
-    lua.pushcfunction(L, lua_graphics_draw_debug_text)
-    lua.setfield(L, -2, cstring("draw_debug_text"))
+	lua.pushcfunction(L, lua_graphics_draw_debug_text)
+	lua.setfield(L, -2, cstring("draw_debug_text"))
 
-    lua.pushcfunction(L, lua_graphics_draw_image)
-    lua.setfield(L, -2, cstring("draw_image"))
+	lua.pushcfunction(L, lua_graphics_draw_image)
+	lua.setfield(L, -2, cstring("draw_image"))
 
-    lua.pushcfunction(L, lua_graphics_draw_image_region)
-    lua.setfield(L, -2, cstring("draw_image_region"))
+	lua.pushcfunction(L, lua_graphics_draw_image_region)
+	lua.setfield(L, -2, cstring("draw_image_region"))
 
-    lua.pushcfunction(L, lua_graphics_draw_sprite)
-    lua.setfield(L, -2, cstring("draw_sprite"))
+	lua.pushcfunction(L, lua_graphics_draw_sprite)
+	lua.setfield(L, -2, cstring("draw_sprite"))
 
-    // RESOURCE LOADERS
-    lua.pushcfunction(L, lua_graphics_load_image)
-    lua.setfield(L, -2, cstring("load_image"))
+	// RESOURCE LOADERS
+	lua.pushcfunction(L, lua_graphics_load_image)
+	lua.setfield(L, -2, cstring("load_image"))
 
-    lua.pushcfunction(L, lua_graphics_load_atlas)
-    lua.setfield(L, -2, cstring("load_atlas"))
-    
-    lua.pushcfunction(L, lua_graphics_set_default_filter)
-    lua.setfield(L, -2, cstring("set_default_filter"))
+	lua.pushcfunction(L, lua_graphics_load_atlas)
+	lua.setfield(L, -2, cstring("load_atlas"))
+	
+	lua.pushcfunction(L, lua_graphics_set_default_filter)
+	lua.setfield(L, -2, cstring("set_default_filter"))
 
-    // GETTERS
-    lua.pushcfunction(L, lua_graphics_get_image_size)
-    lua.setfield(L, -2, cstring("get_image_size"))
+	// GETTERS
+	lua.pushcfunction(L, lua_graphics_get_image_size)
+	lua.setfield(L, -2, cstring("get_image_size"))
 
-    // TRANSFORMATION STATE
-    lua.pushcfunction(L, lua_graphics_set_draw_rotation)
-    lua.setfield(L, -2, cstring("set_draw_rotation"))
+	// TRANSFORMATION STATE
+	lua.pushcfunction(L, lua_graphics_set_draw_rotation)
+	lua.setfield(L, -2, cstring("set_draw_rotation"))
 
-    lua.pushcfunction(L, lua_graphics_set_draw_scale)
-    lua.setfield(L, -2, cstring("set_draw_scale"))
+	lua.pushcfunction(L, lua_graphics_set_draw_scale)
+	lua.setfield(L, -2, cstring("set_draw_scale"))
 
-    lua.pushcfunction(L, lua_graphics_set_draw_origin)
-    lua.setfield(L, -2, cstring("set_draw_origin"))
+	lua.pushcfunction(L, lua_graphics_set_draw_origin)
+	lua.setfield(L, -2, cstring("set_draw_origin"))
 
-    lua.pushcfunction(L, lua_graphics_begin_transform_group)
-    lua.setfield(L, -2, cstring("begin_transform_group"))
+	lua.pushcfunction(L, lua_graphics_begin_transform_group)
+	lua.setfield(L, -2, cstring("begin_transform_group"))
 
-    lua.pushcfunction(L, lua_graphics_end_transform_group)
-    lua.setfield(L, -2, cstring("end_transform_group"))
+	lua.pushcfunction(L, lua_graphics_end_transform_group)
+	lua.setfield(L, -2, cstring("end_transform_group"))
+	
+  // - PIXELMAP IO
+  lua.pushcfunction(L, lua_graphics_new_pixelmap)
+  lua.setfield(L, -2, cstring("new_pixelmap"))
 
-    lua.setglobal(L, cstring("graphics"))
+  lua.pushcfunction(L, lua_graphics_load_pixelmap)
+  lua.setfield(L, -2, cstring("load_pixelmap"))
+
+  lua.pushcfunction(L, lua_graphics_get_pixelmap_size)
+  lua.setfield(L, -2, cstring("get_pixelmap_size"))
+
+  lua.pushcfunction(L, lua_graphics_save_pixelmap)
+  lua.setfield(L, -2, cstring("save_pixelmap"))
+
+  // - PIXELMAP ATOMIC OPS
+  lua.pushcfunction(L, lua_graphics_pixelmap_set_pixel)
+  lua.setfield(L, -2, cstring("pixelmap_set_pixel"))
+
+  lua.pushcfunction(L, lua_graphics_pixelmap_get_pixel)
+  lua.setfield(L, -2, cstring("pixelmap_get_pixel"))
+
+  lua.pushcfunction(L, lua_graphics_pixelmap_raycast)
+  lua.setfield(L, -2, cstring("pixelmap_raycast"))
+
+  // - PIXELMAP GEOMETRY (BLITS)
+  lua.pushcfunction(L, lua_graphics_blit_rect)
+  lua.setfield(L, -2, cstring("blit_rect"))
+
+  lua.pushcfunction(L, lua_graphics_blit_circle)
+  lua.setfield(L, -2, cstring("blit_circle"))
+
+  lua.pushcfunction(L, lua_graphics_blit_capsule)
+  lua.setfield(L, -2, cstring("blit_capsule"))
+
+  lua.pushcfunction(L, lua_graphics_blit_line)
+  lua.setfield(L, -2, cstring("blit_line"))
+
+  // - PIXELMAP ARRAY-TO-ARRAY (BLITS)
+  lua.pushcfunction(L, lua_graphics_blit)
+  lua.setfield(L, -2, cstring("blit"))
+
+  lua.pushcfunction(L, lua_graphics_blit_region)
+  lua.setfield(L, -2, cstring("blit_region"))
+
+  // - VRAM SYNC
+  lua.pushcfunction(L, lua_graphics_new_image_from_pixelmap)
+  lua.setfield(L, -2, cstring("new_image_from_pixelmap"))
+
+  lua.pushcfunction(L, lua_graphics_update_image_from_pixelmap)
+  lua.setfield(L, -2, cstring("update_image_from_pixelmap"))
+
+  lua.pushcfunction(L, lua_graphics_update_image_region_from_pixelmap)
+  lua.setfield(L, -2, cstring("update_image_region_from_pixelmap"))
+  
+  // -- FFI
+  lua.pushcfunction(L, lua_graphics_pixelmap_get_cptr)
+  lua.setfield(L, -2, cstring("get_pixelmap_cptr"))
+
+  lua.pushcfunction(L, lua_graphics_pixelmap_clone)
+  lua.setfield(L, -2, cstring("pixelmap_clone"))
+  
+  //SETUP API TABLE
+  lua.setglobal(L, cstring("graphics"))
 }
 
 
