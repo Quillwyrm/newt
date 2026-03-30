@@ -113,10 +113,16 @@ runtime.update = function(dt)
 
   local hit, hx, hy = gfx.pixelmap_raycast(pmap_terrain, math.floor(player_x), math.floor(player_y), far_x, far_y)
 
-  -- RIGHT CLICK: Heavy Capsule Laser
+-- RIGHT CLICK: Heavy Capsule Laser
   if input.down("mouse2") then
     local end_x, end_y = far_x, far_y
-    if hit then end_x, end_y = hx, hy end
+    if hit then 
+      end_x, end_y = hx, hy 
+      
+      -- Dynamic high-energy impact rings
+      gfx.blit_circle_outline(pmap_vfx, end_x, end_y, math.random(10, 14), rgba(200, 255, 255, 255), "add")
+      gfx.blit_circle_outline(pmap_vfx, end_x, end_y, math.random(16, 22), rgba(50, 200, 255, 150), "add")
+    end
 
     -- Draw thick beam
     gfx.blit_capsule(pmap_vfx, player_x, player_y, end_x, end_y, 8, C.HEAVY, "replace")
@@ -128,9 +134,13 @@ runtime.update = function(dt)
   -- LEFT CLICK / NORMAL RAYCAST
   elseif hit then
     gfx.blit_line(pmap_vfx, math.floor(player_x), math.floor(player_y), hx, hy, C.LASER, "replace")
+    
+    -- Core impact dot
     gfx.blit_circle(pmap_vfx, hx, hy, math.random(1, 3), rgba(255, 200, 0, 255), "add")
+    -- Dynamic sparking outline
+    gfx.blit_circle_outline(pmap_vfx, hx, hy, math.random(4, 8), rgba(255, 50, 50, 200), "add")
 
-    if input.down("mouse1") then
+    if input.down("mouse1") then 
       gfx.blit_circle(pmap_terrain, hx, hy, 4, C.BRUSH, "erase")
       gfx.update_image_from_pixelmap(img_terrain, pmap_terrain)
     end
@@ -138,7 +148,11 @@ runtime.update = function(dt)
     gfx.blit_line(pmap_vfx, math.floor(player_x), math.floor(player_y), far_x, far_y, rgba(255, 50, 50, 100), "blend")
   end
 
+  -- Player Core
   gfx.blit_circle(pmap_vfx, math.floor(player_x), math.floor(player_y), player_radius, rgba(0, 255, 255, 255), "replace")
+  -- Player Energy Shield
+  gfx.blit_circle_outline(pmap_vfx, math.floor(player_x), math.floor(player_y), player_radius + math.random(2, 3), rgba(0, 150, 255, 150), "add")
+  
   gfx.update_image_from_pixelmap(img_vfx, pmap_vfx)
 end
 

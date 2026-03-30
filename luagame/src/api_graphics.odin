@@ -12,21 +12,29 @@ import "vendor:sdl3/ttf"
 import lua "luajit"
 
 //TODO:
-// raster ops - Pixelmap API
 
-// Primitives: draw_line, 1px unfilled rects, and draw_poly (plus unfilled variant).
-
-// Pixelmaps (CPU Read/Write): load_pixelmap, get_pixel, set_pixel, new_image_from_pixelmap, and save_pixelmap.
+// Primitives: draw_line, 1px unfilled rects, and draw_poly (plus unfilled variant). ect.
 
 // Render Targets: Support for rendering to textures.
 
 // Blend Modes: Global or per-draw blending control.
+
+// Scissor/clip rect
 
 // Camera: A dedicated abstraction or module for view transforms.
 
 // Text & Fonts: Integration with SDL_ttf for font loading and text rendering.
 
 // Animation System: Logic for handling sprite/atlas frames over time.
+
+// Shaders (see notes)
+
+//DONE!!!  
+//Image IO
+//Image drawing prims (GPU)
+//Atlas/Sprite idx system
+//transform pipeline (scale/rot/origin) 
+//Pixelmap API (CPU Read/Write)
 
 //=========================================================================================
 // GRAPHICS API: STATE, TYPES & HELPERS
@@ -186,25 +194,7 @@ u32_rgba_to_abgr :: #force_inline proc(c: u32) -> u32 {
 	return (c >> 24) | ((c >> 8) & 0xFF00) | ((c << 8) & 0x00FF0000) | (c << 24)
 }
 
-// Inline helper for drawing clamped horizontal lines directly to surface memory.
-// Used exclusively by the circle algorithm to fill spans without per-pixel bounds checks.
-write_surface_span :: #force_inline proc(surf: ^sdl.Surface, x1, x2, y: int, mem_color: u32) {
-	if y < 0 || y >= int(surf.h) do return
-	
-	start_x := max(0, min(x1, x2))
-	end_x   := min(int(surf.w) - 1, max(x1, x2))
-	
-	if start_x > end_x do return
 
-	pixels := cast([^]u32)surf.pixels
-	stride := int(surf.pitch) / 4
-	row_idx := y * stride
-
-	// Tight memory loop
-	for col in start_x..=end_x {
-		pixels[row_idx + col] = mem_color
-	}
-}
 
 // ---------------------------------------------------------
 // PIXELMAP ARRAY-TO-ARRAY HELPERS & MATH
@@ -272,20 +262,61 @@ blend_memory_colors :: #force_inline proc(dst, src: u32, mode: PixelmapBlendMode
   return nr | (ng << 8) | (nb << 16) | (na << 24)
 }
 
+// Inline helper for plotting a single bounds-checked pixel.
+blit_pixel :: #force_inline proc(surf: ^sdl.Surface, x, y: int, color: u32, mode: PixelmapBlendMode) {
+  if x >= 0 && x < int(surf.w) && y >= 0 && y < int(surf.h) {
+    pixels := cast([^]u32)surf.pixels
+    idx := y * (int(surf.pitch) / 4) + x
+    
+    if mode == .Replace {
+      pixels[idx] = color
+    } else {
+      pixels[idx] = blend_memory_colors(pixels[idx], color, mode)
+    }
+  }
+}
+
+// Inline helper for drawing clamped horizontal lines. Used by blit_circle.
+blit_horizontal_span :: #force_inline proc(surf: ^sdl.Surface, x1, x2, y: int, mem_color: u32, mode: PixelmapBlendMode) {
+	if y < 0 || y >= int(surf.h) do return
+	
+	start_x := max(0, min(x1, x2))
+	end_x   := min(int(surf.w) - 1, max(x1, x2))
+	if start_x > end_x do return
+
+	pixels := cast([^]u32)surf.pixels
+	stride := int(surf.pitch) / 4
+	row_idx := y * stride
+
+	if mode == .Replace {
+		for col in start_x..=end_x do pixels[row_idx + col] = mem_color
+	} else {
+		for col in start_x..=end_x {
+			idx := row_idx + col
+			pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
+		}
+	}
+}
+
 // Internal math: Shortest distance squared from point P to segment AB
 dist_sq_to_segment :: #force_inline proc(p, a, b: [2]f32) -> f32 {
-  l2 := math.pow(a.x - b.x, 2) + math.pow(a.y - b.y, 2)
-  if l2 == 0 do return math.pow(p.x - a.x, 2) + math.pow(p.y - a.y, 2)
+  dx := b.x - a.x
+  dy := b.y - a.y
+  l2 := dx * dx + dy * dy
   
-  t := ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2
+  if l2 == 0 do return (p.x - a.x) * (p.x - a.x) + (p.y - a.y) * (p.y - a.y)
+  
+  t := ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2
   t = math.clamp(t, 0, 1)
   
   proj := [2]f32{
-    a.x + t * (b.x - a.x),
-    a.y + t * (b.y - a.y),
+    a.x + t * dx,
+    a.y + t * dy,
   }
   
-  return math.pow(p.x - proj.x, 2) + math.pow(p.y - proj.y, 2)
+  px := p.x - proj.x
+  py := p.y - proj.y
+  return px * px + py * py
 }
 
 //=========================================================================================
@@ -867,6 +898,90 @@ lua_graphics_pixelmap_get_pixel :: proc "c" (L: ^lua.State) -> c.int {
 	return 1
 }
 
+// lua_graphics_pixelmap_flood_fill implements: graphics.pixelmap_flood_fill(pmap, x, y, color)
+lua_graphics_pixelmap_flood_fill :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  start_x := cast(int)lua.L_checkinteger(L, 2)
+  start_y := cast(int)lua.L_checkinteger(L, 3)
+  color_u32 := cast(u32)lua.L_checkinteger(L, 4)
+
+  surf := pmap.surface
+  if start_x < 0 || start_x >= int(surf.w) || start_y < 0 || start_y >= int(surf.h) do return 0
+
+  pixels := cast([^]u32)surf.pixels
+  stride := int(surf.pitch) / 4
+
+  mem_fill_color := u32_rgba_to_abgr(color_u32)
+  target_color := pixels[start_y * stride + start_x]
+
+  // If the target pixel is already the color we want to fill, abort to prevent infinite loop
+  if target_color == mem_fill_color do return 0
+
+  // Allocate an explicit heap stack. Reserve 1024 slots to prevent malloc thrashing.
+  stack := make([dynamic][2]int, 0, 1024)
+  defer delete(stack)
+
+  append(&stack, [2]int{start_x, start_y})
+
+  for len(stack) > 0 {
+    pt := pop(&stack)
+    cx, cy := pt.x, pt.y
+
+    // Scan left to find the exact start of this horizontal span
+    for cx > 0 && pixels[cy * stride + (cx - 1)] == target_color {
+      cx -= 1
+    }
+    
+    span_left := cx
+    row_idx := cy * stride
+
+    // Scan right, filling the contiguous horizontal row instantly in physical memory
+    for cx < int(surf.w) && pixels[row_idx + cx] == target_color {
+      pixels[row_idx + cx] = mem_fill_color
+      cx += 1
+    }
+    span_right := cx - 1
+
+    // Scan the row ABOVE the span to find new seeds
+    if cy > 0 {
+      in_span := false
+      row_above := (cy - 1) * stride
+      for x in span_left..=span_right {
+        if pixels[row_above + x] == target_color {
+          if !in_span {
+            append(&stack, [2]int{x, cy - 1})
+            in_span = true
+          }
+        } else {
+          in_span = false
+        }
+      }
+    }
+
+    // Scan the row BELOW the span to find new seeds
+    if cy < int(surf.h) - 1 {
+      in_span := false
+      row_below := (cy + 1) * stride
+      for x in span_left..=span_right {
+        if pixels[row_below + x] == target_color {
+          if !in_span {
+            append(&stack, [2]int{x, cy + 1})
+            in_span = true
+          }
+        } else {
+          in_span = false
+        }
+      }
+    }
+  }
+
+  return 0
+}
+
 //---------------------------------------------
 // - PIXELMAP GEOMETRY
 //---------------------------------------------
@@ -926,42 +1041,37 @@ lua_graphics_blit_circle :: proc "c" (L: ^lua.State) -> c.int {
   color_u32 := cast(u32)lua.L_checkinteger(L, 5)
   mode := parse_blend_mode(lua.L_optstring(L, 6, "replace"))
 
-  if radius <= 0 do return 0
-  surf := pmap.surface
+  if radius < 0 do return 0
   
-  start_x, start_y := max(0, cx - radius), max(0, cy - radius)
-  end_x, end_y     := min(int(surf.w), cx + radius + 1), min(int(surf.h), cy + radius + 1)
-  if start_x >= end_x || start_y >= end_y do return 0
-
+  surf := pmap.surface
   mem_color := u32_rgba_to_abgr(color_u32)
-  pixels    := cast([^]u32)surf.pixels
-  stride    := int(surf.pitch) / 4
-  r_sq      := radius * radius
+  
+  x := 0
+  y := radius
+  d := 3 - 2 * radius
 
-  if mode == .Replace {
-    for y in start_y..<end_y {
-      dy := y - cy
-      dy2 := dy * dy
-      row_idx := y * stride
-      for x in start_x..<end_x {
-        dx := x - cx
-        if (dx * dx + dy2) <= r_sq do pixels[row_idx + x] = mem_color
-      }
+  for x <= y {
+    // Draw the core horizontal bands (expanding outwards from center Y)
+    blit_horizontal_span(surf, cx - y, cx + y, cy + x, mem_color, mode)
+    if x != 0 {
+      blit_horizontal_span(surf, cx - y, cx + y, cy - x, mem_color, mode)
     }
-  } else {
-    for y in start_y..<end_y {
-      dy := y - cy
-      dy2 := dy * dy
-      row_idx := y * stride
-      for x in start_x..<end_x {
-        dx := x - cx
-        if (dx * dx + dy2) <= r_sq {
-          idx := row_idx + x
-          pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
-        }
+
+    if d < 0 {
+      d += 4 * x + 6
+    } else {
+      // y is about to decrement. Draw the top and bottom caps for the CURRENT y.
+      // We skip if x == y to prevent drawing the exact same row we just drew above.
+      if x != y {
+        blit_horizontal_span(surf, cx - x, cx + x, cy + y, mem_color, mode)
+        blit_horizontal_span(surf, cx - x, cx + x, cy - y, mem_color, mode)
       }
+      d += 4 * (x - y) + 10
+      y -= 1
     }
+    x += 1
   }
+  
   return 0
 }
 
@@ -1018,6 +1128,57 @@ lua_graphics_blit_capsule :: proc "c" (L: ^lua.State) -> c.int {
   return 0
 }
 
+// lua_graphics_blit_circle_outline implements: graphics.blit_circle_lines(pmap, cx, cy, radius, color, [mode])
+lua_graphics_blit_circle_outline :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  cx := cast(int)lua.L_checkinteger(L, 2)
+  cy := cast(int)lua.L_checkinteger(L, 3)
+  radius := cast(int)lua.L_checkinteger(L, 4)
+  color_u32 := cast(u32)lua.L_checkinteger(L, 5)
+  mode := parse_blend_mode(lua.L_optstring(L, 6, "replace"))
+
+  if radius < 0 do return 0
+  
+  surf := pmap.surface
+  mem_color := u32_rgba_to_abgr(color_u32)
+  
+  x := 0
+  y := radius
+  d := 3 - 2 * radius
+
+  for x <= y {
+    // Base octant
+    blit_pixel(surf, cx+x, cy+y, mem_color, mode)
+    
+    // Mirrors
+    if x != 0 do blit_pixel(surf, cx-x, cy+y, mem_color, mode)
+    if y != 0 do blit_pixel(surf, cx+x, cy-y, mem_color, mode)
+    if x != 0 && y != 0 do blit_pixel(surf, cx-x, cy-y, mem_color, mode)
+
+    // Swapped diagonals
+    if x != y {
+      blit_pixel(surf, cx+y, cy+x, mem_color, mode)
+      if x != 0 do blit_pixel(surf, cx+y, cy-x, mem_color, mode)
+      if y != 0 do blit_pixel(surf, cx-y, cy+x, mem_color, mode)
+      if x != 0 && y != 0 do blit_pixel(surf, cx-y, cy-x, mem_color, mode)
+    }
+
+    if d < 0 {
+      d += 4 * x + 6
+    } else {
+      d += 4 * (x - y) + 10
+      y -= 1
+    }
+    x += 1
+  }
+
+  return 0
+}
+
 // lua_graphics_blit_line implements: graphics.blit_line(pmap, x1, y1, x2, y2, color, [mode])
 // Uses Bresenham's line algorithm for thin 1px lines.
 lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
@@ -1035,8 +1196,6 @@ lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
 
   surf := pmap.surface
   mem_color := u32_rgba_to_abgr(color_u32)
-  pixels := cast([^]u32)surf.pixels
-  stride := int(surf.pitch) / 4
 
   dx := abs(x1 - x0)
   sx := x0 < x1 ? 1 : -1
@@ -1044,28 +1203,16 @@ lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
   sy := y0 < y1 ? 1 : -1
   err := dx + dy
 
-  if mode == .Replace {
-    for {
-      if x0 >= 0 && x0 < int(surf.w) && y0 >= 0 && y0 < int(surf.h) {
-        pixels[y0 * stride + x0] = mem_color
-      }
-      if x0 == x1 && y0 == y1 do break
-      e2 := 2 * err
-      if e2 >= dy { err += dy; x0 += sx }
-      if e2 <= dx { err += dx; y0 += sy }
-    }
-  } else {
-    for {
-      if x0 >= 0 && x0 < int(surf.w) && y0 >= 0 && y0 < int(surf.h) {
-        idx := y0 * stride + x0
-        pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
-      }
-      if x0 == x1 && y0 == y1 do break
-      e2 := 2 * err
-      if e2 >= dy { err += dy; x0 += sx }
-      if e2 <= dx { err += dx; y0 += sy }
-    }
+  for {
+    blit_pixel(surf, x0, y0, mem_color, mode)
+    
+    if x0 == x1 && y0 == y1 do break
+    
+    e2 := 2 * err
+    if e2 >= dy { err += dy; x0 += sx }
+    if e2 <= dx { err += dx; y0 += sy }
   }
+  
   return 0
 }
 
@@ -1087,7 +1234,7 @@ lua_graphics_pixelmap_raycast :: proc "c" (L: ^lua.State) -> c.int {
   surf := pmap.surface
   pixels := cast([^]u32)surf.pixels
   stride := int(surf.pitch) / 4
-
+  
   dx := abs(x1 - x0)
   sx := x0 < x1 ? 1 : -1
   dy := -abs(y1 - y0)
@@ -1505,6 +1652,9 @@ register_graphics_api :: proc(L: ^lua.State) {
 
   lua.pushcfunction(L, lua_graphics_pixelmap_raycast)
   lua.setfield(L, -2, cstring("pixelmap_raycast"))
+  
+  lua.pushcfunction(L, lua_graphics_pixelmap_flood_fill)
+  lua.setfield(L, -2, cstring("pixelmap_flood_fill"))
 
   // - PIXELMAP GEOMETRY (BLITS)
   lua.pushcfunction(L, lua_graphics_blit_rect)
@@ -1512,6 +1662,9 @@ register_graphics_api :: proc(L: ^lua.State) {
 
   lua.pushcfunction(L, lua_graphics_blit_circle)
   lua.setfield(L, -2, cstring("blit_circle"))
+  
+  lua.pushcfunction(L, lua_graphics_blit_circle_outline)
+  lua.setfield(L, -2, cstring("blit_circle_outline"))
 
   lua.pushcfunction(L, lua_graphics_blit_capsule)
   lua.setfield(L, -2, cstring("blit_capsule"))
