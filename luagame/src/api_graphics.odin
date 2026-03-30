@@ -1196,6 +1196,8 @@ lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
 
   surf := pmap.surface
   mem_color := u32_rgba_to_abgr(color_u32)
+  pixels := cast([^]u32)surf.pixels
+  stride := int(surf.pitch) / 4
 
   dx := abs(x1 - x0)
   sx := x0 < x1 ? 1 : -1
@@ -1203,16 +1205,28 @@ lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
   sy := y0 < y1 ? 1 : -1
   err := dx + dy
 
-  for {
-    blit_pixel(surf, x0, y0, mem_color, mode)
-    
-    if x0 == x1 && y0 == y1 do break
-    
-    e2 := 2 * err
-    if e2 >= dy { err += dy; x0 += sx }
-    if e2 <= dx { err += dx; y0 += sy }
+  if mode == .Replace {
+    for {
+      if x0 >= 0 && x0 < int(surf.w) && y0 >= 0 && y0 < int(surf.h) {
+        pixels[y0 * stride + x0] = mem_color
+      }
+      if x0 == x1 && y0 == y1 do break
+      e2 := 2 * err
+      if e2 >= dy { err += dy; x0 += sx }
+      if e2 <= dx { err += dx; y0 += sy }
+    }
+  } else {
+    for {
+      if x0 >= 0 && x0 < int(surf.w) && y0 >= 0 && y0 < int(surf.h) {
+        idx := y0 * stride + x0
+        pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
+      }
+      if x0 == x1 && y0 == y1 do break
+      e2 := 2 * err
+      if e2 >= dy { err += dy; x0 += sx }
+      if e2 <= dx { err += dx; y0 += sy }
+    }
   }
-  
   return 0
 }
 
