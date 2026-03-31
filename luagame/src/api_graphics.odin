@@ -62,7 +62,7 @@ Pixelmap :: struct {
 }
 
 // Global singleton for the immediate-mode "Pen" state and shared resources.
-gfx_ctx: struct {
+Gfx_Ctx: struct {
   pending: struct {
 		rotation: f32,
 		scale:    [2]f32,
@@ -70,7 +70,7 @@ gfx_ctx: struct {
   },
   group_depth:       int,
   current_color:     sdl.Color,    // Shadow copy for RenderClear/DebugText
-  rect_color:        sdl.Color,    // Shadow copy for gfx_ctx.base_rect_texture ONLY
+  rect_color:        sdl.Color,    // Shadow copy for Gfx_Ctx.base_rect_texture ONLY
 	base_rect_texture: ^sdl.Texture,
 	default_scale_mode: sdl.ScaleMode,
 }= {
@@ -84,39 +84,39 @@ gfx_ctx: struct {
 
 // Returns the draw state to neutral defaults.
 reset_pending_transforms :: proc() {
-	gfx_ctx.pending.rotation = 0
-	gfx_ctx.pending.scale    = {1, 1}
-	gfx_ctx.pending.origin   = {0, 0}
+	Gfx_Ctx.pending.rotation = 0
+	Gfx_Ctx.pending.scale    = {1, 1}
+	Gfx_Ctx.pending.origin   = {0, 0}
 }
 
 // Called after every draw call to handle the Consumer vs. Persistent logic.
 check_transform_consumption :: proc() {
-	if gfx_ctx.group_depth == 0 {
+	if Gfx_Ctx.group_depth == 0 {
 		reset_pending_transforms()
 	}
 }
 
 init_graphics_state :: proc() {
 	// 1. Lock Odin and SDL to the same baseline color state
-	gfx_ctx.current_color = sdl.Color{255, 255, 255, 255}
+	Gfx_Ctx.current_color = sdl.Color{255, 255, 255, 255}
 	sdl.SetRenderDrawColor(Renderer, 255, 255, 255, 255)
 
 	// 2. Setup the 1x1 rect texture
-	if gfx_ctx.base_rect_texture != nil do return
+	if Gfx_Ctx.base_rect_texture != nil do return
 
 	pixel_data: u32 = 0xFFFFFFFF
-	gfx_ctx.base_rect_texture = sdl.CreateTexture(Renderer, .RGBA32, .STATIC, 1, 1)
-	sdl.UpdateTexture(gfx_ctx.base_rect_texture, nil, &pixel_data, 4)
-	sdl.SetTextureBlendMode(gfx_ctx.base_rect_texture, {.BLEND})
+	Gfx_Ctx.base_rect_texture = sdl.CreateTexture(Renderer, .RGBA32, .STATIC, 1, 1)
+	sdl.UpdateTexture(Gfx_Ctx.base_rect_texture, nil, &pixel_data, 4)
+	sdl.SetTextureBlendMode(Gfx_Ctx.base_rect_texture, {.BLEND})
 }
 
 // set_render_color checks the requested color against our shadow state.
 // If it differs, we update SDL and sync our shadow state. If it matches, we do nothing.
 // This is the backbone of the stateless Lua API's performance.
 set_render_color :: proc(c: sdl.Color) {
-	if gfx_ctx.current_color != c {
+	if Gfx_Ctx.current_color != c {
 		sdl.SetRenderDrawColor(Renderer, c.r, c.g, c.b, c.a)
-		gfx_ctx.current_color = c
+		Gfx_Ctx.current_color = c
 	}
 }
 
@@ -148,7 +148,7 @@ load_image_from_path :: proc(path: cstring) -> (Image, bool) {
 	sdl.SetTextureBlendMode(texture, {.BLEND})
 	
 	// Apply the global filter preference immediately
-	sdl.SetTextureScaleMode(texture, gfx_ctx.default_scale_mode)
+	sdl.SetTextureScaleMode(texture, Gfx_Ctx.default_scale_mode)
 
 	return Image{texture, f32(w), f32(h)}, true
 }
@@ -156,19 +156,19 @@ load_image_from_path :: proc(path: cstring) -> (Image, bool) {
 
 // Internal workhorse for drawing textures with transforms.
 draw_image_pixels :: proc(tex: ^sdl.Texture, src_rect: ^sdl.FRect, x, y, w, h: f32, color: sdl.Color) {
-  p := &gfx_ctx.pending
+  p := &Gfx_Ctx.pending
 
   pivot := p.origin * p.scale
   size  := [2]f32{w, h} * p.scale
   dst   := sdl.FRect{ x - pivot.x, y - pivot.y, size.x, size.y }
 
   // THE COLOR ROUTING
-  if tex == gfx_ctx.base_rect_texture {
+  if tex == Gfx_Ctx.base_rect_texture {
     // 1. It's a Rect: Check the cache to save GPU calls
-    if color != gfx_ctx.rect_color {
+    if color != Gfx_Ctx.rect_color {
       sdl.SetTextureColorMod(tex, color.r, color.g, color.b)
       sdl.SetTextureAlphaMod(tex, color.a)
-      gfx_ctx.rect_color = color
+      Gfx_Ctx.rect_color = color
     }
   } else {
     // 2. It's an Image: Always apply the tint (don't bother caching 500 textures)
@@ -192,131 +192,6 @@ draw_image_pixels :: proc(tex: ^sdl.Texture, src_rect: ^sdl.FRect, x, y, w, h: f
 // This compiles down to a single CPU bswap instruction.
 u32_rgba_to_abgr :: #force_inline proc(c: u32) -> u32 {
 	return (c >> 24) | ((c >> 8) & 0xFF00) | ((c << 8) & 0x00FF0000) | (c << 24)
-}
-
-
-
-// ---------------------------------------------------------
-// PIXELMAP ARRAY-TO-ARRAY HELPERS & MATH
-// ---------------------------------------------------------
-PixelmapBlendMode :: enum {
-  Replace,
-  Blend,
-  Add,
-  Multiply,
-  Erase,
-  Mask,
-}
-
-parse_blend_mode :: #force_inline proc(mode_str: cstring) -> PixelmapBlendMode {
-  if mode_str == "replace"  do return .Replace
-  if mode_str == "add"      do return .Add
-  if mode_str == "multiply" do return .Multiply
-  if mode_str == "erase"    do return .Erase
-  if mode_str == "mask"     do return .Mask
-  return .Blend
-}
-
-blend_memory_colors :: #force_inline proc(dst, src: u32, mode: PixelmapBlendMode) -> u32 {
-  sa := (src >> 24) & 0xFF
-  if sa == 0 && mode != .Replace do return dst // Fast path
-
-  sr := src & 0xFF
-  sg := (src >> 8) & 0xFF
-  sb := (src >> 16) & 0xFF
-
-  dr := dst & 0xFF
-  dg := (dst >> 8) & 0xFF
-  db := (dst >> 16) & 0xFF
-  da := (dst >> 24) & 0xFF
-
-  nr, ng, nb, na: u32
-
-  switch mode {
-  case .Replace:
-    return src
-  case .Blend:
-    inv_alpha := 255 - sa
-    nr = (sr * sa + dr * inv_alpha) / 255
-    ng = (sg * sa + dg * inv_alpha) / 255
-    nb = (sb * sa + db * inv_alpha) / 255
-    na = sa + da - (sa * da) / 255
-  case .Add:
-    nr = min(255, dr + sr)
-    ng = min(255, dg + sg)
-    nb = min(255, db + sb)
-    na = min(255, da + sa)
-  case .Multiply:
-    nr = (dr * sr) / 255
-    ng = (dg * sg) / 255
-    nb = (db * sb) / 255
-    na = da // Standard multiply ignores dest alpha
-  case .Erase:
-    nr, ng, nb = dr, dg, db
-    na = (da * (255 - sa)) / 255
-  case .Mask:
-    nr, ng, nb = dr, dg, db
-    na = (da * sa) / 255
-  }
-
-  return nr | (ng << 8) | (nb << 16) | (na << 24)
-}
-
-// Inline helper for plotting a single bounds-checked pixel.
-blit_pixel :: #force_inline proc(surf: ^sdl.Surface, x, y: int, color: u32, mode: PixelmapBlendMode) {
-  if x >= 0 && x < int(surf.w) && y >= 0 && y < int(surf.h) {
-    pixels := cast([^]u32)surf.pixels
-    idx := y * (int(surf.pitch) / 4) + x
-    
-    if mode == .Replace {
-      pixels[idx] = color
-    } else {
-      pixels[idx] = blend_memory_colors(pixels[idx], color, mode)
-    }
-  }
-}
-
-// Inline helper for drawing clamped horizontal lines. Used by blit_circle.
-blit_horizontal_span :: #force_inline proc(surf: ^sdl.Surface, x1, x2, y: int, mem_color: u32, mode: PixelmapBlendMode) {
-	if y < 0 || y >= int(surf.h) do return
-	
-	start_x := max(0, min(x1, x2))
-	end_x   := min(int(surf.w) - 1, max(x1, x2))
-	if start_x > end_x do return
-
-	pixels := cast([^]u32)surf.pixels
-	stride := int(surf.pitch) / 4
-	row_idx := y * stride
-
-	if mode == .Replace {
-		for col in start_x..=end_x do pixels[row_idx + col] = mem_color
-	} else {
-		for col in start_x..=end_x {
-			idx := row_idx + col
-			pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
-		}
-	}
-}
-
-// Internal math: Shortest distance squared from point P to segment AB
-dist_sq_to_segment :: #force_inline proc(p, a, b: [2]f32) -> f32 {
-  dx := b.x - a.x
-  dy := b.y - a.y
-  l2 := dx * dx + dy * dy
-  
-  if l2 == 0 do return (p.x - a.x) * (p.x - a.x) + (p.y - a.y) * (p.y - a.y)
-  
-  t := ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2
-  t = math.clamp(t, 0, 1)
-  
-  proj := [2]f32{
-    a.x + t * dx,
-    a.y + t * dy,
-  }
-  
-  px := p.x - proj.x
-  py := p.y - proj.y
-  return px * px + py * py
 }
 
 //=========================================================================================
@@ -443,7 +318,7 @@ lua_graphics_draw_sprite :: proc "c" (L: ^lua.State) -> c.int {
 }
 
 // lua_graphics_draw_rect implements: graphics.draw_rect(x, y, w, h, [color])
-// Draws a filled rectangle. Internally, this stretches the 1x1 'gfx_ctx.base_rect_texture'
+// Draws a filled rectangle. Internally, this stretches the 1x1 'Gfx_Ctx.base_rect_texture'
 // to the desired dimensions and applies a color tint.
 lua_graphics_draw_rect :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
@@ -462,11 +337,11 @@ lua_graphics_draw_rect :: proc "c" (L: ^lua.State) -> c.int {
 	dst := sdl.FRect{x, y, w, h}
 
 	// Apply color tinting to our white pixel
-	sdl.SetTextureColorMod(gfx_ctx.base_rect_texture, color.r, color.g, color.b)
-	sdl.SetTextureAlphaMod(gfx_ctx.base_rect_texture, color.a)
+	sdl.SetTextureColorMod(Gfx_Ctx.base_rect_texture, color.r, color.g, color.b)
+	sdl.SetTextureAlphaMod(Gfx_Ctx.base_rect_texture, color.a)
 
 	// Draw the 1px texture stretched to the rect size
-	draw_image_pixels(gfx_ctx.base_rect_texture, nil, x, y, w, h, color)
+	draw_image_pixels(Gfx_Ctx.base_rect_texture, nil, x, y, w, h, color)
 
 	return 0
 }
@@ -600,9 +475,9 @@ lua_graphics_set_default_filter :: proc "c" (L: ^lua.State) -> c.int {
     mode_str := lua.L_checkstring(L, 1)
 
     if mode_str == "nearest" {
-        gfx_ctx.default_scale_mode = .NEAREST
+        Gfx_Ctx.default_scale_mode = .NEAREST
     } else if mode_str == "linear" {
-        gfx_ctx.default_scale_mode = .LINEAR
+        Gfx_Ctx.default_scale_mode = .LINEAR
     } else {
         lua.L_error(L, cstring("Invalid filter mode. Expected 'nearest' or 'linear'"))
     }
@@ -645,7 +520,7 @@ lua_graphics_get_image_size :: proc "c" (L: ^lua.State) -> c.int {
 // lua_graphics_set_draw_rotation: graphics.set_draw_rotation(angle: number = 0)
 lua_graphics_set_draw_rotation :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
-	gfx_ctx.pending.rotation = cast(f32)lua.L_optnumber(L, 1, 0.0)
+	Gfx_Ctx.pending.rotation = cast(f32)lua.L_optnumber(L, 1, 0.0)
 	return 0
 }
 
@@ -656,32 +531,32 @@ lua_graphics_set_draw_scale :: proc "c" (L: ^lua.State) -> c.int {
 	// If sy isn't provided, we default to sx to perform a uniform scale.
 	sy := lua.L_optnumber(L, 2, sx) 
 	
-	gfx_ctx.pending.scale.x = cast(f32)sx
-	gfx_ctx.pending.scale.y = cast(f32)sy
+	Gfx_Ctx.pending.scale.x = cast(f32)sx
+	Gfx_Ctx.pending.scale.y = cast(f32)sy
 	return 0
 }
 
 // lua_graphics_set_draw_origin: graphics.set_draw_origin(ox: number = 0, oy: number = 0)
 lua_graphics_set_draw_origin :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
-	gfx_ctx.pending.origin.x = cast(f32)lua.L_optnumber(L, 1, 0.0)
-	gfx_ctx.pending.origin.y = cast(f32)lua.L_optnumber(L, 2, 0.0)
+	Gfx_Ctx.pending.origin.x = cast(f32)lua.L_optnumber(L, 1, 0.0)
+	Gfx_Ctx.pending.origin.y = cast(f32)lua.L_optnumber(L, 2, 0.0)
 	return 0
 }
 
 // lua_graphics_begin_transform_group: graphics.begin_transform_group()
 lua_graphics_begin_transform_group :: proc "c" (L: ^lua.State) -> c.int {
-	gfx_ctx.group_depth += 1
+	Gfx_Ctx.group_depth += 1
 	return 0
 }
 
 // lua_graphics_end_transform_group: graphics.end_transform_group()
 lua_graphics_end_transform_group :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
-	gfx_ctx.group_depth = math.max(0, gfx_ctx.group_depth - 1)
+	Gfx_Ctx.group_depth = math.max(0, Gfx_Ctx.group_depth - 1)
 	
 	// If we've popped the last group, reset the pen to neutral defaults.
-	if gfx_ctx.group_depth == 0 {
+	if Gfx_Ctx.group_depth == 0 {
 		reset_pending_transforms()
 	}
 	return 0
@@ -762,7 +637,7 @@ lua_graphics_load_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
     pixels := stbi.load(path_cstr, &w, &h, &channels, 4) // Force RGBA
     if pixels == nil {
         lua.pushnil(L)
-        lua.pushstring(L, cstring("stb_image failed to load pixelmap"))
+        lua.pushstring(L, stbi.failure_reason())
         return 2
     }
     defer stbi.image_free(pixels)
@@ -833,7 +708,7 @@ lua_graphics_save_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 
 	if res == 0 {
 		lua.pushboolean(L, b32(false))
-		lua.pushstring(L, cstring("stb_image_write failed to save file"))
+		lua.pushstring(L, cstring("Failed to write PNG (check file path and permissions)"))
 		return 2
 	}
 
@@ -982,254 +857,6 @@ lua_graphics_pixelmap_flood_fill :: proc "c" (L: ^lua.State) -> c.int {
   return 0
 }
 
-//---------------------------------------------
-// - PIXELMAP GEOMETRY
-//---------------------------------------------
-
-// lua_graphics_blit_rect implements: graphics.blit_rect(pmap, x, y, w, h, color, [mode])
-lua_graphics_blit_rect :: proc "c" (L: ^lua.State) -> c.int {
-  context = runtime.default_context()
-  
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
-  if pmap == nil || pmap.surface == nil do return 0
-
-  x := cast(int)lua.L_checkinteger(L, 2)
-  y := cast(int)lua.L_checkinteger(L, 3)
-  w := cast(int)lua.L_checkinteger(L, 4)
-  h := cast(int)lua.L_checkinteger(L, 5)
-  color_u32 := cast(u32)lua.L_checkinteger(L, 6)
-  mode := parse_blend_mode(lua.L_optstring(L, 7, "replace"))
-
-  if w <= 0 || h <= 0 do return 0
-  surf := pmap.surface
-  
-  start_x, start_y := max(0, x), max(0, y)
-  end_x, end_y     := min(int(surf.w), x + w), min(int(surf.h), y + h)
-  if start_x >= end_x || start_y >= end_y do return 0
-
-  mem_color := u32_rgba_to_abgr(color_u32)
-  pixels    := cast([^]u32)surf.pixels
-  stride    := int(surf.pitch) / 4
-
-  if mode == .Replace {
-    for row in start_y..<end_y {
-      row_idx := row * stride
-      for col in start_x..<end_x { pixels[row_idx + col] = mem_color }
-    }
-  } else {
-    for row in start_y..<end_y {
-      row_idx := row * stride
-      for col in start_x..<end_x {
-        idx := row_idx + col
-        pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
-      }
-    }
-  }
-  return 0
-}
-
-// lua_graphics_blit_circle implements: graphics.blit_circle(pmap, cx, cy, radius, color, [mode])
-lua_graphics_blit_circle :: proc "c" (L: ^lua.State) -> c.int {
-  context = runtime.default_context()
-  
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
-  if pmap == nil || pmap.surface == nil do return 0
-
-  cx := cast(int)lua.L_checkinteger(L, 2)
-  cy := cast(int)lua.L_checkinteger(L, 3)
-  radius := cast(int)lua.L_checkinteger(L, 4)
-  color_u32 := cast(u32)lua.L_checkinteger(L, 5)
-  mode := parse_blend_mode(lua.L_optstring(L, 6, "replace"))
-
-  if radius < 0 do return 0
-  
-  surf := pmap.surface
-  mem_color := u32_rgba_to_abgr(color_u32)
-  
-  x := 0
-  y := radius
-  d := 3 - 2 * radius
-
-  for x <= y {
-    // Draw the core horizontal bands (expanding outwards from center Y)
-    blit_horizontal_span(surf, cx - y, cx + y, cy + x, mem_color, mode)
-    if x != 0 {
-      blit_horizontal_span(surf, cx - y, cx + y, cy - x, mem_color, mode)
-    }
-
-    if d < 0 {
-      d += 4 * x + 6
-    } else {
-      // y is about to decrement. Draw the top and bottom caps for the CURRENT y.
-      // We skip if x == y to prevent drawing the exact same row we just drew above.
-      if x != y {
-        blit_horizontal_span(surf, cx - x, cx + x, cy + y, mem_color, mode)
-        blit_horizontal_span(surf, cx - x, cx + x, cy - y, mem_color, mode)
-      }
-      d += 4 * (x - y) + 10
-      y -= 1
-    }
-    x += 1
-  }
-  
-  return 0
-}
-
-// lua_graphics_blit_capsule implements: graphics.blit_capsule(pmap, x1, y1, x2, y2, radius, color, [mode])
-lua_graphics_blit_capsule :: proc "c" (L: ^lua.State) -> c.int {
-  context = runtime.default_context()
-  
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
-  if pmap == nil || pmap.surface == nil do return 0
-
-  x1 := cast(f32)lua.L_checknumber(L, 2)
-  y1 := cast(f32)lua.L_checknumber(L, 3)
-  x2 := cast(f32)lua.L_checknumber(L, 4)
-  y2 := cast(f32)lua.L_checknumber(L, 5)
-  r  := cast(f32)lua.L_checknumber(L, 6)
-  color_u32 := cast(u32)lua.L_checkinteger(L, 7)
-  mode := parse_blend_mode(lua.L_optstring(L, 8, "replace"))
-
-  surf := pmap.surface
-  mem_color := u32_rgba_to_abgr(color_u32)
-  r_sq := r * r
-
-  min_x, min_y := cast(int)math.floor(min(x1, x2) - r), cast(int)math.floor(min(y1, y2) - r)
-  max_x, max_y := cast(int)math.ceil(max(x1, x2) + r),  cast(int)math.ceil(max(y1, y2) + r)
-
-  start_x, start_y := max(0, min_x), max(0, min_y)
-  end_x, end_y     := min(int(surf.w), max_x + 1), min(int(surf.h), max_y + 1)
-  if start_x >= end_x || start_y >= end_y do return 0
-
-  pixels := cast([^]u32)surf.pixels
-  stride := int(surf.pitch) / 4
-  a, b := [2]f32{x1, y1}, [2]f32{x2, y2}
-
-  if mode == .Replace {
-    for y_px in start_y..<end_y {
-      row_idx := y_px * stride
-      for x_px in start_x..<end_x {
-        if dist_sq_to_segment({f32(x_px), f32(y_px)}, a, b) <= r_sq {
-          pixels[row_idx + x_px] = mem_color
-        }
-      }
-    }
-  } else {
-    for y_px in start_y..<end_y {
-      row_idx := y_px * stride
-      for x_px in start_x..<end_x {
-        if dist_sq_to_segment({f32(x_px), f32(y_px)}, a, b) <= r_sq {
-          idx := row_idx + x_px
-          pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
-        }
-      }
-    }
-  }
-  return 0
-}
-
-// lua_graphics_blit_circle_outline implements: graphics.blit_circle_lines(pmap, cx, cy, radius, color, [mode])
-lua_graphics_blit_circle_outline :: proc "c" (L: ^lua.State) -> c.int {
-  context = runtime.default_context()
-  
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
-  if pmap == nil || pmap.surface == nil do return 0
-
-  cx := cast(int)lua.L_checkinteger(L, 2)
-  cy := cast(int)lua.L_checkinteger(L, 3)
-  radius := cast(int)lua.L_checkinteger(L, 4)
-  color_u32 := cast(u32)lua.L_checkinteger(L, 5)
-  mode := parse_blend_mode(lua.L_optstring(L, 6, "replace"))
-
-  if radius < 0 do return 0
-  
-  surf := pmap.surface
-  mem_color := u32_rgba_to_abgr(color_u32)
-  
-  x := 0
-  y := radius
-  d := 3 - 2 * radius
-
-  for x <= y {
-    // Base octant
-    blit_pixel(surf, cx+x, cy+y, mem_color, mode)
-    
-    // Mirrors
-    if x != 0 do blit_pixel(surf, cx-x, cy+y, mem_color, mode)
-    if y != 0 do blit_pixel(surf, cx+x, cy-y, mem_color, mode)
-    if x != 0 && y != 0 do blit_pixel(surf, cx-x, cy-y, mem_color, mode)
-
-    // Swapped diagonals
-    if x != y {
-      blit_pixel(surf, cx+y, cy+x, mem_color, mode)
-      if x != 0 do blit_pixel(surf, cx+y, cy-x, mem_color, mode)
-      if y != 0 do blit_pixel(surf, cx-y, cy+x, mem_color, mode)
-      if x != 0 && y != 0 do blit_pixel(surf, cx-y, cy-x, mem_color, mode)
-    }
-
-    if d < 0 {
-      d += 4 * x + 6
-    } else {
-      d += 4 * (x - y) + 10
-      y -= 1
-    }
-    x += 1
-  }
-
-  return 0
-}
-
-// lua_graphics_blit_line implements: graphics.blit_line(pmap, x1, y1, x2, y2, color, [mode])
-// Uses Bresenham's line algorithm for thin 1px lines.
-lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
-  context = runtime.default_context()
-  
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
-  if pmap == nil || pmap.surface == nil do return 0
-
-  x0 := cast(int)lua.L_checkinteger(L, 2)
-  y0 := cast(int)lua.L_checkinteger(L, 3)
-  x1 := cast(int)lua.L_checkinteger(L, 4)
-  y1 := cast(int)lua.L_checkinteger(L, 5)
-  color_u32 := cast(u32)lua.L_checkinteger(L, 6)
-  mode := parse_blend_mode(lua.L_optstring(L, 7, "replace"))
-
-  surf := pmap.surface
-  mem_color := u32_rgba_to_abgr(color_u32)
-  pixels := cast([^]u32)surf.pixels
-  stride := int(surf.pitch) / 4
-
-  dx := abs(x1 - x0)
-  sx := x0 < x1 ? 1 : -1
-  dy := -abs(y1 - y0)
-  sy := y0 < y1 ? 1 : -1
-  err := dx + dy
-
-  if mode == .Replace {
-    for {
-      if x0 >= 0 && x0 < int(surf.w) && y0 >= 0 && y0 < int(surf.h) {
-        pixels[y0 * stride + x0] = mem_color
-      }
-      if x0 == x1 && y0 == y1 do break
-      e2 := 2 * err
-      if e2 >= dy { err += dy; x0 += sx }
-      if e2 <= dx { err += dx; y0 += sy }
-    }
-  } else {
-    for {
-      if x0 >= 0 && x0 < int(surf.w) && y0 >= 0 && y0 < int(surf.h) {
-        idx := y0 * stride + x0
-        pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
-      }
-      if x0 == x1 && y0 == y1 do break
-      e2 := 2 * err
-      if e2 >= dy { err += dy; x0 += sx }
-      if e2 <= dx { err += dx; y0 += sy }
-    }
-  }
-  return 0
-}
-
 // lua_graphics_pixelmap_raycast implements: graphics.pixelmap_raycast(pmap, x1, y1, x2, y2) -> hit(bool), x, y, color
 lua_graphics_pixelmap_raycast :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
@@ -1278,6 +905,355 @@ lua_graphics_pixelmap_raycast :: proc "c" (L: ^lua.State) -> c.int {
   return 1
 }
 
+// ---------------------------------------------------------
+// PIXELMAP ARRAY-TO-ARRAY HELPERS & MATH
+// ---------------------------------------------------------
+PixelmapBlendMode :: enum {
+  Replace,
+  Blend,
+  Add,
+  Multiply,
+  Erase,
+  Mask,
+}
+
+parse_blend_mode :: #force_inline proc(mode_str: cstring) -> PixelmapBlendMode {
+  if mode_str == nil do return .Blend // Safety check in case Lua passes nil
+
+  switch string(mode_str) {
+    case "replace":  return .Replace
+    case "add":      return .Add
+    case "multiply": return .Multiply
+    case "erase":    return .Erase
+    case "mask":     return .Mask
+    case:            return .Blend
+  }
+}
+
+blend_memory_colors :: #force_inline proc(dst, src: u32, mode: PixelmapBlendMode) -> u32 {
+  sa := (src >> 24) & 0xFF
+  if sa == 0 && mode != .Replace do return dst // Fast path
+
+  sr := src & 0xFF
+  sg := (src >> 8) & 0xFF
+  sb := (src >> 16) & 0xFF
+
+  dr := dst & 0xFF
+  dg := (dst >> 8) & 0xFF
+  db := (dst >> 16) & 0xFF
+  da := (dst >> 24) & 0xFF
+
+  nr, ng, nb, na: u32
+
+  switch mode {
+  case .Replace:
+    return src
+  case .Blend:
+    inv_alpha := 255 - sa
+    nr = (sr * sa + dr * inv_alpha) / 255
+    ng = (sg * sa + dg * inv_alpha) / 255
+    nb = (sb * sa + db * inv_alpha) / 255
+    na = sa + da - (sa * da) / 255
+  case .Add:
+    nr = min(255, dr + sr)
+    ng = min(255, dg + sg)
+    nb = min(255, db + sb)
+    na = min(255, da + sa)
+  case .Multiply:
+    nr = (dr * sr) / 255
+    ng = (dg * sg) / 255
+    nb = (db * sb) / 255
+    na = da // Standard multiply ignores dest alpha
+  case .Erase:
+    nr, ng, nb = dr, dg, db
+    na = (da * (255 - sa)) / 255
+  case .Mask:
+    nr, ng, nb = dr, dg, db
+    na = (da * sa) / 255
+  }
+
+  return nr | (ng << 8) | (nb << 16) | (na << 24)
+}
+
+// Inline helper for plotting a single bounds-checked pixel.
+blit_pixel :: #force_inline proc(surf: ^sdl.Surface, x, y: int, color: u32, mode: PixelmapBlendMode) {
+  if x >= 0 && x < int(surf.w) && y >= 0 && y < int(surf.h) {
+    pixels := cast([^]u32)surf.pixels
+    idx := y * (int(surf.pitch) / 4) + x
+    pixels[idx] = blend_memory_colors(pixels[idx], color, mode)
+  }
+}
+
+// Internal helper to calculate safe iteration bounds for floating-point shapes
+get_clipped_bounds :: #force_inline proc(surf: ^sdl.Surface, min_x, min_y, max_x, max_y: f32) -> (start_x, start_y, end_x, end_y: int, valid: bool) {
+  start_x = max(0, cast(int)math.floor(min_x))
+  start_y = max(0, cast(int)math.floor(min_y))
+  end_x   = min(int(surf.w), cast(int)math.ceil(max_x) + 1)
+  end_y   = min(int(surf.h), cast(int)math.ceil(max_y) + 1)
+  
+  valid = start_x < end_x && start_y < end_y
+  return
+}
+
+// Internal math: Shortest distance squared from point P to segment AB
+dist_sq_to_segment :: #force_inline proc(p, a, b: [2]f32) -> f32 {
+  dx := b.x - a.x
+  dy := b.y - a.y
+  l2 := dx * dx + dy * dy
+  
+  if l2 == 0 do return (p.x - a.x) * (p.x - a.x) + (p.y - a.y) * (p.y - a.y)
+  
+  t := ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2
+  t = math.clamp(t, 0.0, 1.0)
+  
+  proj := [2]f32{ a.x + t * dx, a.y + t * dy }
+  
+  px := p.x - proj.x
+  py := p.y - proj.y
+  return px * px + py * py
+}
+
+//---------------------------------------------
+// - PIXELMAP GEOMETRY
+//---------------------------------------------
+
+// lua_graphics_blit_rect implements: graphics.blit_rect(pmap, x, y, w, h, [color], [mode])
+lua_graphics_blit_rect :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  x := cast(int)lua.L_checkinteger(L, 2)
+  y := cast(int)lua.L_checkinteger(L, 3)
+  w := cast(int)lua.L_checkinteger(L, 4)
+  h := cast(int)lua.L_checkinteger(L, 5)
+  color_u32 := cast(u32)lua.L_optinteger(L, 6, -1)
+  mode := parse_blend_mode(lua.L_optstring(L, 7, "blend")) // Updated Default
+
+  if w <= 0 || h <= 0 do return 0
+  surf := pmap.surface
+  
+  start_x, start_y := max(0, x), max(0, y)
+  end_x, end_y     := min(int(surf.w), x + w), min(int(surf.h), y + h)
+  if start_x >= end_x || start_y >= end_y do return 0
+
+  mem_color := u32_rgba_to_abgr(color_u32)
+  pixels    := cast([^]u32)surf.pixels
+  stride    := int(surf.pitch) / 4
+
+  for row in start_y..<end_y {
+    row_idx := row * stride
+    for col in start_x..<end_x {
+      idx := row_idx + col
+      pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
+    }
+  }
+  return 0
+}
+
+// lua_graphics_blit_circle_outline implements: graphics.blit_circle_outline(pmap, cx, cy, radius, thickness, [color], [mode])
+lua_graphics_blit_circle_outline :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  cx     := cast(f32)lua.L_checknumber(L, 2)
+  cy     := cast(f32)lua.L_checknumber(L, 3)
+  r      := cast(f32)lua.L_checknumber(L, 4)
+  thick  := cast(f32)lua.L_checknumber(L, 5)
+  color  := cast(u32)lua.L_optinteger(L, 6, -1)
+  mode   := parse_blend_mode(lua.L_optstring(L, 7, "blend")) // Updated Default
+
+  surf   := pmap.surface
+  mem_c  := u32_rgba_to_abgr(color)
+  r_sq   := r * r
+  
+  inner_r    := max(0.0, r - thick)
+  inner_r_sq := inner_r * inner_r
+
+  start_x, start_y, end_x, end_y, ok := get_clipped_bounds(surf, cx - r, cy - r, cx + r, cy + r)
+  if !ok do return 0
+
+  pixels := cast([^]u32)surf.pixels
+  stride := int(surf.pitch) / 4
+
+  for y_px in start_y..<end_y {
+    row_idx := y_px * stride
+    dy      := f32(y_px) + 0.5 - cy 
+    dy_sq   := dy * dy
+    for x_px in start_x..<end_x {
+      dx := f32(x_px) + 0.5 - cx
+      dist_sq := dx * dx + dy_sq
+      
+      if dist_sq <= r_sq && dist_sq > inner_r_sq {
+        idx := row_idx + x_px
+        pixels[idx] = blend_memory_colors(pixels[idx], mem_c, mode)
+      }
+    }
+  }
+  return 0
+}
+
+// lua_graphics_blit_circle_pixel_outline implements: graphics.blit_circle_pixel_outline(pmap, cx, cy, radius, [color], [mode])
+lua_graphics_blit_circle_pixel_outline :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  cx := cast(int)lua.L_checkinteger(L, 2)
+  cy := cast(int)lua.L_checkinteger(L, 3)
+  radius := cast(int)lua.L_checkinteger(L, 4)
+  color_u32 := cast(u32)lua.L_optinteger(L, 5, -1)
+  mode := parse_blend_mode(lua.L_optstring(L, 6, "blend")) // Updated Default
+
+  if radius < 0 do return 0
+  
+  surf := pmap.surface
+  mem_color := u32_rgba_to_abgr(color_u32)
+  
+  x := 0
+  y := radius
+  d := 3 - 2 * radius
+
+  for x <= y {
+    blit_pixel(surf, cx+x, cy+y, mem_color, mode)
+    if x != 0 do blit_pixel(surf, cx-x, cy+y, mem_color, mode)
+    if y != 0 do blit_pixel(surf, cx+x, cy-y, mem_color, mode)
+    if x != 0 && y != 0 do blit_pixel(surf, cx-x, cy-y, mem_color, mode)
+
+    if x != y {
+      blit_pixel(surf, cx+y, cy+x, mem_color, mode)
+      if x != 0 do blit_pixel(surf, cx+y, cy-x, mem_color, mode)
+      if y != 0 do blit_pixel(surf, cx-y, cy+x, mem_color, mode)
+      if x != 0 && y != 0 do blit_pixel(surf, cx-y, cy-x, mem_color, mode)
+    }
+
+    if d < 0 {
+      d += 4 * x + 6
+    } else {
+      d += 4 * (x - y) + 10
+      y -= 1
+    }
+    x += 1
+  }
+  return 0
+}
+
+// lua_graphics_blit_circle implements: graphics.blit_circle(pmap, cx, cy, radius, [color], [mode])
+lua_graphics_blit_circle :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  cx     := cast(f32)lua.L_checknumber(L, 2)
+  cy     := cast(f32)lua.L_checknumber(L, 3)
+  r      := cast(f32)lua.L_checknumber(L, 4)
+  color  := cast(u32)lua.L_optinteger(L, 5, -1)
+  mode   := parse_blend_mode(lua.L_optstring(L, 6, "blend")) // Updated Default
+
+  surf   := pmap.surface
+  mem_c  := u32_rgba_to_abgr(color)
+  r_sq   := r * r
+
+  start_x, start_y, end_x, end_y, ok := get_clipped_bounds(surf, cx - r, cy - r, cx + r, cy + r)
+  if !ok do return 0
+
+  pixels := cast([^]u32)surf.pixels
+  stride := int(surf.pitch) / 4
+
+  for y_px in start_y..<end_y {
+    row_idx := y_px * stride
+    dy      := f32(y_px) + 0.5 - cy 
+    dy_sq   := dy * dy
+    for x_px in start_x..<end_x {
+      dx := f32(x_px) + 0.5 - cx
+      if dx * dx + dy_sq <= r_sq {
+        idx := row_idx + x_px
+        pixels[idx] = blend_memory_colors(pixels[idx], mem_c, mode)
+      }
+    }
+  }
+  return 0
+}
+
+// lua_graphics_blit_capsule implements: graphics.blit_capsule(pmap, x1, y1, x2, y2, radius, [color], [mode])
+lua_graphics_blit_capsule :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  x1 := cast(f32)lua.L_checknumber(L, 2)
+  y1 := cast(f32)lua.L_checknumber(L, 3)
+  x2 := cast(f32)lua.L_checknumber(L, 4)
+  y2 := cast(f32)lua.L_checknumber(L, 5)
+  r  := cast(f32)lua.L_checknumber(L, 6)
+  color_u32 := cast(u32)lua.L_optinteger(L, 7, -1)
+  mode := parse_blend_mode(lua.L_optstring(L, 8, "blend")) // Updated Default
+
+  surf := pmap.surface
+  mem_color := u32_rgba_to_abgr(color_u32)
+  r_sq := r * r
+
+  min_x, min_y := min(x1, x2) - r, min(y1, y2) - r
+  max_x, max_y := max(x1, x2) + r, max(y1, y2) + r
+
+  start_x, start_y, end_x, end_y, ok := get_clipped_bounds(surf, min_x, min_y, max_x, max_y)
+  if !ok do return 0
+
+  pixels := cast([^]u32)surf.pixels
+  stride := int(surf.pitch) / 4
+  a, b := [2]f32{x1, y1}, [2]f32{x2, y2}
+
+  for y_px in start_y..<end_y {
+    row_idx := y_px * stride
+    for x_px in start_x..<end_x {
+      if dist_sq_to_segment({f32(x_px) + 0.5, f32(y_px) + 0.5}, a, b) <= r_sq {
+        idx := row_idx + x_px
+        pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
+      }
+    }
+  }
+  return 0
+}
+
+// lua_graphics_blit_line implements: graphics.blit_line(pmap, x1, y1, x2, y2, [color], [mode])
+lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  x0 := cast(int)lua.L_checkinteger(L, 2)
+  y0 := cast(int)lua.L_checkinteger(L, 3)
+  x1 := cast(int)lua.L_checkinteger(L, 4)
+  y1 := cast(int)lua.L_checkinteger(L, 5)
+  color_u32 := cast(u32)lua.L_optinteger(L, 6, -1)
+  mode := parse_blend_mode(lua.L_optstring(L, 7, "blend")) // Updated Default
+
+  surf := pmap.surface
+  mem_color := u32_rgba_to_abgr(color_u32)
+
+  dx := abs(x1 - x0)
+  sx := x0 < x1 ? 1 : -1
+  dy := -abs(y1 - y0)
+  sy := y0 < y1 ? 1 : -1
+  err := dx + dy
+
+  for {
+    blit_pixel(surf, x0, y0, mem_color, mode)
+    if x0 == x1 && y0 == y1 do break
+    e2 := 2 * err
+    if e2 >= dy { err += dy; x0 += sx }
+    if e2 <= dx { err += dx; y0 += sy }
+  }
+  return 0
+}
+
 //---------------------------------------------
 // - PIXELMAP MAP-TO-MAP/BLIT
 //---------------------------------------------
@@ -1292,7 +1268,7 @@ lua_graphics_blit :: proc "c" (L: ^lua.State) -> c.int {
 
   dest_x := cast(int)lua.L_checkinteger(L, 3)
   dest_y := cast(int)lua.L_checkinteger(L, 4)
-  mode := parse_blend_mode(lua.L_optstring(L, 5, "blend"))
+  mode := parse_blend_mode(lua.L_optstring(L, 5, "blend")) // Updated Default
 
   dst_surf, src_surf := dst_pmap.surface, src_pmap.surface
   
@@ -1304,21 +1280,11 @@ lua_graphics_blit :: proc "c" (L: ^lua.State) -> c.int {
   src_pixels := cast([^]u32)src_surf.pixels
   dst_stride, src_stride := int(dst_surf.pitch) / 4, int(src_surf.pitch) / 4
   
-  // Hoisted loops for cache efficiency
-  if mode == .Replace {
-    for y in start_y..<end_y {
-      src_row, dst_row := y * src_stride, (dest_y + y) * dst_stride
-      for x in start_x..<end_x {
-        dst_pixels[dst_row + (dest_x + x)] = src_pixels[src_row + x]
-      }
-    }
-  } else {
-    for y in start_y..<end_y {
-      src_row, dst_row := y * src_stride, (dest_y + y) * dst_stride
-      for x in start_x..<end_x {
-        src_idx, dst_idx := src_row + x, dst_row + (dest_x + x)
-        dst_pixels[dst_idx] = blend_memory_colors(dst_pixels[dst_idx], src_pixels[src_idx], mode)
-      }
+  for y in start_y..<end_y {
+    src_row, dst_row := y * src_stride, (dest_y + y) * dst_stride
+    for x in start_x..<end_x {
+      src_idx, dst_idx := src_row + x, dst_row + (dest_x + x)
+      dst_pixels[dst_idx] = blend_memory_colors(dst_pixels[dst_idx], src_pixels[src_idx], mode)
     }
   }
   return 0
@@ -1338,7 +1304,7 @@ lua_graphics_blit_region :: proc "c" (L: ^lua.State) -> c.int {
   bh    := cast(int)lua.L_checkinteger(L, 6)
   dst_x := cast(int)lua.L_checkinteger(L, 7)
   dst_y := cast(int)lua.L_checkinteger(L, 8)
-  mode  := parse_blend_mode(lua.L_optstring(L, 9, "blend"))
+  mode  := parse_blend_mode(lua.L_optstring(L, 9, "blend")) // Updated Default
 
   dst_surf, src_surf := dst_pmap.surface, src_pmap.surface
   if bw <= 0 || bh <= 0 do return 0
@@ -1358,20 +1324,11 @@ lua_graphics_blit_region :: proc "c" (L: ^lua.State) -> c.int {
   src_pixels := cast([^]u32)src_surf.pixels
   dst_stride, src_stride := int(dst_surf.pitch) / 4, int(src_surf.pitch) / 4
   
-  if mode == .Replace {
-    for y in 0..<bh {
-      src_row, dst_row := (src_y + y) * src_stride, (dst_y + y) * dst_stride
-      for x in 0..<bw {
-        dst_pixels[dst_row + (dst_x + x)] = src_pixels[src_row + (src_x + x)]
-      }
-    }
-  } else {
-    for y in 0..<bh {
-      src_row, dst_row := (src_y + y) * src_stride, (dst_y + y) * dst_stride
-      for x in 0..<bw {
-        src_idx, dst_idx := src_row + (src_x + x), dst_row + (dst_x + x)
-        dst_pixels[dst_idx] = blend_memory_colors(dst_pixels[dst_idx], src_pixels[src_idx], mode)
-      }
+  for y in 0..<bh {
+    src_row, dst_row := (src_y + y) * src_stride, (dst_y + y) * dst_stride
+    for x in 0..<bw {
+      src_idx, dst_idx := src_row + (src_x + x), dst_row + (dst_x + x)
+      dst_pixels[dst_idx] = blend_memory_colors(dst_pixels[dst_idx], src_pixels[src_idx], mode)
     }
   }
   return 0
@@ -1398,7 +1355,7 @@ lua_graphics_new_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 	}
 	
 	sdl.SetTextureBlendMode(texture, {.BLEND})
-	sdl.SetTextureScaleMode(texture, gfx_ctx.default_scale_mode)
+	sdl.SetTextureScaleMode(texture, Gfx_Ctx.default_scale_mode)
 
 	img := cast(^Image)lua.newuserdata(L, size_of(Image))
 	img^ = Image{
@@ -1676,6 +1633,9 @@ register_graphics_api :: proc(L: ^lua.State) {
 
   lua.pushcfunction(L, lua_graphics_blit_circle)
   lua.setfield(L, -2, cstring("blit_circle"))
+  
+  lua.pushcfunction(L, lua_graphics_blit_circle_pixel_outline)
+  lua.setfield(L, -2, cstring("blit_circle_pixel_outline"))
   
   lua.pushcfunction(L, lua_graphics_blit_circle_outline)
   lua.setfield(L, -2, cstring("blit_circle_outline"))
