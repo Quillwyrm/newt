@@ -24,19 +24,22 @@ free(object)
 
 ## rgba
 
-Constructs a packed 32-bit integer color used by the graphics pipeline. It can parse distinct RGBA values, hex strings, or passthrough an existing packed integer.
+Constructs a packed 32-bit integer color used by the graphics pipeline. It safely parses distinct RGBA values, hex strings, or raw hex integers. Invalid inputs default to solid white (`0xFFFFFFFF`).
 
 ### Usage
 ```lua
 color = rgba(r, g, b, a?)
 -- or
 color = rgba(hex_string)
+-- or
+color = rgba(hex_number)
 ```
 
 ### Arguments
 * `number: r`, `number: g`, `number: b` - Red, green, and blue components (0-255).
 * `number: a` (Optional) - Alpha component (0-255, defaults to 255).
-* `string: hex_string` - A hex color string (e.g., `"#FF00FF"` or `"FF00FF"`).
+* `string: hex_string` - A hex string, with or without `#` (e.g., `"#FF00FF"`, `"FF00FF"`, or `"FF00FF80"`).
+* `number: hex_number` - A raw integer. 24-bit values (e.g., `0xFF00FF`) automatically get full alpha applied. 32-bit values pass through untouched.
 
 ### Returns
 * `number: color` - The packed 32-bit color integer (`0xRRGGBBAA`).
