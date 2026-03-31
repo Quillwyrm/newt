@@ -9,7 +9,7 @@ The goal is a fast, "no bullshit" development experience: drop in your assets, w
 * **Graphics:** Hardware-accelerated 2D rendering with sprite batching and CPU pixelmap rasterization.
 * **Audio:** Real-time 8-bus mixing engine with 3D spatialization and DSP effects.
 * **Input:** Clean state polling and edge detection for keyboard and mouse.
-* **Filesystem:** Sandboxed directory management and file I/O.
+* **Filesystem:** Directory management and file I/O.
 
 ---
 
