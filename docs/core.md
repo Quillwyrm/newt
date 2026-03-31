@@ -8,7 +8,7 @@ The Luagame core API provides fundamental engine primitives. These functions are
 
 ---
 
-### free
+### `free`
 
 Immediately executes the garbage collection metamethod (`__gc`) of an engine userdata object, explicitly reclaiming its backend memory without waiting for the Lua garbage collector.
 
@@ -22,7 +22,7 @@ free(object)
 
 ---
 
-### rgba
+### `rgba`
 
 Constructs a packed 32-bit integer color used by the graphics pipeline. It safely parses distinct RGBA values, hex strings, or raw hex integers. Invalid inputs default to solid white (`0xFFFFFFFF`).
 
