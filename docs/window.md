@@ -1,7 +1,7 @@
 # window
 The Luagame windowing API manages the display context, input state, and OS-level window controls. All functions are available under the global `window` module.
 
-### Functions
+## Functions
 **Lifecycle**
 * [`init`](#windowinit)
 * [`close`](#windowclose)
@@ -28,15 +28,15 @@ The Luagame windowing API manages the display context, input state, and OS-level
 
 ---
 
-## window.init
+# window.init
 Initializes the main window and renderer context.
 
-### Usage
+## Usage
 ```lua
 window.init(width, height, title, flags?)
 ```
 
-### Arguments
+## Arguments
 - `number: width` - Initial window width in pixels.
 - `number: height` - Initial window height in pixels.
 - `string: title` - The window title.
@@ -44,184 +44,184 @@ window.init(width, height, title, flags?)
 
 ---
 
-## window.close
+# window.close
 Closes the window and destroys the rendering context.
 
-### Usage
+## Usage
 ```lua
 window.close()
 ```
 
 ---
 
-## window.should_close
+# window.should_close
 Checks if the user has requested the window to close (e.g., clicking the 'X' button).
 
-### Usage
+## Usage
 ```lua
 running = window.should_close()
 ```
 
-### Returns
+## Returns
 - `boolean: requested` - `true` if a close event is pending.
 
 ---
 
-## window.get_size
+# window.get_size
 Returns the current window dimensions.
 
-### Usage
+## Usage
 ```lua
 w, h = window.get_size()
 ```
 
-### Returns
+## Returns
 - `number: w` - Width in pixels.
 - `number: h` - Height in pixels.
 
 ---
 
-## window.get_position
+# window.get_position
 Returns the window's position on the screen.
 
-### Usage
+## Usage
 ```lua
 x, y = window.get_position()
 ```
 
-### Returns
+## Returns
 - `number: x` - X coordinate.
 - `number: y` - Y coordinate.
 
 ---
 
-## window.set_title
+# window.set_title
 Updates the window title text.
 
-### Usage
+## Usage
 ```lua
 window.set_title(text)
 ```
 
-### Arguments
+## Arguments
 - `string: text` - New title string.
 
 ---
 
-## window.set_size
+# window.set_size
 Sets the window dimensions.
 
-### Usage
+## Usage
 ```lua
 window.set_size(w, h)
 ```
 
-### Arguments
+## Arguments
 - `number: w`
 - `number: h`
 
 ---
 
-## window.set_position
+# window.set_position
 Sets the window position on the screen.
 
-### Usage
+## Usage
 ```lua
 window.set_position(x, y)
 ```
 
-### Arguments
+## Arguments
 - `number: x`
 - `number: y`
 
 ---
 
-## window.maximize
+# window.maximize
 Maximizes the window to fill the screen.
 
-### Usage
+## Usage
 ```lua
 window.maximize()
 ```
 
 ---
 
-## window.minimize
+# window.minimize
 Minimizes the window to the taskbar/dock.
 
-### Usage
+## Usage
 ```lua
 window.minimize()
 ```
 
 ---
 
-## window.set_cursor
+# window.set_cursor
 Sets the system mouse cursor shape.
 
-### Usage
+## Usage
 ```lua
 window.set_cursor(name)
 ```
 
-### Arguments
+## Arguments
 - `string: name` - One of: `"arrow"`, `"ibeam"`, `"wait"`, `"waitarrow"`, `"crosshair"`, `"sizenwse"`, `"sizenesw"`, `"sizewe"`, `"sizens"`, `"sizeall"`, `"no"`, `"hand"`.
 
 ---
 
-## window.cursor_show
+# window.cursor_show
 Shows the mouse cursor.
 
-### Usage
+## Usage
 ```lua
 window.cursor_show()
 ```
 
 ---
 
-## window.cursor_hide
+# window.cursor_hide
 Hides the mouse cursor.
 
-### Usage
+## Usage
 ```lua
 window.cursor_hide()
 ```
 
 ---
 
-## window.cursor_visible
+# window.cursor_visible
 Checks if the cursor is currently visible.
 
-### Usage
+## Usage
 ```lua
 visible = window.cursor_visible()
 ```
 
-### Returns
+## Returns
 - `boolean: visible` - `true` if the cursor is visible.
 
 ---
 
-## window.get_clipboard
+# window.get_clipboard
 Gets the text currently in the OS clipboard.
 
-### Usage
+## Usage
 ```lua
 text = window.get_clipboard()
 ```
 
-### Returns
+## Returns
 - `string: text` - The clipboard content, or `nil` if empty.
 
 ---
 
-## window.set_clipboard
+# window.set_clipboard
 Sets the OS clipboard text.
 
-### Usage
+## Usage
 ```lua
 window.set_clipboard(text)
 ```
 
-### Arguments
+## Arguments
 - `string: text` - The string to copy to the clipboard.
