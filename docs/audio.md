@@ -2,11 +2,11 @@
 
 The Luagame audio API is a real-time mixing engine built on an 8-bus architecture. It supports 3D spatialization, audio streaming for long-form assets, and per-bus DSP effects.
 
-## System Overview
+### System Overview
 - **Mixing Buses**: The engine provides 8 buses (0-7). Bus 0 is the **Master Bus** and outputs directly to the hardware. Buses 1-7 are sub-buses that route into Bus 0 and feature a persistent signal chain: Group -> Delay -> HPF -> LPF.
 - **Handle Safety**: Playback functions return an integer handle. These handles are unique identifiers; if a sound finishes or its slot is reclaimed by the engine, the handle becomes invalid, ensuring that commands sent to "dead" voices fail safely without affecting new sounds.
 
-## Functions
+### Functions
 
 **Engine Configuration**
 * [`config_bus_delay_times`](#audioconfig_bus_delay_times)
@@ -63,141 +63,141 @@ The Luagame audio API is a real-time mixing engine built on an 8-bus architectur
 
 ---
 
-# audio.config_bus_delay_times
+## audio.config_bus_delay_times
 
 Configures the buffer length (echo time) for sub-bus delay nodes. This must be called **before** the engine initializes.
 
-## Usage
+### Usage
 
 ```lua
 audio.config_bus_delay_times(config)
 ```
 
-## Arguments
+### Arguments
 
 * `table: config` - A table mapping bus indices (1-7) to delay times in seconds (e.g., `{ [1] = 0.5, [4] = 2.0 }`).
 
 ---
 
-# audio.set_listener_position
+## audio.set_listener_position
 
 Sets the world-space position of the virtual listener.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_listener_position(x, y)
 ```
 
-## Arguments
+### Arguments
 
 * `number: x` - X coordinate.
 * `number: y` - Y coordinate.
 
 ---
 
-# audio.set_listener_rotation
+## audio.set_listener_rotation
 
 Sets the orientation of the listener in degrees.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_listener_rotation(degrees)
 ```
 
-## Arguments
+### Arguments
 
 * `number: degrees` - Rotation angle.
 
 ---
 
-# audio.set_listener_velocity
+## audio.set_listener_velocity
 
 Sets the velocity of the listener for Doppler effect calculations.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_listener_velocity(vx, vy)
 ```
 
-## Arguments
+### Arguments
 
 * `number: vx` - Velocity on the X axis.
 * `number: vy` - Velocity on the Y axis.
 
 ---
 
-# audio.set_default_falloff
+## audio.set_default_falloff
 
 Sets the global default inner and outer radii for all future 3D playback calls.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_default_falloff(min_px, max_px?)
 ```
 
-## Arguments
+### Arguments
 
 * `number: min_px` - The distance at which volume begins to attenuate.
 * `number: max_px` (Optional) - The distance at which the sound becomes silent.
 
 ---
 
-# audio.set_default_falloff_mode
+## audio.set_default_falloff_mode
 
 Sets the default attenuation curve for future 3D playback calls.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_default_falloff_mode(mode)
 ```
 
-## Arguments
+### Arguments
 
 * `string: mode` - The curve type: `"none"`, `"inverse"`, `"linear"`, or `"exponential"`.
 
 ---
 
-# audio.load_sound
+## audio.load_sound
 
 Loads an audio file into memory as a reusable asset.
 
-## Usage
+### Usage
 
 ```lua
 sound = audio.load_sound(filepath, mode?)
 ```
 
-## Arguments
+### Arguments
 
 * `string: filepath` - Path to the audio file.
 * `string: mode` (Optional) - `"static"` (fully decoded into RAM, default) or `"stream"` (decoded on the fly).
 
-## Returns
+### Returns
 
 * `userdata: sound` - A handle to the sound asset.
 
 ---
 
-# audio.get_sound_info
+## audio.get_sound_info
 
 Returns metadata for a loaded sound asset.
 
-## Usage
+### Usage
 
 ```lua
 path, duration, is_stream = audio.get_sound_info(sound)
 ```
 
-## Arguments
+### Arguments
 
 * `userdata: sound` - The sound asset to inspect.
 
-## Returns
+### Returns
 
 * `string: path` - The source file path.
 * `number: duration` - Length in seconds (0.0 for streams).
@@ -205,17 +205,17 @@ path, duration, is_stream = audio.get_sound_info(sound)
 
 ---
 
-# audio.play
+## audio.play
 
 Starts 2D (non-spatialized) playback of a sound.
 
-## Usage
+### Usage
 
 ```lua
 handle = audio.play(sound, bus, vol?, pitch?, pan?)
 ```
 
-## Arguments
+### Arguments
 
 * `userdata: sound` - The sound asset to play.
 * `number: bus` - The target bus index (0-7).
@@ -223,23 +223,23 @@ handle = audio.play(sound, bus, vol?, pitch?, pan?)
 * `number: pitch` (Optional) - Initial pitch (default 1.0).
 * `number: pan` (Optional) - Initial stereo pan (default 0.0).
 
-## Returns
+### Returns
 
 * `number: handle` - A unique identifier for the playing voice.
 
 ---
 
-# audio.play_at
+## audio.play_at
 
 Starts 3D (spatialized) playback of a sound at a world position.
 
-## Usage
+### Usage
 
 ```lua
 handle = audio.play_at(sound, bus, x, y, vol?, pitch?)
 ```
 
-## Arguments
+### Arguments
 
 * `userdata: sound` - The sound asset to play.
 * `number: bus` - The target bus index (0-7).
@@ -247,91 +247,91 @@ handle = audio.play_at(sound, bus, x, y, vol?, pitch?)
 * `number: vol` (Optional) - Initial volume.
 * `number: pitch` (Optional) - Initial pitch.
 
-## Returns
+### Returns
 
 * `number: handle` - A unique identifier for the playing voice.
 
 ---
 
-# audio.set_voice_volume
+## audio.set_voice_volume
 
 Sets the volume of an active voice.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_voice_volume(handle, volume)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 * `number: volume` - New volume level.
 
 ---
 
-# audio.set_voice_pitch
+## audio.set_voice_pitch
 
 Sets the playback speed of an active voice.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_voice_pitch(handle, pitch)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 * `number: pitch` - New pitch multiplier.
 
 ---
 
-# audio.set_voice_pan
+## audio.set_voice_pan
 
 Sets the stereo panning for an active voice. Calling this disables spatialization for the voice.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_voice_pan(handle, pan)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 * `number: pan` - Panning value (-1.0 to 1.0).
 
 ---
 
-# audio.set_voice_looping
+## audio.set_voice_looping
 
 Enables or disables looping for an active voice.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_voice_looping(handle, is_looping)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 * `boolean: is_looping` - `true` to loop.
 
 ---
 
-# audio.seek_voice
+## audio.seek_voice
 
 Seeks to a specific position within a voice's audio data.
 
-## Usage
+### Usage
 
 ```lua
 audio.seek_voice(handle, offset, unit?)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 * `number: offset` - The target position.
@@ -339,17 +339,17 @@ audio.seek_voice(handle, offset, unit?)
 
 ---
 
-# audio.fade_voice
+## audio.fade_voice
 
 Smoothly transitions a voice's volume over a duration.
 
-## Usage
+### Usage
 
 ```lua
 audio.fade_voice(handle, target_volume, duration)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 * `number: target_volume` - Destination volume level.
@@ -357,21 +357,21 @@ audio.fade_voice(handle, target_volume, duration)
 
 ---
 
-# audio.get_voice_info
+## audio.get_voice_info
 
 Returns the current playback state of a voice.
 
-## Usage
+### Usage
 
 ```lua
 time, duration = audio.get_voice_info(handle)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 
-## Returns
+### Returns
 
 * `number: time` - Current playback position in seconds.
 * `number: duration` - Total length of the sound in seconds.
@@ -379,71 +379,71 @@ time, duration = audio.get_voice_info(handle)
 
 ---
 
-# audio.is_voice_playing
+## audio.is_voice_playing
 
 Checks if a voice is currently active and not paused.
 
-## Usage
+### Usage
 
 ```lua
 playing = audio.is_voice_playing(handle)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 
-## Returns
+### Returns
 
 * `boolean: playing` - `true` if active.
 
 ---
 
-# audio.set_voice_position
+## audio.set_voice_position
 
 Sets the world-space position of an active voice and enables spatialization.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_voice_position(handle, x, y)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 * `number: x`, `number: y` - World coordinates.
 
 ---
 
-# audio.set_voice_velocity
+## audio.set_voice_velocity
 
 Sets the velocity of a voice for Doppler effect calculations.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_voice_velocity(handle, vx, vy)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 * `number: vx`, `number: vy` - Velocity components.
 
 ---
 
-# audio.set_voice_falloff
+## audio.set_voice_falloff
 
 Sets the attenuation radii for a specific voice.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_voice_falloff(handle, min_px, max_px?)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 * `number: min_px` - Inner radius.
@@ -451,110 +451,110 @@ audio.set_voice_falloff(handle, min_px, max_px?)
 
 ---
 
-# audio.set_voice_rolloff
+## audio.set_voice_rolloff
 
 Sets the rolloff factor (intensity of the falloff) for a specific voice.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_voice_rolloff(handle, factor)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 * `number: factor` - Rolloff multiplier.
 
 ---
 
-# audio.set_voice_falloff_mode
+## audio.set_voice_falloff_mode
 
 Sets the attenuation curve for a specific voice.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_voice_falloff_mode(handle, mode)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 * `string: mode` - `"none"`, `"inverse"`, `"linear"`, or `"exponential"`.
 
 ---
 
-# audio.set_voice_pan_mode
+## audio.set_voice_pan_mode
 
 Sets the panning calculation mode for a voice.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_voice_pan_mode(handle, mode)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 * `string: mode` - `"balance"` (default) or `"pan"`.
 
 ---
 
-# audio.pause_voice
+## audio.pause_voice
 
 Pauses playback of a voice.
 
-## Usage
+### Usage
 
 ```lua
 audio.pause_voice(handle)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 
 ---
 
-# audio.resume_voice
+## audio.resume_voice
 
 Resumes playback of a paused voice.
 
-## Usage
+### Usage
 
 ```lua
 audio.resume_voice(handle)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 
 ---
 
-# audio.stop_voice
+## audio.stop_voice
 
 Immediately halts a voice and reclaims its slot.
 
-## Usage
+### Usage
 
 ```lua
 audio.stop_voice(handle)
 ```
 
-## Arguments
+### Arguments
 
 * `number: handle` - The voice identifier.
 
 ---
 
-# audio.stop_all_voices
+## audio.stop_all_voices
 
 Immediately halts and destroys all active voices across the entire engine.
 
-## Usage
+### Usage
 
 ```lua
 audio.stop_all_voices()
@@ -562,68 +562,68 @@ audio.stop_all_voices()
 
 ---
 
-# audio.set_bus_volume
+## audio.set_bus_volume
 
 Sets the volume for an entire mixing bus.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_bus_volume(bus, volume)
 ```
 
-## Arguments
+### Arguments
 
 * `number: bus` - Bus index (0-7).
 * `number: volume` - New volume level.
 
 ---
 
-# audio.set_bus_pitch
+## audio.set_bus_pitch
 
 Sets the playback speed for an entire mixing bus.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_bus_pitch(bus, pitch)
 ```
 
-## Arguments
+### Arguments
 
 * `number: bus` - Bus index (0-7).
 * `number: pitch` - New pitch multiplier.
 
 ---
 
-# audio.set_bus_pan
+## audio.set_bus_pan
 
 Sets the stereo panning for an entire mixing bus.
 
-## Usage
+### Usage
 
 ```lua
 audio.set_bus_pan(bus, pan)
 ```
 
-## Arguments
+### Arguments
 
 * `number: bus` - Bus index (0-7).
 * `number: pan` - Panning value (-1.0 to 1.0).
 
 ---
 
-# audio.fade_bus
+## audio.fade_bus
 
 Smoothly transitions a bus's volume over a duration.
 
-## Usage
+### Usage
 
 ```lua
 audio.fade_bus(bus, target_volume, duration)
 ```
 
-## Arguments
+### Arguments
 
 * `number: bus` - Bus index (0-7).
 * `number: target_volume` - Destination volume.
@@ -631,51 +631,51 @@ audio.fade_bus(bus, target_volume, duration)
 
 ---
 
-# audio.set_bus_lpf
+## audio.set_bus_lpf
 
 Sets the Low-Pass Filter cutoff for a sub-bus (1-7).
 
-## Usage
+### Usage
 
 ```lua
 audio.set_bus_lpf(bus, hz)
 ```
 
-## Arguments
+### Arguments
 
 * `number: bus` - Bus index (1-7).
 * `number: hz` - Frequency cutoff (Range: 10-22000).
 
 ---
 
-# audio.set_bus_hpf
+## audio.set_bus_hpf
 
 Sets the High-Pass Filter cutoff for a sub-bus (1-7).
 
-## Usage
+### Usage
 
 ```lua
 audio.set_bus_hpf(bus, hz)
 ```
 
-## Arguments
+### Arguments
 
 * `number: bus` - Bus index (1-7).
 * `number: hz` - Frequency cutoff (Range: 10-22000).
 
 ---
 
-# audio.set_bus_delay_mix
+## audio.set_bus_delay_mix
 
 Sets the wet/dry balance for the delay effect on a sub-bus (1-7).
 
-## Usage
+### Usage
 
 ```lua
 audio.set_bus_delay_mix(bus, wet, dry?)
 ```
 
-## Arguments
+### Arguments
 
 * `number: bus` - Bus index (1-7).
 * `number: wet` - Level of processed (echo) signal.
@@ -683,65 +683,65 @@ audio.set_bus_delay_mix(bus, wet, dry?)
 
 ---
 
-# audio.set_bus_delay_feedback
+## audio.set_bus_delay_feedback
 
 Sets the feedback (echo tail intensity) for the delay effect on a sub-bus (1-7).
 
-## Usage
+### Usage
 
 ```lua
 audio.set_bus_delay_feedback(bus, amount)
 ```
 
-## Arguments
+### Arguments
 
 * `number: bus` - Bus index (1-7).
 * `number: amount` - Feedback level (Range: 0.0 to 1.0).
 
 ---
 
-# audio.pause_bus
+## audio.pause_bus
 
 Pauses all audio output from a bus.
 
-## Usage
+### Usage
 
 ```lua
 audio.pause_bus(bus)
 ```
 
-## Arguments
+### Arguments
 
 * `number: bus` - Bus index (0-7).
 
 ---
 
-# audio.resume_bus
+## audio.resume_bus
 
 Resumes audio output for a paused bus.
 
-## Usage
+### Usage
 
 ```lua
 audio.resume_bus(bus)
 ```
 
-## Arguments
+### Arguments
 
 * `number: bus` - Bus index (0-7).
 
 ---
 
-# audio.stop_bus
+## audio.stop_bus
 
 Halts a bus and immediately destroys all voices assigned to it.
 
-## Usage
+### Usage
 
 ```lua
 audio.stop_bus(bus)
 ```
 
-## Arguments
+### Arguments
 
 * `number: bus` - Bus index (0-7).

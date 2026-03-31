@@ -18,11 +18,6 @@ The engine expects a specific file layout relative to the executable:
   ├── luagame.exe
   ├── SDL3.dll
   ├── SDL3_ttf.dll
-  ├── lua/
-  │    └── main.lua
-  └── fonts/
-       ├── regular.ttf
-       ├── bold.ttf
-       ├── italic.ttf
-       └── bolditalic.ttf
+  └── lua/
+       └── main.lua
 ```
