@@ -1,350 +1,233 @@
-# monotome.window
-The windowing API for Monotome, handling the main display context, sizing, positioning, cursors, and clipboard.
+# window
+The Luagame windowing API manages the display context, input state, and OS-level window controls. All functions are available under the global `window` module.
 
 ### Functions
 **Lifecycle**
-* [`init`](#monotomewindowinit)
-* [`close`](#monotomewindowclose)
-* [`should_close`](#monotomewindowshould_close)
+* [`init`](#windowinit)
+* [`close`](#windowclose)
+* [`should_close`](#windowshould_close)
 
 **Getters**
-* [`size`](#monotomewindowsize)
-* [`grid_size`](#monotomewindowgrid_size)
-* [`cell_size`](#monotomewindowcell_size)
-* [`position`](#monotomewindowposition)
-* [`metrics`](#monotomewindowmetrics)
+* [`get_size`](#windowget_size)
+* [`get_position`](#windowget_position)
 
 **Setters**
-* [`set_title`](#monotomewindowset_title)
-* [`set_size`](#monotomewindowset_size)
-* [`set_position`](#monotomewindowset_position)
-* [`maximize`](#monotomewindowmaximize)
-* [`minimize`](#monotomewindowminimize)
+* [`set_title`](#windowset_title)
+* [`set_size`](#windowset_size)
+* [`set_position`](#windowset_position)
+* [`maximize`](#windowmaximize)
+* [`minimize`](#windowminimize)
 
 **Cursor & Clipboard**
-* [`set_cursor`](#monotomewindowset_cursor)
-* [`cursor_show`](#monotomewindowcursor_show)
-* [`cursor_hide`](#monotomewindowcursor_hide)
-* [`cursor_visible`](#monotomewindowcursor_visible)
-* [`get_clipboard`](#monotomewindowget_clipboard)
-* [`set_clipboard`](#monotomewindowset_clipboard)
+* [`set_cursor`](#windowset_cursor)
+* [`cursor_show`](#windowcursor_show)
+* [`cursor_hide`](#windowcursor_hide)
+* [`cursor_visible`](#windowcursor_visible)
+* [`get_clipboard`](#windowget_clipboard)
+* [`set_clipboard`](#windowset_clipboard)
 
 ---
 
-## monotome.window.init
+## window.init
 Initializes the main window and renderer context.
 
 ### Usage
 ```lua
-monotome.window.init(width, height, title, flags?)
+window.init(width, height, title, flags?)
 ```
 
 ### Arguments
-- `number: width` - Window width in pixels.
-- `number: height` - Window height in pixels.
-- `string: title` - Window header title.
-- `table: flags` - Optional list of config strings (`"resizable"`, `"fullscreen"`, `"borderless"`).
+- `number: width` - Initial window width in pixels.
+- `number: height` - Initial window height in pixels.
+- `string: title` - The window title.
+- `table: flags` (Optional) - A list of string flags: `{"fullscreen", "borderless", "resizable"}`.
 
 ### Returns
 None.
 
 ---
 
-## monotome.window.close
-Requests the engine to close the window and quit. This sets a flag; the actual exit happens at the end of the current frame.
+## window.close
+Closes the window and destroys the rendering context.
 
 ### Usage
 ```lua
-monotome.window.close()
+window.close()
 ```
-
-### Arguments
-None.
 
 ### Returns
 None.
 
 ---
 
-## monotome.window.should_close
-Checks if a quit request has been issued (e.g. by the OS window close button or `window.close()`).
+## window.should_close
+Checks if the user has requested the window to close (e.g., clicking the 'X' button).
 
 ### Usage
 ```lua
-closing = monotome.window.should_close()
+running = window.should_close()
 ```
 
-### Arguments
-None.
-
 ### Returns
-- `boolean: closing` - `true` if the app is scheduled to exit.
+- `boolean: requested` - `true` if a close event is pending.
 
 ---
 
-## monotome.window.size
-Gets the current window dimensions in pixels.
+## window.get_size
+Returns the current window dimensions.
 
 ### Usage
 ```lua
-w, h = monotome.window.size()
+w, h = window.get_size()
 ```
 
-### Arguments
-None.
-
 ### Returns
-- `number: w` - Window width in pixels.
-- `number: h` - Window height in pixels.
+- `number: w` - Width in pixels.
+- `number: h` - Height in pixels.
 
 ---
 
-## monotome.window.grid_size
-Gets the current window capacity in whole text cells.
+## window.get_position
+Returns the window's position on the screen.
 
 ### Usage
 ```lua
-cols, rows = monotome.window.grid_size()
+x, y = window.get_position()
 ```
 
-### Arguments
-None.
-
 ### Returns
-- `number: cols` - Number of columns that fit in the window.
-- `number: rows` - Number of rows that fit in the window.
+- `number: x` - X coordinate.
+- `number: y` - Y coordinate.
 
 ---
 
-## monotome.window.cell_size
-Gets the current dimensions of a single character cell in pixels.
+## window.set_title
+Updates the window title text.
 
 ### Usage
 ```lua
-cw, ch = monotome.window.cell_size()
+window.set_title(text)
 ```
 
 ### Arguments
-None.
-
-### Returns
-- `number: cw` - Cell width in pixels.
-- `number: ch` - Cell height in pixels.
+- `string: text` - New title string.
 
 ---
 
-## monotome.window.position
-Gets the window's top-left coordinates on the desktop.
+## window.set_size
+Sets the window dimensions.
 
 ### Usage
 ```lua
-x, y = monotome.window.position()
+window.set_size(w, h)
 ```
 
 ### Arguments
-None.
-
-### Returns
-- `number: x` - Desktop X coordinate.
-- `number: y` - Desktop Y coordinate.
+- `number: w`
+- `number: h`
 
 ---
 
-## monotome.window.metrics
-Efficiently retrieves all window metric data in a single call.
+## window.set_position
+Sets the window position on the screen.
 
 ### Usage
 ```lua
-cols, rows, cw, ch, w, h, x, y = monotome.window.metrics()
+window.set_position(x, y)
 ```
 
 ### Arguments
-None.
-
-### Returns
-1. `number: cols` - Grid columns.
-2. `number: rows` - Grid rows.
-3. `number: cw` - Cell width.
-4. `number: ch` - Cell height.
-5. `number: w` - Window width.
-6. `number: h` - Window height.
-7. `number: x` - Window X pos.
-8. `number: y` - Window Y pos.
+- `number: x`
+- `number: y`
 
 ---
 
-## monotome.window.set_title
-Updates the window header title.
-
-### Usage
-```lua
-monotome.window.set_title(title)
-```
-
-### Arguments
-- `string: title` - The new window title.
-
-### Returns
-None.
-
----
-
-## monotome.window.set_size
-Sets the window dimensions in pixels.
-
-### Usage
-```lua
-monotome.window.set_size(width, height)
-```
-
-### Arguments
-- `number: width` - New width in pixels.
-- `number: height` - New height in pixels.
-
-### Returns
-None.
-
----
-
-## monotome.window.set_position
-Sets the window position on the desktop.
-
-### Usage
-```lua
-monotome.window.set_position(x, y)
-```
-
-### Arguments
-- `number: x` - New X coordinate.
-- `number: y` - New Y coordinate.
-
-### Returns
-None.
-
----
-
-## monotome.window.maximize
+## window.maximize
 Maximizes the window to fill the screen.
 
 ### Usage
 ```lua
-monotome.window.maximize()
+window.maximize()
 ```
-
-### Arguments
-None.
-
-### Returns
-None.
 
 ---
 
-## monotome.window.minimize
+## window.minimize
 Minimizes the window to the taskbar/dock.
 
 ### Usage
 ```lua
-monotome.window.minimize()
+window.minimize()
 ```
-
-### Arguments
-None.
-
-### Returns
-None.
 
 ---
 
-## monotome.window.set_cursor
+## window.set_cursor
 Sets the system mouse cursor shape.
 
 ### Usage
 ```lua
-monotome.window.set_cursor(name)
+window.set_cursor(name)
 ```
 
 ### Arguments
 - `string: name` - One of: `"arrow"`, `"ibeam"`, `"wait"`, `"waitarrow"`, `"crosshair"`, `"sizenwse"`, `"sizenesw"`, `"sizewe"`, `"sizens"`, `"sizeall"`, `"no"`, `"hand"`.
 
-### Returns
-None.
-
 ---
 
-## monotome.window.cursor_show
+## window.cursor_show
 Shows the mouse cursor.
 
 ### Usage
 ```lua
-monotome.window.cursor_show()
+window.cursor_show()
 ```
-
-### Arguments
-None.
-
-### Returns
-None.
 
 ---
 
-## monotome.window.cursor_hide
+## window.cursor_hide
 Hides the mouse cursor.
 
 ### Usage
 ```lua
-monotome.window.cursor_hide()
+window.cursor_hide()
 ```
-
-### Arguments
-None.
-
-### Returns
-None.
 
 ---
 
-## monotome.window.cursor_visible
+## window.cursor_visible
 Checks if the cursor is currently visible.
 
 ### Usage
 ```lua
-visible = monotome.window.cursor_visible()
+visible = window.cursor_visible()
 ```
-
-### Arguments
-None.
 
 ### Returns
 - `boolean: visible` - `true` if the cursor is visible.
 
 ---
 
-## monotome.window.get_clipboard
+## window.get_clipboard
 Gets the text currently in the OS clipboard.
 
 ### Usage
 ```lua
-text = monotome.window.get_clipboard()
+text = window.get_clipboard()
 ```
 
-### Arguments
-None.
-
 ### Returns
-- `string: text` - The clipboard content (or empty string).
+- `string: text` - The clipboard content, or `nil` if empty.
 
 ---
 
-## monotome.window.set_clipboard
+## window.set_clipboard
 Sets the OS clipboard text.
 
 ### Usage
 ```lua
-monotome.window.set_clipboard(text)
+window.set_clipboard(text)
 ```
 
 ### Arguments
-- `string: text` - The text to copy to the clipboard. Must not contain NUL bytes.
-
-### Returns
-None.
+- `string: text` - The string to copy to the clipboard.

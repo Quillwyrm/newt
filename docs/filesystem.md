@@ -1,95 +1,78 @@
-# monotome.filesystem
+# filesystem
 
-The OS filesystem API for Monotome, providing access to the process working directory, launch arguments, directory listing, and basic file IO.
+The Luagame filesystem API provides access to the process environment, directory management, and basic file IO. All functions are available under the global `filesystem` module.
 
 ### Functions
 
-**Roots / Startup**
+**Roots / Environment**
 
-* [`resource_dir`](#monotomefilesystemresource_dir)
-* [`working_dir`](#monotomefilesystemworking_dir)
-* [`set_working_dir`](#monotomefilesystemset_working_dir)
-* [`args`](#monotomefilesystemargs)
+* [`get_resource_dir`](#filesystemget_resource_dir)
+* [`get_working_dir`](#filesystemget_working_dir)
+* [`set_working_dir`](#filesystemset_working_dir)
+* [`get_args`](#filesystemget_args)
 
-**Directory**
+**Directory Management**
 
-* [`list_dir`](#monotomefilesystemlist_dir)
-* [`info`](#monotomefilesysteminfo)
+* [`list_dir`](#filesystemlist_dir)
+* [`info`](#filesysteminfo)
+* [`mkdir`](#filesystemmkdir)
 
-**Files**
+**File Operations**
 
-* [`read_file`](#monotomefilesystemread_file)
-* [`write_file`](#monotomefilesystemwrite_file)
-
-**Mutations**
-
-* [`mkdir`](#monotomefilesystemmkdir)
-* [`rename`](#monotomefilesystemrename)
-* [`remove`](#monotomefilesystemremove)
+* [`read_file`](#filesystemread_file)
+* [`write_file`](#filesystemwrite_file)
+* [`rename`](#filesystemrename)
+* [`remove`](#filesystemremove)
 
 ---
 
-## monotome.filesystem.resource_dir
+## filesystem.get_resource_dir
 
-Returns the absolute directory containing the engine’s bundled runtime files (the folder that contains `lua/` and `fonts/` next to the executable).
+Returns the absolute directory containing the Luagame executable. Use this to locate bundled assets like scripts and fonts relative to the binary.
 
 ### Usage
 
 ```lua
-path = monotome.filesystem.resource_dir()
--- or
-path, err = monotome.filesystem.resource_dir()
+path, err = filesystem.get_resource_dir()
 ```
-
-### Arguments
-
-None.
 
 ### Returns
 
-* `string: path` - Absolute resource directory.
+* `string: path` - Absolute directory of the executable.
 * On failure: `nil, string: err`
 
 ---
 
-## monotome.filesystem.working_dir
+## filesystem.get_working_dir
 
-Returns the process current working directory (CWD). Relative paths passed to filesystem calls are resolved from this directory by the OS.
+Returns the current working directory (CWD) of the process. Relative paths in other filesystem calls are resolved from this location.
 
 ### Usage
 
 ```lua
-path = monotome.filesystem.working_dir()
--- or
-path, err = monotome.filesystem.working_dir()
+path, err = filesystem.get_working_dir()
 ```
-
-### Arguments
-
-None.
 
 ### Returns
 
-* `string: path` - Absolute working directory.
+* `string: path` - The absolute CWD.
 * On failure: `nil, string: err`
 
 ---
 
-## monotome.filesystem.set_working_dir
+## filesystem.set_working_dir
 
-Sets the process current working directory (CWD). This is a global side-effect: it changes how the OS resolves relative paths for the whole program.
+Sets the current working directory (CWD) for the process. This is a global side-effect affecting how the OS resolves relative paths.
 
 ### Usage
 
 ```lua
-ok = monotome.filesystem.set_working_dir(path)
--- or
-ok, err = monotome.filesystem.set_working_dir(path)
+ok, err = filesystem.set_working_dir(path)
 ```
 
 ### Arguments
 
-* `string: path` - New working directory.
+* `string: path` - The new directory path to set.
 
 ### Returns
 
@@ -98,123 +81,104 @@ ok, err = monotome.filesystem.set_working_dir(path)
 
 ---
 
-## monotome.filesystem.args
+## filesystem.get_args
 
-Returns the launch arguments passed to the program, excluding the executable path (argv0). This is typically used to open files when launching via CLI or OS “Open with…”.
+Returns the command-line arguments passed to the program. This list excludes the executable path (`argv[0]`), providing only user-supplied arguments.
 
 ### Usage
 
 ```lua
-args = monotome.filesystem.args()
+args = filesystem.get_args()
 ```
-
-### Arguments
-
-None.
 
 ### Returns
 
-* `table: args` - Array of strings (`args[1]..args[n]`).
+* `table: args` - An array of strings.
 
 ---
 
-## monotome.filesystem.list_dir
+## filesystem.list_dir
 
-Lists the entries in a directory.
+Lists the entries within a specified directory.
 
 ### Usage
 
 ```lua
-entries = monotome.filesystem.list_dir(path)
--- or
-entries, err = monotome.filesystem.list_dir(path)
+entries, err = filesystem.list_dir(path)
 ```
 
 ### Arguments
 
-* `string: path` - Directory path (absolute or relative).
+* `string: path` - The directory to list.
 
 ### Returns
 
-* `table: entries` - Array of entry tables:
-
-  * `string: name` - Base name only (no path prefix).
+* `table: entries` - An array of entry tables:
+  * `string: name` - The name of the file or directory.
   * `string: kind` - `"file"`, `"dir"`, or `"other"`.
 * On failure: `nil, string: err`
 
-### Notes
-
-* `"."` and `".."` are not included.
-* Ordering is unspecified; sort in Lua if needed.
-
 ---
 
-## monotome.filesystem.info
+## filesystem.info
 
-Returns basic information about a path.
+Returns metadata for a specific path.
 
 ### Usage
 
 ```lua
-info = monotome.filesystem.info(path)
--- or
-info, err = monotome.filesystem.info(path)
+stats, err = filesystem.info(path)
 ```
 
 ### Arguments
 
-* `string: path` - Path to inspect.
+* `string: path` - The path to inspect.
 
 ### Returns
 
-* `table: info`
-
+* `table: stats`:
   * `string: kind` - `"file"`, `"dir"`, or `"other"`.
-  * `number: size` - File size in bytes (meaningful for `"file"`).
-  * `number: modified_time` - Unix timestamp in seconds.
+  * `number: size` - Size in bytes.
+  * `number: modified_time` - Last modification as a Unix timestamp.
 * On failure: `nil, string: err`
 
 ---
 
-## monotome.filesystem.read_file
+## filesystem.read_file
 
-Reads an entire file into a Lua string.
+Reads the entire contents of a file into a string.
 
 ### Usage
 
 ```lua
-data = monotome.filesystem.read_file(path)
--- or
-data, err = monotome.filesystem.read_file(path)
+data, err = filesystem.read_file(path)
 ```
 
 ### Arguments
 
-* `string: path` - File path.
+* `string: path` - The file to read.
 
 ### Returns
 
-* `string: data` - File contents (byte-accurate).
+* `string: data` - The file contents as a raw byte string.
 * On failure: `nil, string: err`
 
 ---
 
-## monotome.filesystem.write_file
+## filesystem.write_file
 
-Writes a Lua string to a file. Creates the file if missing and overwrites/truncates if it exists.
+Writes a string to a file. Creates the file if missing and overwrites/truncates it if it exists.
 
 ### Usage
 
 ```lua
-ok = monotome.filesystem.write_file(path, data)
--- or
-ok, err = monotome.filesystem.write_file(path, data)
+ok, err = filesystem.write_file(path, data)
 ```
 
 ### Arguments
 
-* `string: path` - File path.
-* `string: data` - Data to write.
+* `string: path` - The destination path.
+* `string: data` - The string data to write.
 
 ### Returns
 
@@ -223,21 +187,19 @@ ok, err = monotome.filesystem.write_file(path, data)
 
 ---
 
-## monotome.filesystem.mkdir
+## filesystem.mkdir
 
-Creates a directory (single-level).
+Creates a new directory.
 
 ### Usage
 
 ```lua
-ok = monotome.filesystem.mkdir(path)
--- or
-ok, err = monotome.filesystem.mkdir(path)
+ok, err = filesystem.mkdir(path)
 ```
 
 ### Arguments
 
-* `string: path` - Directory path.
+* `string: path` - The directory path to create.
 
 ### Returns
 
@@ -246,16 +208,14 @@ ok, err = monotome.filesystem.mkdir(path)
 
 ---
 
-## monotome.filesystem.rename
+## filesystem.rename
 
-Renames (or moves) a file or directory.
+Renames or moves a file or directory.
 
 ### Usage
 
 ```lua
-ok = monotome.filesystem.rename(old_path, new_path)
--- or
-ok, err = monotome.filesystem.rename(old_path, new_path)
+ok, err = filesystem.rename(old_path, new_path)
 ```
 
 ### Arguments
@@ -270,16 +230,14 @@ ok, err = monotome.filesystem.rename(old_path, new_path)
 
 ---
 
-## monotome.filesystem.remove
+## filesystem.remove
 
-Removes a file or an empty directory.
+Deletes a file or an empty directory.
 
 ### Usage
 
 ```lua
-ok = monotome.filesystem.remove(path)
--- or
-ok, err = monotome.filesystem.remove(path)
+ok, err = filesystem.remove(path)
 ```
 
 ### Arguments
@@ -290,4 +248,3 @@ ok, err = monotome.filesystem.remove(path)
 
 * `boolean: ok` - `true` on success.
 * On failure: `false, string: err`
-
