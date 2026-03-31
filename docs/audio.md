@@ -63,7 +63,7 @@ The Luagame audio API is a real-time mixing engine built on an 8-bus architectur
 
 ---
 
-### audio.config_bus_delay_times
+### config_bus_delay_times
 
 Configures the buffer length (echo time) for sub-bus delay nodes. This must be called **before** the engine initializes.
 
@@ -79,7 +79,7 @@ audio.config_bus_delay_times(config)
 
 ---
 
-### audio.set_listener_position
+### set_listener_position
 
 Sets the world-space position of the virtual listener.
 
@@ -96,7 +96,7 @@ audio.set_listener_position(x, y)
 
 ---
 
-### audio.set_listener_rotation
+### set_listener_rotation
 
 Sets the orientation of the listener in degrees.
 
@@ -112,7 +112,7 @@ audio.set_listener_rotation(degrees)
 
 ---
 
-### audio.set_listener_velocity
+### set_listener_velocity
 
 Sets the velocity of the listener for Doppler effect calculations.
 
@@ -129,7 +129,7 @@ audio.set_listener_velocity(vx, vy)
 
 ---
 
-### audio.set_default_falloff
+### set_default_falloff
 
 Sets the global default inner and outer radii for all future 3D playback calls.
 
@@ -146,7 +146,7 @@ audio.set_default_falloff(min_px, max_px?)
 
 ---
 
-### audio.set_default_falloff_mode
+### set_default_falloff_mode
 
 Sets the default attenuation curve for future 3D playback calls.
 
@@ -162,7 +162,7 @@ audio.set_default_falloff_mode(mode)
 
 ---
 
-### audio.load_sound
+### load_sound
 
 Loads an audio file into memory as a reusable asset.
 
@@ -183,7 +183,7 @@ sound = audio.load_sound(filepath, mode?)
 
 ---
 
-### audio.get_sound_info
+### get_sound_info
 
 Returns metadata for a loaded sound asset.
 
@@ -205,7 +205,7 @@ path, duration, is_stream = audio.get_sound_info(sound)
 
 ---
 
-### audio.play
+### play
 
 Starts 2D (non-spatialized) playback of a sound.
 
@@ -229,7 +229,7 @@ handle = audio.play(sound, bus, vol?, pitch?, pan?)
 
 ---
 
-### audio.play_at
+### play_at
 
 Starts 3D (spatialized) playback of a sound at a world position.
 
@@ -253,7 +253,7 @@ handle = audio.play_at(sound, bus, x, y, vol?, pitch?)
 
 ---
 
-### audio.set_voice_volume
+### set_voice_volume
 
 Sets the volume of an active voice.
 
@@ -270,7 +270,7 @@ audio.set_voice_volume(handle, volume)
 
 ---
 
-### audio.set_voice_pitch
+### set_voice_pitch
 
 Sets the playback speed of an active voice.
 
@@ -287,7 +287,7 @@ audio.set_voice_pitch(handle, pitch)
 
 ---
 
-### audio.set_voice_pan
+### set_voice_pan
 
 Sets the stereo panning for an active voice. Calling this disables spatialization for the voice.
 
@@ -304,7 +304,7 @@ audio.set_voice_pan(handle, pan)
 
 ---
 
-### audio.set_voice_looping
+### set_voice_looping
 
 Enables or disables looping for an active voice.
 
@@ -321,7 +321,7 @@ audio.set_voice_looping(handle, is_looping)
 
 ---
 
-### audio.seek_voice
+### seek_voice
 
 Seeks to a specific position within a voice's audio data.
 
@@ -339,7 +339,7 @@ audio.seek_voice(handle, offset, unit?)
 
 ---
 
-### audio.fade_voice
+### fade_voice
 
 Smoothly transitions a voice's volume over a duration.
 
@@ -357,7 +357,7 @@ audio.fade_voice(handle, target_volume, duration)
 
 ---
 
-### audio.get_voice_info
+### get_voice_info
 
 Returns the current playback state of a voice.
 
@@ -379,7 +379,7 @@ time, duration = audio.get_voice_info(handle)
 
 ---
 
-### audio.is_voice_playing
+### is_voice_playing
 
 Checks if a voice is currently active and not paused.
 
@@ -399,7 +399,7 @@ playing = audio.is_voice_playing(handle)
 
 ---
 
-### audio.set_voice_position
+### set_voice_position
 
 Sets the world-space position of an active voice and enables spatialization.
 
@@ -416,7 +416,7 @@ audio.set_voice_position(handle, x, y)
 
 ---
 
-### audio.set_voice_velocity
+### set_voice_velocity
 
 Sets the velocity of a voice for Doppler effect calculations.
 
@@ -433,7 +433,7 @@ audio.set_voice_velocity(handle, vx, vy)
 
 ---
 
-### audio.set_voice_falloff
+### set_voice_falloff
 
 Sets the attenuation radii for a specific voice.
 
@@ -451,7 +451,7 @@ audio.set_voice_falloff(handle, min_px, max_px?)
 
 ---
 
-### audio.set_voice_rolloff
+### set_voice_rolloff
 
 Sets the rolloff factor (intensity of the falloff) for a specific voice.
 
@@ -468,7 +468,7 @@ audio.set_voice_rolloff(handle, factor)
 
 ---
 
-### audio.set_voice_falloff_mode
+### set_voice_falloff_mode
 
 Sets the attenuation curve for a specific voice.
 
@@ -485,7 +485,7 @@ audio.set_voice_falloff_mode(handle, mode)
 
 ---
 
-### audio.set_voice_pan_mode
+### set_voice_pan_mode
 
 Sets the panning calculation mode for a voice.
 
@@ -502,7 +502,7 @@ audio.set_voice_pan_mode(handle, mode)
 
 ---
 
-### audio.pause_voice
+### pause_voice
 
 Pauses playback of a voice.
 
@@ -518,7 +518,7 @@ audio.pause_voice(handle)
 
 ---
 
-### audio.resume_voice
+### resume_voice
 
 Resumes playback of a paused voice.
 
@@ -534,7 +534,7 @@ audio.resume_voice(handle)
 
 ---
 
-### audio.stop_voice
+### stop_voice
 
 Immediately halts a voice and reclaims its slot.
 
@@ -550,7 +550,7 @@ audio.stop_voice(handle)
 
 ---
 
-### audio.stop_all_voices
+### stop_all_voices
 
 Immediately halts and destroys all active voices across the entire engine.
 
@@ -562,7 +562,7 @@ audio.stop_all_voices()
 
 ---
 
-### audio.set_bus_volume
+### set_bus_volume
 
 Sets the volume for an entire mixing bus.
 
@@ -579,7 +579,7 @@ audio.set_bus_volume(bus, volume)
 
 ---
 
-### audio.set_bus_pitch
+### set_bus_pitch
 
 Sets the playback speed for an entire mixing bus.
 
@@ -596,7 +596,7 @@ audio.set_bus_pitch(bus, pitch)
 
 ---
 
-### audio.set_bus_pan
+### set_bus_pan
 
 Sets the stereo panning for an entire mixing bus.
 
@@ -613,7 +613,7 @@ audio.set_bus_pan(bus, pan)
 
 ---
 
-### audio.fade_bus
+### fade_bus
 
 Smoothly transitions a bus's volume over a duration.
 
@@ -631,7 +631,7 @@ audio.fade_bus(bus, target_volume, duration)
 
 ---
 
-### audio.set_bus_lpf
+### set_bus_lpf
 
 Sets the Low-Pass Filter cutoff for a sub-bus (1-7).
 
@@ -648,7 +648,7 @@ audio.set_bus_lpf(bus, hz)
 
 ---
 
-### audio.set_bus_hpf
+### set_bus_hpf
 
 Sets the High-Pass Filter cutoff for a sub-bus (1-7).
 
@@ -665,7 +665,7 @@ audio.set_bus_hpf(bus, hz)
 
 ---
 
-### audio.set_bus_delay_mix
+### set_bus_delay_mix
 
 Sets the wet/dry balance for the delay effect on a sub-bus (1-7).
 
@@ -683,7 +683,7 @@ audio.set_bus_delay_mix(bus, wet, dry?)
 
 ---
 
-### audio.set_bus_delay_feedback
+### set_bus_delay_feedback
 
 Sets the feedback (echo tail intensity) for the delay effect on a sub-bus (1-7).
 
@@ -700,7 +700,7 @@ audio.set_bus_delay_feedback(bus, amount)
 
 ---
 
-### audio.pause_bus
+### pause_bus
 
 Pauses all audio output from a bus.
 
@@ -716,7 +716,7 @@ audio.pause_bus(bus)
 
 ---
 
-### audio.resume_bus
+### resume_bus
 
 Resumes audio output for a paused bus.
 
@@ -732,7 +732,7 @@ audio.resume_bus(bus)
 
 ---
 
-### audio.stop_bus
+### stop_bus
 
 Halts a bus and immediately destroys all voices assigned to it.
 
