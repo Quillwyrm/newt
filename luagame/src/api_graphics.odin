@@ -178,7 +178,7 @@ draw_image_pixels :: proc(tex: ^sdl.Texture, src_rect: ^sdl.FRect, x, y, w, h: f
   }
 
   // Draw
-  sdl.RenderTextureRotated(Renderer, tex, src_rect, &dst, f64(p.rotation), sdl.FPoint{pivot.x, pivot.y}, .NONE)
+  sdl.RenderTextureRotated(Renderer, tex, src_rect, &dst, f64(p.rotation), &sdl.FPoint{pivot.x, pivot.y}, .NONE)
 
   // Consume the transform
   check_transform_consumption()
@@ -566,23 +566,28 @@ lua_graphics_end_transform_group :: proc "c" (L: ^lua.State) -> c.int {
 // PIXELMAP API
 //---------------------------------------------
 // Valid Blend Modes: "replace", "blend", "add", "multiply", "erase", "mask"
+// Optional colors default to 0xFFFFFFFF (White).
 
 // -- IO & Allocation
-// .load_pixelmap(path: string) -> pmap, w, h | nil, err
 // .new_pixelmap(w, h: number) -> pmap
+// .load_pixelmap(path: string) -> pmap, w, h | nil, err
 // .get_pixelmap_size(pmap) -> w, h
 // .save_pixelmap(pmap, path: string) -> ok, err?
 
 // -- Atomic Math & Queries
-// .pixelmap_get_pixel(pmap, x, y: number) -> color_u32
 // .pixelmap_set_pixel(pmap, x, y: number, color: u32)
+// .pixelmap_get_pixel(pmap, x, y: number) -> color_u32
+// .pixelmap_flood_fill(pmap, x, y: number, color: u32)
 // .pixelmap_raycast(pmap, x1, y1, x2, y2: number) -> hit(bool), hx, hy, color_u32
 
 // -- Geometric Blitting (CPU Shapes)
-// .blit_rect(pmap, x, y, w, h: number, color: u32, [mode: string = "replace"])
-// .blit_circle(pmap, cx, cy, radius: number, color: u32, [mode: string = "replace"])
-// .blit_line(pmap, x1, y1, x2, y2: number, color: u32, [mode: string = "replace"])          // 1px thick
-// .blit_capsule(pmap, x1, y1, x2, y2, radius: number, color: u32, [mode: string = "replace"]) // Thick rounded line
+// .blit_line(pmap, x1, y1, x2, y2: number, [color: u32], [mode: string = "blend"])                      // 1px thick (Bresenham)
+// .blit_rect(pmap, x, y, w, h: number, [color: u32], [mode: string = "blend"])                          // Solid fill
+// .blit_triangle(pmap, x1, y1, x2, y2, x3, y3: number, [color: u32], [mode: string = "blend"])          // Solid fill
+// .blit_circle(pmap, cx, cy, radius: number, [color: u32], [mode: string = "blend"])                    // Solid fill (Float)
+// .blit_circle_outline(pmap, cx, cy, radius, thickness: number, [color: u32], [mode: string = "blend"]) // Variable thickness donut (Float)
+// .blit_circle_pixel_outline(pmap, cx, cy, radius: number, [color: u32], [mode: string = "blend"])      // 1px thick (Bresenham)
+// .blit_capsule(pmap, x1, y1, x2, y2, radius: number, [color: u32], [mode: string = "blend"])           // Thick rounded line (Float)
 
 // -- Array-to-Array Blitting (CPU Maps)
 // .blit(dst, src, dx, dy: number, [mode: string = "blend"]) 
@@ -593,9 +598,9 @@ lua_graphics_end_transform_group :: proc "c" (L: ^lua.State) -> c.int {
 // .update_image_from_pixelmap(img, pmap, [dx, dy: number = 0])
 // .update_image_region_from_pixelmap(img, pmap, sx, sy, w, h, dx, dy)
 
-// -- FFI
-// .get_pixelmap_cptr(pmap) 
-// .pixelmap_clone(pmap)
+// -- FFI & Memory
+// .get_pixelmap_cptr(pmap) -> lightuserdata (raw pixels pointer)
+// .pixelmap_clone(pmap) -> new_pmap
 
 //---------------------------------------------
 // - PIXELMAP IO
@@ -1052,6 +1057,133 @@ lua_graphics_blit_rect :: proc "c" (L: ^lua.State) -> c.int {
   return 0
 }
 
+// lua_graphics_blit_triangle implements: graphics.blit_triangle(pmap, x1, y1, x2, y2, x3, y3, [color], [mode])
+lua_graphics_blit_triangle :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  x1 := cast(f32)lua.L_checknumber(L, 2)
+  y1 := cast(f32)lua.L_checknumber(L, 3)
+  x2 := cast(f32)lua.L_checknumber(L, 4)
+  y2 := cast(f32)lua.L_checknumber(L, 5)
+  x3 := cast(f32)lua.L_checknumber(L, 6)
+  y3 := cast(f32)lua.L_checknumber(L, 7)
+  
+  color_u32 := cast(u32)lua.L_optinteger(L, 8, -1)
+  mode := parse_blend_mode(lua.L_optstring(L, 9, "blend"))
+
+  surf := pmap.surface
+  mem_color := u32_rgba_to_abgr(color_u32)
+
+  // Find the extreme points for the bounding box
+  min_x := min(x1, min(x2, x3))
+  min_y := min(y1, min(y2, y3))
+  max_x := max(x1, max(x2, x3))
+  max_y := max(y1, max(y2, y3))
+
+  start_x, start_y, end_x, end_y, ok := get_clipped_bounds(surf, min_x, min_y, max_x, max_y)
+  if !ok do return 0
+
+  pixels := cast([^]u32)surf.pixels
+  stride := int(surf.pitch) / 4
+
+  for y_px in start_y..<end_y {
+    row_idx := y_px * stride
+    py := f32(y_px) + 0.5 // Sample at pixel center
+    
+    for x_px in start_x..<end_x {
+      px := f32(x_px) + 0.5
+      
+      // Calculate 2D cross products (Edge Equations)
+      w0 := (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
+      w1 := (x3 - x2) * (py - y2) - (y3 - y2) * (px - x2)
+      w2 := (x1 - x3) * (py - y3) - (y1 - y3) * (px - x3)
+
+      // If the pixel is on the same side of all three edges, it is inside the triangle.
+      // Checking both >= 0 and <= 0 handles both Clockwise and Counter-Clockwise vertex winding.
+      if (w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0) || (w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0) {
+        idx := row_idx + x_px
+        pixels[idx] = blend_memory_colors(pixels[idx], mem_color, mode)
+      }
+    }
+  }
+  
+  return 0
+}
+
+// lua_graphics_blit_line implements: graphics.blit_line(pmap, x1, y1, x2, y2, [color], [mode])
+lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  x0 := cast(int)lua.L_checkinteger(L, 2)
+  y0 := cast(int)lua.L_checkinteger(L, 3)
+  x1 := cast(int)lua.L_checkinteger(L, 4)
+  y1 := cast(int)lua.L_checkinteger(L, 5)
+  color_u32 := cast(u32)lua.L_optinteger(L, 6, -1)
+  mode := parse_blend_mode(lua.L_optstring(L, 7, "blend")) // Updated Default
+
+  surf := pmap.surface
+  mem_color := u32_rgba_to_abgr(color_u32)
+
+  dx := abs(x1 - x0)
+  sx := x0 < x1 ? 1 : -1
+  dy := -abs(y1 - y0)
+  sy := y0 < y1 ? 1 : -1
+  err := dx + dy
+
+  for {
+    blit_pixel(surf, x0, y0, mem_color, mode)
+    if x0 == x1 && y0 == y1 do break
+    e2 := 2 * err
+    if e2 >= dy { err += dy; x0 += sx }
+    if e2 <= dx { err += dx; y0 += sy }
+  }
+  return 0
+}
+
+// lua_graphics_blit_circle implements: graphics.blit_circle(pmap, cx, cy, radius, [color], [mode])
+lua_graphics_blit_circle :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+  
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  if pmap == nil || pmap.surface == nil do return 0
+
+  cx     := cast(f32)lua.L_checknumber(L, 2)
+  cy     := cast(f32)lua.L_checknumber(L, 3)
+  r      := cast(f32)lua.L_checknumber(L, 4)
+  color  := cast(u32)lua.L_optinteger(L, 5, -1)
+  mode   := parse_blend_mode(lua.L_optstring(L, 6, "blend")) // Updated Default
+
+  surf   := pmap.surface
+  mem_c  := u32_rgba_to_abgr(color)
+  r_sq   := r * r
+
+  start_x, start_y, end_x, end_y, ok := get_clipped_bounds(surf, cx - r, cy - r, cx + r, cy + r)
+  if !ok do return 0
+
+  pixels := cast([^]u32)surf.pixels
+  stride := int(surf.pitch) / 4
+
+  for y_px in start_y..<end_y {
+    row_idx := y_px * stride
+    dy      := f32(y_px) + 0.5 - cy 
+    dy_sq   := dy * dy
+    for x_px in start_x..<end_x {
+      dx := f32(x_px) + 0.5 - cx
+      if dx * dx + dy_sq <= r_sq {
+        idx := row_idx + x_px
+        pixels[idx] = blend_memory_colors(pixels[idx], mem_c, mode)
+      }
+    }
+  }
+  return 0
+}
+
 // lua_graphics_blit_circle_outline implements: graphics.blit_circle_outline(pmap, cx, cy, radius, thickness, [color], [mode])
 lua_graphics_blit_circle_outline :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
@@ -1142,44 +1274,6 @@ lua_graphics_blit_circle_pixel_outline :: proc "c" (L: ^lua.State) -> c.int {
   return 0
 }
 
-// lua_graphics_blit_circle implements: graphics.blit_circle(pmap, cx, cy, radius, [color], [mode])
-lua_graphics_blit_circle :: proc "c" (L: ^lua.State) -> c.int {
-  context = runtime.default_context()
-  
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
-  if pmap == nil || pmap.surface == nil do return 0
-
-  cx     := cast(f32)lua.L_checknumber(L, 2)
-  cy     := cast(f32)lua.L_checknumber(L, 3)
-  r      := cast(f32)lua.L_checknumber(L, 4)
-  color  := cast(u32)lua.L_optinteger(L, 5, -1)
-  mode   := parse_blend_mode(lua.L_optstring(L, 6, "blend")) // Updated Default
-
-  surf   := pmap.surface
-  mem_c  := u32_rgba_to_abgr(color)
-  r_sq   := r * r
-
-  start_x, start_y, end_x, end_y, ok := get_clipped_bounds(surf, cx - r, cy - r, cx + r, cy + r)
-  if !ok do return 0
-
-  pixels := cast([^]u32)surf.pixels
-  stride := int(surf.pitch) / 4
-
-  for y_px in start_y..<end_y {
-    row_idx := y_px * stride
-    dy      := f32(y_px) + 0.5 - cy 
-    dy_sq   := dy * dy
-    for x_px in start_x..<end_x {
-      dx := f32(x_px) + 0.5 - cx
-      if dx * dx + dy_sq <= r_sq {
-        idx := row_idx + x_px
-        pixels[idx] = blend_memory_colors(pixels[idx], mem_c, mode)
-      }
-    }
-  }
-  return 0
-}
-
 // lua_graphics_blit_capsule implements: graphics.blit_capsule(pmap, x1, y1, x2, y2, radius, [color], [mode])
 lua_graphics_blit_capsule :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
@@ -1221,38 +1315,7 @@ lua_graphics_blit_capsule :: proc "c" (L: ^lua.State) -> c.int {
   return 0
 }
 
-// lua_graphics_blit_line implements: graphics.blit_line(pmap, x1, y1, x2, y2, [color], [mode])
-lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
-  context = runtime.default_context()
-  
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
-  if pmap == nil || pmap.surface == nil do return 0
 
-  x0 := cast(int)lua.L_checkinteger(L, 2)
-  y0 := cast(int)lua.L_checkinteger(L, 3)
-  x1 := cast(int)lua.L_checkinteger(L, 4)
-  y1 := cast(int)lua.L_checkinteger(L, 5)
-  color_u32 := cast(u32)lua.L_optinteger(L, 6, -1)
-  mode := parse_blend_mode(lua.L_optstring(L, 7, "blend")) // Updated Default
-
-  surf := pmap.surface
-  mem_color := u32_rgba_to_abgr(color_u32)
-
-  dx := abs(x1 - x0)
-  sx := x0 < x1 ? 1 : -1
-  dy := -abs(y1 - y0)
-  sy := y0 < y1 ? 1 : -1
-  err := dx + dy
-
-  for {
-    blit_pixel(surf, x0, y0, mem_color, mode)
-    if x0 == x1 && y0 == y1 do break
-    e2 := 2 * err
-    if e2 >= dy { err += dy; x0 += sx }
-    if e2 <= dx { err += dx; y0 += sy }
-  }
-  return 0
-}
 
 //---------------------------------------------
 // - PIXELMAP MAP-TO-MAP/BLIT
@@ -1601,7 +1664,8 @@ register_graphics_api :: proc(L: ^lua.State) {
 	lua.pushcfunction(L, lua_graphics_end_transform_group)
 	lua.setfield(L, -2, cstring("end_transform_group"))
 	
-  // - PIXELMAP IO
+//------------------------------------------------
+// - PIXELMAP IO & ALLOCATION
   lua.pushcfunction(L, lua_graphics_new_pixelmap)
   lua.setfield(L, -2, cstring("new_pixelmap"))
 
@@ -1620,31 +1684,34 @@ register_graphics_api :: proc(L: ^lua.State) {
 
   lua.pushcfunction(L, lua_graphics_pixelmap_get_pixel)
   lua.setfield(L, -2, cstring("pixelmap_get_pixel"))
-
-  lua.pushcfunction(L, lua_graphics_pixelmap_raycast)
-  lua.setfield(L, -2, cstring("pixelmap_raycast"))
   
   lua.pushcfunction(L, lua_graphics_pixelmap_flood_fill)
   lua.setfield(L, -2, cstring("pixelmap_flood_fill"))
 
+  lua.pushcfunction(L, lua_graphics_pixelmap_raycast)
+  lua.setfield(L, -2, cstring("pixelmap_raycast"))
+  
   // - PIXELMAP GEOMETRY (BLITS)
+  lua.pushcfunction(L, lua_graphics_blit_line)
+  lua.setfield(L, -2, cstring("blit_line"))
+
   lua.pushcfunction(L, lua_graphics_blit_rect)
   lua.setfield(L, -2, cstring("blit_rect"))
-
+  
+  lua.pushcfunction(L, lua_graphics_blit_triangle)
+  lua.setfield(L, -2, cstring("blit_triangle"))
+  
   lua.pushcfunction(L, lua_graphics_blit_circle)
   lua.setfield(L, -2, cstring("blit_circle"))
-  
-  lua.pushcfunction(L, lua_graphics_blit_circle_pixel_outline)
-  lua.setfield(L, -2, cstring("blit_circle_pixel_outline"))
   
   lua.pushcfunction(L, lua_graphics_blit_circle_outline)
   lua.setfield(L, -2, cstring("blit_circle_outline"))
 
+  lua.pushcfunction(L, lua_graphics_blit_circle_pixel_outline)
+  lua.setfield(L, -2, cstring("blit_circle_pixel_outline"))
+
   lua.pushcfunction(L, lua_graphics_blit_capsule)
   lua.setfield(L, -2, cstring("blit_capsule"))
-
-  lua.pushcfunction(L, lua_graphics_blit_line)
-  lua.setfield(L, -2, cstring("blit_line"))
 
   // - PIXELMAP ARRAY-TO-ARRAY (BLITS)
   lua.pushcfunction(L, lua_graphics_blit)
@@ -1663,7 +1730,7 @@ register_graphics_api :: proc(L: ^lua.State) {
   lua.pushcfunction(L, lua_graphics_update_image_region_from_pixelmap)
   lua.setfield(L, -2, cstring("update_image_region_from_pixelmap"))
   
-  // -- FFI
+  // -- FFI & MEMORY
   lua.pushcfunction(L, lua_graphics_pixelmap_get_cptr)
   lua.setfield(L, -2, cstring("get_pixelmap_cptr"))
 

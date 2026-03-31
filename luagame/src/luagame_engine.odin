@@ -5,7 +5,7 @@ import "core:mem"
 import "core:fmt"
 import "core:strings"
 import "core:c"
-import os  "core:os/os2"
+import os  "core:os"
 import sdl "vendor:sdl3"
 import lua "luajit"
 

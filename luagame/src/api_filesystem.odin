@@ -5,7 +5,7 @@ import "base:runtime"
 import "core:strings"
 import "core:time"
 import "core:c"
-import os  "core:os/os2"
+import os  "core:os"
 import lua "luajit"
 
 
