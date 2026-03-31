@@ -52,7 +52,7 @@ end
 
 ## Documentation
 
-The complete API documentation, including detailed overviews of all core modules, is available in the [Luagame API Reference](api_ref.md).
+The complete API documentation, including detailed overviews of all core modules, is available in the [Luagame API Reference](docs/api_ref.md).
 
 * `runtime` - Core lifecycle hooks.
 * `window` - Context and OS interaction.
