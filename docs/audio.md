@@ -77,10 +77,6 @@ audio.config_bus_delay_times(config)
 
 * `table: config` - A table mapping bus indices (1-7) to delay times in seconds (e.g., `{ [1] = 0.5, [4] = 2.0 }`).
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_listener_position
@@ -98,10 +94,6 @@ audio.set_listener_position(x, y)
 * `number: x` - X coordinate.
 * `number: y` - Y coordinate.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_listener_rotation
@@ -117,10 +109,6 @@ audio.set_listener_rotation(degrees)
 ### Arguments
 
 * `number: degrees` - Rotation angle.
-
-### Returns
-
-None.
 
 ---
 
@@ -139,10 +127,6 @@ audio.set_listener_velocity(vx, vy)
 * `number: vx` - Velocity on the X axis.
 * `number: vy` - Velocity on the Y axis.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_default_falloff
@@ -160,10 +144,6 @@ audio.set_default_falloff(min_px, max_px?)
 * `number: min_px` - The distance at which volume begins to attenuate.
 * `number: max_px` (Optional) - The distance at which the sound becomes silent.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_default_falloff_mode
@@ -179,10 +159,6 @@ audio.set_default_falloff_mode(mode)
 ### Arguments
 
 * `string: mode` - The curve type: `"none"`, `"inverse"`, `"linear"`, or `"exponential"`.
-
-### Returns
-
-None.
 
 ---
 
@@ -292,10 +268,6 @@ audio.set_voice_volume(handle, volume)
 * `number: handle` - The voice identifier.
 * `number: volume` - New volume level.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_voice_pitch
@@ -312,10 +284,6 @@ audio.set_voice_pitch(handle, pitch)
 
 * `number: handle` - The voice identifier.
 * `number: pitch` - New pitch multiplier.
-
-### Returns
-
-None.
 
 ---
 
@@ -334,10 +302,6 @@ audio.set_voice_pan(handle, pan)
 * `number: handle` - The voice identifier.
 * `number: pan` - Panning value (-1.0 to 1.0).
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_voice_looping
@@ -354,10 +318,6 @@ audio.set_voice_looping(handle, is_looping)
 
 * `number: handle` - The voice identifier.
 * `boolean: is_looping` - `true` to loop.
-
-### Returns
-
-None.
 
 ---
 
@@ -377,10 +337,6 @@ audio.seek_voice(handle, offset, unit?)
 * `number: offset` - The target position.
 * `string: unit` (Optional) - `"seconds"` (default) or `"samples"`.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.fade_voice
@@ -398,10 +354,6 @@ audio.fade_voice(handle, target_volume, duration)
 * `number: handle` - The voice identifier.
 * `number: target_volume` - Destination volume level.
 * `number: duration` - Time in seconds.
-
-### Returns
-
-None.
 
 ---
 
@@ -462,10 +414,6 @@ audio.set_voice_position(handle, x, y)
 * `number: handle` - The voice identifier.
 * `number: x`, `number: y` - World coordinates.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_voice_velocity
@@ -482,10 +430,6 @@ audio.set_voice_velocity(handle, vx, vy)
 
 * `number: handle` - The voice identifier.
 * `number: vx`, `number: vy` - Velocity components.
-
-### Returns
-
-None.
 
 ---
 
@@ -505,10 +449,6 @@ audio.set_voice_falloff(handle, min_px, max_px?)
 * `number: min_px` - Inner radius.
 * `number: max_px` (Optional) - Outer radius.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_voice_rolloff
@@ -525,10 +465,6 @@ audio.set_voice_rolloff(handle, factor)
 
 * `number: handle` - The voice identifier.
 * `number: factor` - Rolloff multiplier.
-
-### Returns
-
-None.
 
 ---
 
@@ -547,10 +483,6 @@ audio.set_voice_falloff_mode(handle, mode)
 * `number: handle` - The voice identifier.
 * `string: mode` - `"none"`, `"inverse"`, `"linear"`, or `"exponential"`.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_voice_pan_mode
@@ -568,10 +500,6 @@ audio.set_voice_pan_mode(handle, mode)
 * `number: handle` - The voice identifier.
 * `string: mode` - `"balance"` (default) or `"pan"`.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.pause_voice
@@ -587,10 +515,6 @@ audio.pause_voice(handle)
 ### Arguments
 
 * `number: handle` - The voice identifier.
-
-### Returns
-
-None.
 
 ---
 
@@ -608,10 +532,6 @@ audio.resume_voice(handle)
 
 * `number: handle` - The voice identifier.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.stop_voice
@@ -628,10 +548,6 @@ audio.stop_voice(handle)
 
 * `number: handle` - The voice identifier.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.stop_all_voices
@@ -643,14 +559,6 @@ Immediately halts and destroys all active voices across the entire engine.
 ```lua
 audio.stop_all_voices()
 ```
-
-### Arguments
-
-None.
-
-### Returns
-
-None.
 
 ---
 
@@ -669,10 +577,6 @@ audio.set_bus_volume(bus, volume)
 * `number: bus` - Bus index (0-7).
 * `number: volume` - New volume level.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_bus_pitch
@@ -690,10 +594,6 @@ audio.set_bus_pitch(bus, pitch)
 * `number: bus` - Bus index (0-7).
 * `number: pitch` - New pitch multiplier.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_bus_pan
@@ -710,10 +610,6 @@ audio.set_bus_pan(bus, pan)
 
 * `number: bus` - Bus index (0-7).
 * `number: pan` - Panning value (-1.0 to 1.0).
-
-### Returns
-
-None.
 
 ---
 
@@ -733,10 +629,6 @@ audio.fade_bus(bus, target_volume, duration)
 * `number: target_volume` - Destination volume.
 * `number: duration` - Time in seconds.
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_bus_lpf
@@ -754,10 +646,6 @@ audio.set_bus_lpf(bus, hz)
 * `number: bus` - Bus index (1-7).
 * `number: hz` - Frequency cutoff (Range: 10-22000).
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_bus_hpf
@@ -774,10 +662,6 @@ audio.set_bus_hpf(bus, hz)
 
 * `number: bus` - Bus index (1-7).
 * `number: hz` - Frequency cutoff (Range: 10-22000).
-
-### Returns
-
-None.
 
 ---
 
@@ -797,10 +681,6 @@ audio.set_bus_delay_mix(bus, wet, dry?)
 * `number: wet` - Level of processed (echo) signal.
 * `number: dry` (Optional) - Level of original signal (default 1.0).
 
-### Returns
-
-None.
-
 ---
 
 ## audio.set_bus_delay_feedback
@@ -818,10 +698,6 @@ audio.set_bus_delay_feedback(bus, amount)
 * `number: bus` - Bus index (1-7).
 * `number: amount` - Feedback level (Range: 0.0 to 1.0).
 
-### Returns
-
-None.
-
 ---
 
 ## audio.pause_bus
@@ -837,10 +713,6 @@ audio.pause_bus(bus)
 ### Arguments
 
 * `number: bus` - Bus index (0-7).
-
-### Returns
-
-None.
 
 ---
 
@@ -858,10 +730,6 @@ audio.resume_bus(bus)
 
 * `number: bus` - Bus index (0-7).
 
-### Returns
-
-None.
-
 ---
 
 ## audio.stop_bus
@@ -877,7 +745,3 @@ audio.stop_bus(bus)
 ### Arguments
 
 * `number: bus` - Bus index (0-7).
-
-### Returns
-
-None.

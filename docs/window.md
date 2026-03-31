@@ -42,9 +42,6 @@ window.init(width, height, title, flags?)
 - `string: title` - The window title.
 - `table: flags` (Optional) - A list of string flags: `{"fullscreen", "borderless", "resizable"}`.
 
-### Returns
-None.
-
 ---
 
 ## window.close
@@ -54,9 +51,6 @@ Closes the window and destroys the rendering context.
 ```lua
 window.close()
 ```
-
-### Returns
-None.
 
 ---
 
