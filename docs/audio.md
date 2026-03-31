@@ -9,59 +9,59 @@ The Luagame audio API is a real-time mixing engine built on an 8-bus architectur
 ## Functions
 
 **Engine Configuration**
-* [`config_bus_delay_times`](#audioconfig_bus_delay_times)
+* [`config_bus_delay_times`](#config_bus_delay_times)
 
 **Listener & Defaults**
-* [`set_listener_position`](#audioset_listener_position)
-* [`set_listener_rotation`](#audioset_listener_rotation)
-* [`set_listener_velocity`](#audioset_listener_velocity)
-* [`set_default_falloff`](#audioset_default_falloff)
-* [`set_default_falloff_mode`](#audioset_default_falloff_mode)
+* [`set_listener_position`](#set_listener_position)
+* [`set_listener_rotation`](#set_listener_rotation)
+* [`set_listener_velocity`](#set_listener_velocity)
+* [`set_default_falloff`](#set_default_falloff)
+* [`set_default_falloff_mode`](#set_default_falloff_mode)
 
 **Asset Management**
-* [`load_sound`](#audioload_sound)
-* [`get_sound_info`](#audioget_sound_info)
+* [`load_sound`](#load_sound)
+* [`get_sound_info`](#get_sound_info)
 
 **Playback**
-* [`play`](#audioplay)
-* [`play_at`](#audioplay_at)
+* [`play`](#play)
+* [`play_at`](#play_at)
 
 **Voice Control**
-* [`set_voice_volume`](#audioset_voice_volume)
-* [`set_voice_pitch`](#audioset_voice_pitch)
-* [`set_voice_pan`](#audioset_voice_pan)
-* [`set_voice_looping`](#audioset_voice_looping)
-* [`seek_voice`](#audioseek_voice)
-* [`fade_voice`](#audiofade_voice)
-* [`get_voice_info`](#audioget_voice_info)
-* [`is_voice_playing`](#audiois_voice_playing)
-* [`set_voice_position`](#audioset_voice_position)
-* [`set_voice_velocity`](#audioset_voice_velocity)
-* [`set_voice_falloff`](#audioset_voice_falloff)
-* [`set_voice_rolloff`](#audioset_voice_rolloff)
-* [`set_voice_falloff_mode`](#audioset_voice_falloff_mode)
-* [`set_voice_pan_mode`](#audioset_voice_pan_mode)
+* [`set_voice_volume`](#set_voice_volume)
+* [`set_voice_pitch`](#set_voice_pitch)
+* [`set_voice_pan`](#set_voice_pan)
+* [`set_voice_looping`](#set_voice_looping)
+* [`seek_voice`](#seek_voice)
+* [`fade_voice`](#fade_voice)
+* [`get_voice_info`](#get_voice_info)
+* [`is_voice_playing`](#is_voice_playing)
+* [`set_voice_position`](#set_voice_position)
+* [`set_voice_velocity`](#set_voice_velocity)
+* [`set_voice_falloff`](#set_voice_falloff)
+* [`set_voice_rolloff`](#set_voice_rolloff)
+* [`set_voice_falloff_mode`](#set_voice_falloff_mode)
+* [`set_voice_pan_mode`](#set_voice_pan_mode)
 
 **Voice Lifecycle**
-* [`pause_voice`](#audiopause_voice)
-* [`resume_voice`](#audioresume_voice)
-* [`stop_voice`](#audiostop_voice)
-* [`stop_all_voices`](#audiostop_all_voices)
+* [`pause_voice`](#pause_voice)
+* [`resume_voice`](#resume_voice)
+* [`stop_voice`](#stop_voice)
+* [`stop_all_voices`](#stop_all_voices)
 
 **Bus Mixing**
-* [`set_bus_volume`](#audioset_bus_volume)
-* [`set_bus_pitch`](#audioset_bus_pitch)
-* [`set_bus_pan`](#audioset_bus_pan)
-* [`fade_bus`](#audiofade_bus)
-* [`set_bus_lpf`](#audioset_bus_lpf)
-* [`set_bus_hpf`](#audioset_bus_hpf)
-* [`set_bus_delay_mix`](#audioset_bus_delay_mix)
-* [`set_bus_delay_feedback`](#audioset_bus_delay_feedback)
-* [`pause_bus`](#audiopause_bus)
-* [`resume_bus`](#audioresume_bus)
-* [`stop_bus`](#audiostop_bus)
+* [`set_bus_volume`](#set_bus_volume)
+* [`set_bus_pitch`](#set_bus_pitch)
+* [`set_bus_pan`](#set_bus_pan)
+* [`fade_bus`](#fade_bus)
+* [`set_bus_lpf`](#set_bus_lpf)
+* [`set_bus_hpf`](#set_bus_hpf)
+* [`set_bus_delay_mix`](#set_bus_delay_mix)
+* [`set_bus_delay_feedback`](#set_bus_delay_feedback)
+* [`pause_bus`](#pause_bus)
+* [`resume_bus`](#resume_bus)
+* [`stop_bus`](#stop_bus)
 
----
+## Engine Configuration
 
 ### config_bus_delay_times
 
@@ -78,6 +78,8 @@ audio.config_bus_delay_times(config)
 * `table: config` - A table mapping bus indices (1-7) to delay times in seconds (e.g., `{ [1] = 0.5, [4] = 2.0 }`).
 
 ---
+
+## Listener & Defaults
 
 ### set_listener_position
 
@@ -162,6 +164,8 @@ audio.set_default_falloff_mode(mode)
 
 ---
 
+## Asset Management
+
 ### load_sound
 
 Loads an audio file into memory as a reusable asset.
@@ -204,6 +208,8 @@ path, duration, is_stream = audio.get_sound_info(sound)
 * `boolean: is_stream` - `true` if the asset is streaming.
 
 ---
+
+## Playback
 
 ### play
 
@@ -252,6 +258,8 @@ handle = audio.play_at(sound, bus, x, y, vol?, pitch?)
 * `number: handle` - A unique identifier for the playing voice.
 
 ---
+
+## Voice Control
 
 ### set_voice_volume
 
@@ -502,6 +510,8 @@ audio.set_voice_pan_mode(handle, mode)
 
 ---
 
+## Voice Lifecycle
+
 ### pause_voice
 
 Pauses playback of a voice.
@@ -561,6 +571,8 @@ audio.stop_all_voices()
 ```
 
 ---
+
+## Bus Mixing
 
 ### set_bus_volume
 
