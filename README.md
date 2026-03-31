@@ -1,77 +1,69 @@
-# LUAGAME
+# Luagame
 
-## API
-Luagame exposes the following functions to Lua.
+Luagame is a lightweight, scriptable 2D game engine. It uses a high-performance host environment (written in Odin) to handle windowing, rendering, audio, and input, while deferring all application logic and state to Lua scripts. 
 
-**runtime (callbacks)**
-* `init()`
-* `update(dt)`
-* `draw()`
+The goal is a fast, "no bullshit" development experience: drop in your assets, write some Lua, and run.
 
-**window**
-* `window.init(width, height, title, flags?)`
-* `window.close()`
-* `window.should_close() -> bool`
-* `window.get_size() -> (w, h)`
-* `window.get_position() -> (x, y)`
-* `window.set_title(title)`
-* `window.set_size(width, height)`
-* `window.set_position(x, y)`
-* `window.maximize()`
-* `window.minimize()`
-* `window.set_cursor(name)`
-* `window.cursor_show()`
-* `window.cursor_hide()`
-* `window.cursor_visible() -> bool`
-* `window.get_clipboard() -> string`
-* `window.set_clipboard(text)`
+### Features
+* **Script-Driven:** Complete control over the application lifecycle via Lua callbacks.
+* **Graphics:** Hardware-accelerated 2D rendering with sprite batching and CPU pixelmap rasterization.
+* **Audio:** Real-time 8-bus mixing engine with 3D spatialization and DSP effects.
+* **Input:** Clean state polling and edge detection for keyboard and mouse.
+* **Filesystem:** Sandboxed directory management and file I/O.
 
-**graphics**
-* `graphics.clear([color])`
-* `graphics.draw_rect(x, y, w, h, [color])`
-* `graphics.draw_debug_text(x, y, text, [color])`
-* `graphics.draw_image(img, x, y, [color])`
-* `graphics.draw_image_region(img, sx, sy, sw, sh, x, y, [color])`
-* `graphics.draw_sprite(atlas, idx, x, y, [color])`
-* `graphics.load_image(path) -> Image | nil, err`
-* `graphics.load_atlas(path, cell_w, cell_h) -> Atlas | nil, err`
-* `graphics.set_default_filter("nearest" | "linear")`
-* `graphics.get_image_size(img) -> w, h`
-* `graphics.set_draw_rotation(angle)`
-* `graphics.set_draw_scale(sx, sy)`
-* `graphics.set_draw_origin(ox, oy)`
-* `graphics.begin_transform_group()`
-* `graphics.end_transform_group()`
+---
 
-**input**
-* `input.down(name: string) -> bool`
-* `input.pressed(name: string) -> bool`
-* `input.repeated(name: string) -> bool`
-* `input.released(name: string) -> bool`
-* `input.get_mouse_position() -> (x:number, y:number)`
-* `input.get_mouse_wheel() -> (dx:number, dy:number)`
-* `input.start_text() -> nil`
-* `input.stop_text() -> nil`
-* `input.get_text() -> string`
+## Quick Start
 
-**filesystem**
-* `filesystem.get_resource_dir() -> string | (nil, err)`
-* `filesystem.get_working_dir() -> string | (nil, err)`
-* `filesystem.set_working_dir(path:string) -> (ok:boolean, err?:string)`
-* `filesystem.get_args() -> {string...}`
-* `filesystem.list_dir(path:string) -> { {name:string, kind:string}... } | (nil, err)`
-* `filesystem.info(path:string) -> {kind:string, size:number, modified_time:number} | (nil, err)`
-* `filesystem.read_file(path:string) -> string | (nil, err)`
-* `filesystem.write_file(path:string, data:string) -> (ok:boolean, err?:string)`
-* `filesystem.mkdir(path:string) -> (ok:boolean, err?:string)`
-* `filesystem.rename(old_path:string, new_path:string) -> (ok:boolean, err?:string)`
-* `filesystem.remove(path:string) -> (ok:boolean, err?:string)`
+The engine expects a specific file layout relative to the executable. Your entire game lives inside the `lua/` directory, starting with `main.lua`.
 
-**Global Namespace**
-* `release(userdata)`
+```sh
+/luagame_project
+  ├── luagame.exe
+  ├── SDL3.dll
+  ├── SDL3_ttf.dll
+  └── lua/
+       └── main.lua
+```
 
+### Minimal Example (`main.lua`)
+
+```lua
+-- Initialize the window
+function runtime.init()
+    window.init(800, 600, "Hello Luagame")
+end
+
+-- Handle logic
+function runtime.update(dt)
+    if input.pressed("escape") then 
+        window.close() 
+    end
+end
+
+-- Render the frame
+function runtime.draw()
+    graphics.clear(rgba("#1E1E2E"))
+    graphics.draw_debug_text(10, 10, "Luagame is running.", rgba(255, 255, 255))
+end
+```
+
+---
+
+## Documentation
+
+The complete API documentation, including detailed overviews of all core modules, is available in the [Luagame API Reference](api_ref.md).
+
+* `runtime` - Core lifecycle hooks.
+* `window` - Context and OS interaction.
+* `graphics` - 2D rendering and textures.
+* `audio` - Sound playback and mixing.
+* `input` - Keyboard and mouse state.
+* `filesystem` - I/O operations.
+* `core` - Global primitives and memory management.
+
+---
 
 ## Status
 
-**Active Development.** The core API is stable but subject to change.
-
+**Active Development.** The core API is stabilizing but is still subject to change.

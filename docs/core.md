@@ -37,9 +37,9 @@ color = rgba(hex_number)
 
 ### Arguments
 * `number: r`, `number: g`, `number: b` - Red, green, and blue components (0-255).
-* `number: a` (Optional) - Alpha component (0-255, defaults to 255).
-* `string: hex_string` - A hex string, with or without `#` (e.g., `"#FF00FF"`, `"FF00FF"`, or `"FF00FF80"`).
-* `number: hex_number` - A raw integer. 24-bit values (e.g., `0xFF00FF`) automatically get full alpha applied. 32-bit values pass through untouched.
+* `number: a` (Optional) - Alpha component (0-255). Defaults to 255.
+* `string: hex_string` - A hex string with or without a `#` (e.g., `"#FF0000"` or `"FF0000FF"`). If the alpha channel is omitted, it defaults to full opacity.
+* `number: hex_number` - A raw hex integer (e.g., `0xFF0000` or `0xFF0000FF`). If the alpha channel is omitted, it defaults to full opacity.
 
 ### Returns
 * `number: color` - The packed 32-bit color integer (`0xRRGGBBAA`).
