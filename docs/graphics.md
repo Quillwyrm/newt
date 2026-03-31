@@ -1,11 +1,11 @@
 # graphics
 
-[cite_start]The Luagame graphics API manages both hardware-accelerated rendering (VRAM) and low-level CPU pixel manipulation (RAM)[cite: 1, 6]. 
+The Luagame graphics API manages both hardware-accelerated rendering (VRAM) and low-level CPU pixel manipulation (RAM). 
 
 ### Related Core API
 These functions reside in the global `core` module but are frequently used with graphics.
 
-* [cite_start][`free(userdata)`](core.md#free) - Manually destroys `Atlas`, `Image`, or `Pixelmap` userdata to reclaim memory[cite: 118, 120, 122].
+* [`free(userdata)`](core.md#free) - Manually destroys `Atlas`, `Image`, or `Pixelmap` userdata to reclaim memory.
 * [`rgba(r, g, b, a)`](core.md#rgba) - Constructs packed color integers for drawing operations.
 
 ---
@@ -13,7 +13,7 @@ These functions reside in the global `core` module but are frequently used with 
 ## Functions
 
 ### Hardware Rendering (VRAM)
-[cite_start]Operations performed directly on the GPU using hardware-accelerated textures[cite: 6, 7].
+Operations performed directly on the GPU using hardware-accelerated textures.
 
 **Rendering Verbs**
 * [`clear`](#graphicsclear)
@@ -28,7 +28,7 @@ These functions reside in the global `core` module but are frequently used with 
 * [`get_image_size`](#graphicsget_image_size)
 
 ### Pixelmap (CPU Rasterizer)
-Software-based rasterization for raw memory manipulation. [cite_start]All `blit_` functions respect a unified blend mode: `"replace"`, `"blend"`, `"add"`, `"multiply"`, `"erase"`, or `"mask"`[cite: 28, 60].
+Software-based rasterization for raw memory manipulation. All `blit_` functions respect a unified blend mode: `"replace"`, `"blend"`, `"add"`, `"multiply"`, `"erase"`, or `"mask"`.
 
 **IO & Lifecycle**
 * [`new_pixelmap`](#graphicsnew_pixelmap)
@@ -67,7 +67,7 @@ Software-based rasterization for raw memory manipulation. [cite_start]All `blit_
 ## Hardware Rendering
 
 ### graphics.clear
-[cite_start]Clears the entire render target[cite: 16].
+Clears the entire render target.
 
 #### Usage
 ```lua
@@ -75,12 +75,12 @@ graphics.clear(color?)
 ```
 
 #### Arguments
-* `number: color` (Optional) - The color to clear with. [cite_start]Defaults to black (`0x000000FF`)[cite: 16].
+* `number: color` (Optional) - The color to clear with. Defaults to black (`0x000000FF`).
 
 ---
 
 ### graphics.draw_debug_text
-[cite_start]Draws simple 8x8 bitmap text to the screen for debugging[cite: 17].
+Draws simple 8x8 bitmap text to the screen for debugging.
 
 #### Usage
 ```lua
@@ -88,14 +88,14 @@ graphics.draw_debug_text(x, y, text, color?)
 ```
 
 #### Arguments
-* [cite_start]`number: x`, `number: y` - Screen coordinates[cite: 17].
-* [cite_start]`string: text` - The string to render[cite: 17].
-* `number: color` (Optional) - Packed color integer. [cite_start]Defaults to white (`0xFFFFFFFF`)[cite: 17].
+* `number: x`, `number: y` - Screen coordinates.
+* `string: text` - The string to render.
+* `number: color` (Optional) - Packed color integer. Defaults to white (`0xFFFFFFFF`).
 
 ---
 
 ### graphics.load_image
-[cite_start]Loads an image file (e.g., PNG) from disk into GPU VRAM[cite: 8, 18].
+Loads an image file (e.g., PNG) from disk into GPU VRAM.
 
 #### Usage
 ```lua
@@ -103,13 +103,13 @@ img, err = graphics.load_image(path)
 ```
 
 #### Returns
-* [cite_start]`userdata: img` - An Image object, or `nil` on failure[cite: 19, 20].
-* [cite_start]`string: err` - Error message if loading failed[cite: 19].
+* `userdata: img` - An Image object, or `nil` on failure.
+* `string: err` - Error message if loading failed.
 
 ---
 
 ### graphics.load_atlas
-[cite_start]Loads an image and partitions it into a grid for sprite drawing[cite: 22].
+Loads an image and partitions it into a grid for sprite drawing.
 
 #### Usage
 ```lua
@@ -117,13 +117,13 @@ atlas, err = graphics.load_atlas(path, cell_w, cell_h)
 ```
 
 #### Returns
-* [cite_start]`userdata: atlas` - An Atlas object, or `nil` on failure[cite: 23, 24].
-* [cite_start]`string: err` - Error message if loading failed[cite: 23].
+* `userdata: atlas` - An Atlas object, or `nil` on failure.
+* `string: err` - Error message if loading failed.
 
 ---
 
 ### graphics.set_default_filter
-[cite_start]Sets the scaling filter used for hardware textures loaded after this call[cite: 25].
+Sets the scaling filter used for hardware textures loaded after this call.
 
 #### Usage
 ```lua
@@ -131,12 +131,12 @@ graphics.set_default_filter(mode)
 ```
 
 #### Arguments
-* [cite_start]`string: mode` - Either `"nearest"` or `"linear"`[cite: 25].
+* `string: mode` - Either `"nearest"` or `"linear"`.
 
 ---
 
 ### graphics.get_image_size
-[cite_start]Returns the pixel dimensions of an Image or Atlas[cite: 27].
+Returns the pixel dimensions of an Image or Atlas.
 
 #### Usage
 ```lua
@@ -144,15 +144,15 @@ w, h = graphics.get_image_size(object)
 ```
 
 #### Returns
-* [cite_start]`number: w` - Width in pixels[cite: 27].
-* [cite_start]`number: h` - Height in pixels[cite: 27].
+* `number: w` - Width in pixels.
+* `number: h` - Height in pixels.
 
 ---
 
 ## Pixelmap
 
 ### graphics.new_pixelmap
-[cite_start]Allocates a new CPU-side buffer for software rasterization, initialized to transparent black[cite: 33, 34].
+Allocates a new CPU-side buffer for software rasterization, initialized to transparent black.
 
 #### Usage
 ```lua
@@ -162,7 +162,7 @@ pm = graphics.new_pixelmap(w, h)
 ---
 
 ### graphics.load_pixelmap
-Loads an image from disk directly into a CPU Pixelmap[cite: 36].
+Loads an image from disk directly into a CPU Pixelmap.
 
 #### Usage
 ```lua
@@ -170,13 +170,13 @@ pm, w, h = graphics.load_pixelmap(path)
 ```
 
 #### Returns
-* [cite_start]`userdata: pm` - The loaded Pixelmap[cite: 36, 38].
-* [cite_start]`number: w`, `number: h` - Original image dimensions[cite: 36].
+* `userdata: pm` - The loaded Pixelmap.
+* `number: w`, `number: h` - Original image dimensions.
 
 ---
 
 ### graphics.save_pixelmap
-[cite_start]Saves the contents of a Pixelmap to a PNG file on disk[cite: 40].
+Saves the contents of a Pixelmap to a PNG file on disk.
 
 #### Usage
 ```lua
@@ -186,7 +186,7 @@ ok, err = graphics.save_pixelmap(pm, path)
 ---
 
 ### graphics.pixelmap_clone
-Creates a deep copy of a Pixelmap into a new buffer[cite: 117].
+Creates a deep copy of a Pixelmap into a new buffer.
 
 #### Usage
 ```lua
@@ -196,7 +196,7 @@ new_pm = graphics.pixelmap_clone(pm)
 ---
 
 ### graphics.get_pixelmap_size
-Returns the pixel dimensions of a Pixelmap[cite: 39].
+Returns the pixel dimensions of a Pixelmap.
 
 #### Usage
 ```lua
@@ -206,7 +206,7 @@ w, h = graphics.get_pixelmap_size(pm)
 ---
 
 ### graphics.pixelmap_get_pixel
-Returns the raw color value of a specific pixel[cite: 45, 46].
+Returns the raw color value of a specific pixel.
 
 #### Usage
 ```lua
@@ -216,7 +216,7 @@ color = graphics.pixelmap_get_pixel(pm, x, y)
 ---
 
 ### graphics.pixelmap_set_pixel
-Sets a single pixel value in memory. This is a raw write and does not perform alpha blending[cite: 42, 43, 44].
+Sets a single pixel value in memory. This is a raw write and does not perform alpha blending.
 
 #### Usage
 ```lua
@@ -226,7 +226,7 @@ graphics.pixelmap_set_pixel(pm, x, y, color)
 ---
 
 ### graphics.pixelmap_flood_fill
-Performs a high-performance scanline flood fill from a starting point[cite: 46, 49].
+Performs a high-performance scanline flood fill from a starting point.
 
 #### Usage
 ```lua
@@ -236,7 +236,7 @@ graphics.pixelmap_flood_fill(pm, x, y, color)
 ---
 
 ### graphics.pixelmap_raycast
-Traces a line and returns the first non-transparent pixel encountered[cite: 54, 57].
+Traces a line and returns the first non-transparent pixel encountered.
 
 #### Usage
 ```lua
@@ -244,14 +244,14 @@ hit, x, y, color = graphics.pixelmap_raycast(pm, x1, y1, x2, y2)
 ```
 
 #### Returns
-* [cite_start]`boolean: hit` - `true` if an opaque pixel was struck[cite: 57].
-* [cite_start]`number: x`, `number: y` - Hit coordinates[cite: 57].
-* [cite_start]`number: color` - The color of the hit pixel[cite: 58].
+* `boolean: hit` - `true` if an opaque pixel was struck.
+* `number: x`, `number: y` - Hit coordinates.
+* `number: color` - The color of the hit pixel.
 
 ---
 
 ### graphics.get_pixelmap_cptr
-[cite_start]Returns a raw C pointer to the pixel data as `lightuserdata` for use with FFI[cite: 116].
+Returns a raw C pointer to the pixel data as `lightuserdata` for use with FFI.
 
 #### Usage
 ```lua
@@ -261,7 +261,7 @@ ptr = graphics.get_pixelmap_cptr(pm)
 ---
 
 ### graphics.blit_line
-[cite_start]Draws a 1px thick line between two points using the Bresenham algorithm[cite: 79, 80].
+Draws a 1px thick line between two points using the Bresenham algorithm.
 
 #### Usage
 ```lua
@@ -271,7 +271,7 @@ graphics.blit_line(pm, x1, y1, x2, y2, color?, mode?)
 ---
 
 ### graphics.blit_rect
-Draws a solid filled rectangle[cite: 68, 71].
+Draws a solid filled rectangle.
 
 #### Usage
 ```lua
@@ -281,7 +281,7 @@ graphics.blit_rect(pm, x, y, w, h, color?, mode?)
 ---
 
 ### graphics.blit_triangle
-[cite_start]Draws a solid filled triangle using edge-equation rasterization[cite: 72, 75].
+Draws a solid filled triangle using edge-equation rasterization.
 
 #### Usage
 ```lua
@@ -291,7 +291,7 @@ graphics.blit_triangle(pm, x1, y1, x2, y2, x3, y3, color?, mode?)
 ---
 
 ### graphics.blit_circle
-Draws a solid filled circle[cite: 84, 86].
+Draws a solid filled circle.
 
 #### Usage
 ```lua
@@ -301,7 +301,7 @@ graphics.blit_circle(pm, cx, cy, radius, color?, mode?)
 ---
 
 ### graphics.blit_circle_outline
-[cite_start]Draws a circle outline with variable thickness[cite: 86, 88].
+Draws a circle outline with variable thickness.
 
 #### Usage
 ```lua
@@ -311,7 +311,7 @@ graphics.blit_circle_outline(pm, cx, cy, radius, thickness, color?, mode?)
 ---
 
 ### graphics.blit_circle_pixel_outline
-[cite_start]Draws a 1px thick circle outline using the Bresenham circle algorithm[cite: 90].
+Draws a 1px thick circle outline using the Bresenham circle algorithm.
 
 #### Usage
 ```lua
@@ -321,7 +321,7 @@ graphics.blit_circle_pixel_outline(pm, cx, cy, radius, color?, mode?)
 ---
 
 ### graphics.blit_capsule
-[cite_start]Draws a thick rounded line (capsule)[cite: 92, 94].
+Draws a thick rounded line (capsule).
 
 #### Usage
 ```lua
@@ -331,7 +331,7 @@ graphics.blit_capsule(pm, x1, y1, x2, y2, radius, color?, mode?)
 ---
 
 ### graphics.blit
-[cite_start]Copies the entire contents of one Pixelmap onto another[cite: 95, 96, 97].
+Copies the entire contents of one Pixelmap onto another.
 
 #### Usage
 ```lua
@@ -341,7 +341,7 @@ graphics.blit(dst, src, dx, dy, mode?)
 ---
 
 ### graphics.blit_region
-[cite_start]Copies a sub-region of one Pixelmap onto another[cite: 98, 100].
+Copies a sub-region of one Pixelmap onto another.
 
 #### Usage
 ```lua
@@ -351,7 +351,7 @@ graphics.blit_region(dst, src, sx, sy, w, h, dx, dy, mode?)
 ---
 
 ### graphics.new_image_from_pixelmap
-Creates a hardware-accelerated `Image` (VRAM) from a CPU `Pixelmap`[cite: 106, 107].
+Creates a hardware-accelerated `Image` (VRAM) from a CPU `Pixelmap`.
 
 #### Usage
 ```lua
@@ -361,7 +361,7 @@ img = graphics.new_image_from_pixelmap(pm)
 ---
 
 ### graphics.update_image_from_pixelmap
-[cite_start]Syncs an entire Pixelmap to an existing GPU Image[cite: 108].
+Syncs an entire Pixelmap to an existing GPU Image.
 
 #### Usage
 ```lua
@@ -371,7 +371,7 @@ graphics.update_image_from_pixelmap(img, pm, dx?, dy?)
 ---
 
 ### graphics.update_image_region_from_pixelmap
-Pushes a sub-region of a Pixelmap to a location on a GPU Image[cite: 110, 114, 115].
+Pushes a sub-region of a Pixelmap to a location on a GPU Image.
 
 #### Usage
 ```lua
