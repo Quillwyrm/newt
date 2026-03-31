@@ -1,16 +1,17 @@
-# monotome.input
-The input API handles keyboard and mouse events. It provides both polling for live state and frame-accurate state changes (pressed/released).
+# input
+
+The Luagame input API handles keyboard and mouse events. It provides polling for live state, frame-accurate edge detection (pressed/released), and text input buffering. All functions are available under the global `input` module.
 
 ### Functions
-* [`down`](#monotomeinputdown)
-* [`pressed`](#monotomeinputpressed)
-* [`released`](#monotomeinputreleased)
-* [`repeated`](#monotomeinputrepeated)
-* [`mouse_position`](#monotomeinputmouse_position)
-* [`mouse_wheel`](#monotomeinputmouse_wheel)
-* [`start_text`](#monotomeinputstart_text)
-* [`stop_text`](#monotomeinputstop_text)
-* [`text`](#monotomeinputtext)
+* [`down`](#inputdown)
+* [`pressed`](#inputpressed)
+* [`released`](#inputreleased)
+* [`repeated`](#inputrepeated)
+* [`get_mouse_position`](#inputget_mouse_position)
+* [`get_mouse_wheel`](#inputget_mouse_wheel)
+* [`start_text`](#inputstart_text)
+* [`stop_text`](#inputstop_text)
+* [`get_text`](#inputget_text)
 
 ### Valid Input Tokens
 All input functions expecting a `key` argument must use one of the following string tokens.
@@ -21,34 +22,34 @@ All input functions expecting a `key` argument must use one of the following str
 - **F-Keys:** `"f1"` to `"f18"`
 - **Controls:** `"space"`, `"tab"`, `"return"`, `"backspace"`, `"escape"`, `"delete"`, `"insert"`, `"home"`, `"end"`, `"pageup"`, `"pagedown"`, `"up"`, `"down"`, `"left"`, `"right"`
 - **Modifiers:** `"lshift"`, `"rshift"`, `"lctrl"`, `"rctrl"`, `"lalt"`, `"ralt"`, `"lsuper"`, `"rsuper"`, `"capslock"`, `"numlock"`, `"scrolllock"`, `"mode"`
-- **Symbols:** `"!"`, `"\""`, `"#"`, `"$"`, `"&"`, `"'"`, `"("`, `")"`, `"*"` `"+"`, `","`, `"-"`, `"."`, `"/"`, `":"`, `";"`, `"<"`, `"="`, `">"`, `"?"`, `"@"`, `"["`, `"\\"`, `"]"`, `"^"`, `"_"`, `"`"`
+- **Symbols:** `"!"`, `"\""`, `"#"`, `"$"`, `"&"`, `"'"`, `"("`, `")"`, `*"`, `"+"`, `","`, `"-"`, `"."`, `"/"`, `":"`, `";"`, `"<"`, `"="`, `">"`, `"?"`, `"@"`, `"["`, `"\\"`, `"]"`, `"^"`, `"_"`, `"\`"`
 - **System:** `"pause"`, `"printscreen"`, `"menu"`, `"power"`, `"undo"`, `"help"`, `"sysreq"`, `"application"`, `"currencyunit"`
 - **App Control:** `"appsearch"`, `"apphome"`, `"appback"`, `"appforward"`, `"apprefresh"`, `"appbookmarks"`
 
 ---
 
-## monotome.input.down
+## input.down
 Checks if a key or mouse button is currently held down.
 
 ### Usage
 ```lua
-is_down = monotome.input.down(key)
+is_down = input.down(key)
 ```
 
 ### Arguments
 - `string: key` - A valid key name or mouse token (e.g., `"space"`, `"mouse1"`, `"a"`).
 
 ### Returns
-- `boolean: is_down` - `true` if the key is held, `false` otherwise.
+- `boolean: is_down` - `true` if the key is held.
 
 ---
 
-## monotome.input.pressed
+## input.pressed
 Checks if a key or mouse button was pressed **this frame**.
 
 ### Usage
 ```lua
-was_pressed = monotome.input.pressed(key)
+was_pressed = input.pressed(key)
 ```
 
 ### Arguments
@@ -59,12 +60,12 @@ was_pressed = monotome.input.pressed(key)
 
 ---
 
-## monotome.input.released
+## input.released
 Checks if a key or mouse button was released **this frame**.
 
 ### Usage
 ```lua
-was_released = monotome.input.released(key)
+was_released = input.released(key)
 ```
 
 ### Arguments
@@ -75,49 +76,43 @@ was_released = monotome.input.released(key)
 
 ---
 
-## monotome.input.repeated
+## input.repeated
 Checks if a key generated a repeat event **this frame** (OS typematic repeat). This returns true only on the "echo" events when a key is held down, **excluding** the initial press.
 
 ### Usage
 ```lua
-is_repeat = monotome.input.repeated(key)
+is_repeat = input.repeated(key)
 ```
 
 ### Arguments
-- `string: key` - A valid key name (e.g., `"space"`, `"a"`, `"backspace"`). **Mouse tokens are not valid.**
+- `string: key` - A valid key name. **Mouse tokens are not valid.**
 
 ### Returns
 - `boolean: is_repeat` - `true` if the key triggered a repeat event this frame.
 
 ---
 
-## monotome.input.mouse_position
-Gets the current mouse cursor position in **grid coordinates**.
+## input.get_mouse_position
+Gets the current mouse cursor position in window coordinates.
 
 ### Usage
 ```lua
-col, row = monotome.input.mouse_position()
+x, y = input.get_mouse_position()
 ```
 
-### Arguments
-None.
-
 ### Returns
-- `number: col` - The column index under the mouse (integers, may be negative or OOB).
-- `number: row` - The row index under the mouse.
+- `number: x` - The horizontal position.
+- `number: y` - The vertical position.
 
 ---
 
-## monotome.input.mouse_wheel
+## input.get_mouse_wheel
 Gets the accumulated mouse wheel scroll delta for this frame.
 
 ### Usage
 ```lua
-dx, dy = monotome.input.mouse_wheel()
+dx, dy = input.get_mouse_wheel()
 ```
-
-### Arguments
-None.
 
 ### Returns
 - `number: dx` - Horizontal scroll amount.
@@ -125,48 +120,33 @@ None.
 
 ---
 
-## monotome.input.start_text
-Enables text input events. While enabled, typing will generate characters accessible via `input.text()`.
+## input.start_text
+Enables text input events. While enabled, typing will generate characters accessible via `input.get_text()`.
 
 ### Usage
 ```lua
-monotome.input.start_text()
+input.start_text()
 ```
-
-### Arguments
-None.
-
-### Returns
-None.
 
 ---
 
-## monotome.input.stop_text
+## input.stop_text
 Disables text input events.
 
 ### Usage
 ```lua
-monotome.input.stop_text()
+input.stop_text()
 ```
-
-### Arguments
-None.
-
-### Returns
-None.
 
 ---
 
-## monotome.input.text
+## input.get_text
 Gets the UTF-8 text characters typed during this frame. Requires `start_text()` to be active.
 
 ### Usage
 ```lua
-text = monotome.input.text()
+text = input.get_text()
 ```
-
-### Arguments
-None.
 
 ### Returns
 - `string: text` - The string of characters typed this frame (empty if none).
