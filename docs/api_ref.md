@@ -2,7 +2,7 @@
 
 Luagame is a scriptable 2D game engine. It provides a performant host environment that handles windowing, rendering, audio, and input polling, while deferring all application logic to Lua scripts.
 
-### Standard Modules
+## Standard Modules
 The engine exposes its primary systems as global namespaces.
 
 * [runtime](runtime.md) - Core lifecycle hooks (`init`, `update`, `draw`).
@@ -12,7 +12,7 @@ The engine exposes its primary systems as global namespaces.
 * [input](input.md) - Keyboard and mouse state polling, edge detection, and text input.
 * [filesystem](filesystem.md) - Process environment, directory management, and basic file IO.
 
-### Global Primitives
+## Global Primitives
 Fundamental operations that are injected directly into the global environment without a module prefix.
 
 * [core](core.md) - Engine primitives and memory management (`free`, `rgba`).

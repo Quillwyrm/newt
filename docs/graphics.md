@@ -13,7 +13,7 @@ These functions reside in the global `core` module but are frequently used with 
 ## Functions
 
 ### Hardware Rendering (VRAM)
-Operations performed directly on the GPU using hardware-accelerated textures.
+Operations performed directly on the GPU using hardware-accelerated textures. These are highly efficient for final display and complex transformations but do not allow for direct, per-pixel modification by the CPU.
 
 **Rendering Verbs**
 * [`clear`](#graphicsclear)
@@ -28,13 +28,14 @@ Operations performed directly on the GPU using hardware-accelerated textures.
 * [`get_image_size`](#graphicsget_image_size)
 
 ### Pixelmap (CPU Rasterizer)
-Software-based rasterization for raw memory manipulation. All `blit_` functions respect a unified blend mode: `"replace"`, `"blend"`, `"add"`, `"multiply"`, `"erase"`, or `"mask"`.
+Pixelmaps are CPU-resident buffers of raw pixel data (backed by SDL Surfaces). Unlike Images, which live in VRAM, Pixelmaps reside in system RAM to allow for low-level software rasterization, procedural generation, and direct per-pixel read/write access. 
+
+Once modified, a Pixelmap can be "synced" or uploaded to an Image to be drawn by the hardware-accelerated pipeline. All `blit_` functions respect a unified blend mode system: `"replace"`, `"blend"`, `"add"`, `"multiply"`, `"erase"`, or `"mask"`.
 
 **IO & Lifecycle**
 * [`new_pixelmap`](#graphicsnew_pixelmap)
 * [`load_pixelmap`](#graphicsload_pixelmap)
 * [`save_pixelmap`](#graphicssave_pixelmap)
-* [`pixelmap_clone`](#graphicspixelmap_clone)
 
 **Queries & Atomic Ops**
 * [`get_pixelmap_size`](#graphicsget_pixelmap_size)
@@ -42,7 +43,7 @@ Software-based rasterization for raw memory manipulation. All `blit_` functions 
 * [`pixelmap_set_pixel`](#graphicspixelmap_set_pixel)
 * [`pixelmap_flood_fill`](#graphicspixelmap_flood_fill)
 * [`pixelmap_raycast`](#graphicspixelmap_raycast)
-* [`get_pixelmap_cptr`](#graphicsget_pixelmap_cptr)
+
 
 **Geometry (Blits)**
 * [`blit_line`](#graphicsblit_line)
@@ -61,6 +62,10 @@ Software-based rasterization for raw memory manipulation. All `blit_` functions 
 * [`new_image_from_pixelmap`](#graphicsnew_image_from_pixelmap)
 * [`update_image_from_pixelmap`](#graphicsupdate_image_from_pixelmap)
 * [`update_image_region_from_pixelmap`](#graphicsupdate_image_region_from_pixelmap)
+
+**FFI utilities**
+* [`get_pixelmap_cptr`](#graphicsget_pixelmap_cptr)
+* [`pixelmap_clone`](#graphicspixelmap_clone)
 
 ---
 
@@ -149,7 +154,7 @@ w, h = graphics.get_image_size(object)
 
 ---
 
-## Pixelmap
+## Pixelmap (CPU Rasterizer)
 
 ### graphics.new_pixelmap
 Allocates a new CPU-side buffer for software rasterization, initialized to transparent black.
