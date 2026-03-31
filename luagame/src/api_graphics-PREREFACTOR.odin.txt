@@ -61,20 +61,73 @@ Pixelmap :: struct {
     surface: ^sdl.Surface,
 }
 
-u32rgba :: distinct u32
-
+// Global singleton for the immediate-mode "Pen" state and shared resources.
 Gfx_Ctx: struct {
-    current_sdl_color:  u32rgba, 
-    default_scale_mode: sdl.ScaleMode,
+  pending: struct {
+		rotation: f32,
+		scale:    [2]f32,
+		origin:   [2]f32,
+  },
+  group_depth:       int,
+  current_color:     sdl.Color,    // Shadow copy for RenderClear/DebugText
+  rect_color:        sdl.Color,    // Shadow copy for Gfx_Ctx.base_rect_texture ONLY
+	base_rect_texture: ^sdl.Texture,
+	default_scale_mode: sdl.ScaleMode,
+}= {
+	//defaults
+  pending = { scale = {1, 1} },
+  default_scale_mode = .NEAREST,
 }
 
 
 //HELPERS---------
 
+// Returns the draw state to neutral defaults.
+reset_pending_transforms :: proc() {
+	Gfx_Ctx.pending.rotation = 0
+	Gfx_Ctx.pending.scale    = {1, 1}
+	Gfx_Ctx.pending.origin   = {0, 0}
+}
+
+// Called after every draw call to handle the Consumer vs. Persistent logic.
+check_transform_consumption :: proc() {
+	if Gfx_Ctx.group_depth == 0 {
+		reset_pending_transforms()
+	}
+}
+
 init_graphics_state :: proc() {
-    Gfx_Ctx.current_sdl_color = u32rgba(0xFFFFFFFF)
-    sdl.SetRenderDrawColor(Renderer, 255, 255, 255, 255)
-    Gfx_Ctx.default_scale_mode = .NEAREST
+	// 1. Lock Odin and SDL to the same baseline color state
+	Gfx_Ctx.current_color = sdl.Color{255, 255, 255, 255}
+	sdl.SetRenderDrawColor(Renderer, 255, 255, 255, 255)
+
+	// 2. Setup the 1x1 rect texture
+	if Gfx_Ctx.base_rect_texture != nil do return
+
+	pixel_data: u32 = 0xFFFFFFFF
+	Gfx_Ctx.base_rect_texture = sdl.CreateTexture(Renderer, .RGBA32, .STATIC, 1, 1)
+	sdl.UpdateTexture(Gfx_Ctx.base_rect_texture, nil, &pixel_data, 4)
+	sdl.SetTextureBlendMode(Gfx_Ctx.base_rect_texture, {.BLEND})
+}
+
+// set_render_color checks the requested color against our shadow state.
+// If it differs, we update SDL and sync our shadow state. If it matches, we do nothing.
+// This is the backbone of the stateless Lua API's performance.
+set_render_color :: proc(c: sdl.Color) {
+	if Gfx_Ctx.current_color != c {
+		sdl.SetRenderDrawColor(Renderer, c.r, c.g, c.b, c.a)
+		Gfx_Ctx.current_color = c
+	}
+}
+
+// unpack_color converts a packed 32-bit integer (0xRRGGBBAA) into an sdl.Color.
+unpack_color :: proc(packed: u32) -> sdl.Color {
+	return sdl.Color{
+		u8((packed >> 24) & 0xFF),
+		u8((packed >> 16) & 0xFF),
+		u8((packed >> 8)  & 0xFF),
+		u8(packed & 0xFF),
+	}
 }
 
 // load_image_from_path handles the hardware-level pipeline: Disk -> CPU RAM -> GPU VRAM.
@@ -100,15 +153,35 @@ load_image_from_path :: proc(path: cstring) -> (Image, bool) {
 	return Image{texture, f32(w), f32(h)}, true
 }
 
-set_global_sdl_color :: proc(c: u32rgba) {
-    if Gfx_Ctx.current_sdl_color != c {
-        r := u8((u32(c) >> 24) & 0xFF)
-        g := u8((u32(c) >> 16) & 0xFF)
-        b := u8((u32(c) >> 8)  & 0xFF)
-        a := u8(u32(c) & 0xFF)
-        sdl.SetRenderDrawColor(Renderer, r, g, b, a)
-        Gfx_Ctx.current_sdl_color = c
+
+// Internal workhorse for drawing textures with transforms.
+draw_image_pixels :: proc(tex: ^sdl.Texture, src_rect: ^sdl.FRect, x, y, w, h: f32, color: sdl.Color) {
+  p := &Gfx_Ctx.pending
+
+  pivot := p.origin * p.scale
+  size  := [2]f32{w, h} * p.scale
+  dst   := sdl.FRect{ x - pivot.x, y - pivot.y, size.x, size.y }
+
+  // THE COLOR ROUTING
+  if tex == Gfx_Ctx.base_rect_texture {
+    // 1. It's a Rect: Check the cache to save GPU calls
+    if color != Gfx_Ctx.rect_color {
+      sdl.SetTextureColorMod(tex, color.r, color.g, color.b)
+      sdl.SetTextureAlphaMod(tex, color.a)
+      Gfx_Ctx.rect_color = color
     }
+  } else {
+    // 2. It's an Image: Always apply the tint (don't bother caching 500 textures)
+    // Note: If color is white {255,255,255,255}, it just draws normally.
+    sdl.SetTextureColorMod(tex, color.r, color.g, color.b)
+    sdl.SetTextureAlphaMod(tex, color.a)
+  }
+
+  // Draw
+  sdl.RenderTextureRotated(Renderer, tex, src_rect, &dst, f64(p.rotation), &sdl.FPoint{pivot.x, pivot.y}, .NONE)
+
+  // Consume the transform
+  check_transform_consumption()
 }
 
 // ---------------------------------------------------------
@@ -125,6 +198,154 @@ u32_rgba_to_abgr :: #force_inline proc(c: u32) -> u32 {
 // GRAPHICS API: LUA BINDINGS
 //=========================================================================================
 
+// lua_graphics_draw_image implements: graphics.draw_image(img, x, y, [color])
+// Draws an image. If 'img' is nil or has been released, this function
+// returns silently to avoid forcing manual 'if img then' guards in Lua.
+lua_graphics_draw_image :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+
+	nargs := lua.gettop(L)
+	if nargs < 3 {
+		lua.L_error(L, cstring("graphics.draw_image expects at least: img, x, y"))
+		return 0
+	}
+
+	// 1. IMPLICIT GUARD: Check if the first argument is actually userdata.
+	// If the user passed 'nil' (because they released the image), we skip the draw.
+	if lua.type(L, 1) != lua.Type.USERDATA {
+		return 0
+	}
+
+	// 2. TYPE CHECK: Verify the userdata has the "Image_Meta" metatable.
+	// L_testudata is used instead of L_checkudata to prevent a Lua-side crash.
+	img := cast(^Image)lua.L_testudata(L, 1, cstring("Image_Meta"))
+
+	// 3. VALIDITY CHECK: Exit if the image is invalid or the VRAM texture is gone.
+	if img == nil || img.texture == nil {
+		return 0
+	}
+
+	// 4. COORDINATES: Extract position from the stack.
+	x := cast(f32)lua.L_checknumber(L, 2)
+	y := cast(f32)lua.L_checknumber(L, 3)
+
+	// 5. COLOR TINT: Pull integer, default to -1 (White), cast to u32, unpack.
+	raw_color := lua.L_optinteger(L, 4, -1)
+	color := unpack_color(cast(u32)raw_color)
+
+	// 6. GEOMETRY: The destination rectangle matches the image's original dimensions.
+	dst := sdl.FRect{x, y, img.width, img.height}
+
+	// 7. RENDER: Dispatch to the hardware-level draw helper.
+	draw_image_pixels(img.texture, nil, x, y, img.width, img.height, color)
+
+	return 0
+}
+
+// lua_graphics_draw_image_region implements: graphics.draw_image_region(img, sx, sy, sw, sh, x, y, [color])
+// Draws a specific rectangular sub-section of an image (a "source rect").
+// This is the primary tool for spritesheets, tilemaps, and atlas rendering.
+// Updated lua_graphics_image_region
+lua_graphics_draw_image_region :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	nargs := lua.gettop(L)
+
+	if nargs < 7 {
+		lua.L_error(L, cstring("graphics.draw_image_region expects: img, sx, sy, sw, sh, x, y, [color]"))
+		return 0
+	}
+
+	if lua.type(L, 1) != lua.Type.USERDATA do return 0
+
+	img := cast(^Image)lua.L_testudata(L, 1, cstring("Image_Meta"))
+	if img == nil || img.texture == nil do return 0
+
+	sx := cast(f32)lua.L_checknumber(L, 2)
+	sy := cast(f32)lua.L_checknumber(L, 3)
+	sw := cast(f32)lua.L_checknumber(L, 4)
+	sh := cast(f32)lua.L_checknumber(L, 5)
+	x  := cast(f32)lua.L_checknumber(L, 6)
+	y  := cast(f32)lua.L_checknumber(L, 7)
+
+	// 5. COLOR TINT: Pull integer, default to -1 (White), cast to u32, unpack.
+	raw_color := lua.L_optinteger(L, 8, -1)
+	color := unpack_color(cast(u32)raw_color)
+
+	// Create the source crop rect
+	src := sdl.FRect{sx, sy, sw, sh}
+
+	// Dispatch to hardware with the source rect and intended dimensions
+	draw_image_pixels(img.texture, &src, x, y, sw, sh, color)
+
+	return 0
+}
+
+// lua_graphics_draw_sprite implements: graphics.draw_sprite(atlas, idx, x, y, [color])
+lua_graphics_draw_sprite :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	nargs := lua.gettop(L)
+
+	// 1. SUBJECT: Extract Atlas and Index.
+	atlas := cast(^Atlas)lua.L_checkudata(L, 1, cstring("Atlas_Meta"))
+	idx   := int(lua.L_checknumber(L, 2))
+
+	// 2. SPATIAL: Extract position.
+	x := f32(lua.L_checknumber(L, 3))
+	y := f32(lua.L_checknumber(L, 4))
+
+	// 5. COLOR TINT: Pull integer, default to -1 (White), cast to u32, unpack.
+	raw_color := lua.L_optinteger(L, 5, -1)
+	color := unpack_color(cast(u32)raw_color)
+
+	// 4. LOGIC: Guard against OOB frame indices.
+	if idx < 0 || idx >= (atlas.cols * atlas.rows) {
+		fmt.eprintln("WARN: draw_sprite index OOB:", idx)
+		return 0
+	}
+
+	// 5. MATH: Calculate source rectangle.
+	src := sdl.FRect{
+		x = f32(idx % atlas.cols) * atlas.cell_w,
+		y = f32(idx / atlas.cols) * atlas.cell_h,
+		w = atlas.cell_w,
+		h = atlas.cell_h,
+	}
+
+	// 6. RENDER: Dispatch to hardware.
+	draw_image_pixels(atlas.image.texture, &src, x, y, atlas.cell_w, atlas.cell_h, color)
+
+	return 0
+}
+
+// lua_graphics_draw_rect implements: graphics.draw_rect(x, y, w, h, [color])
+// Draws a filled rectangle. Internally, this stretches the 1x1 'Gfx_Ctx.base_rect_texture'
+// to the desired dimensions and applies a color tint.
+lua_graphics_draw_rect :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	nargs := lua.gettop(L)
+
+	x := cast(f32)lua.L_checknumber(L, 1)
+	y := cast(f32)lua.L_checknumber(L, 2)
+	w := cast(f32)lua.L_checknumber(L, 3)
+	h := cast(f32)lua.L_checknumber(L, 4)
+
+	// 5. COLOR TINT: Pull integer, default to -1 (White), cast to u32, unpack.
+	raw_color := lua.L_optinteger(L, 5, -1)
+	color := unpack_color(cast(u32)raw_color)
+
+	// We treat the rectangle as a stretched 1x1 image.
+	dst := sdl.FRect{x, y, w, h}
+
+	// Apply color tinting to our white pixel
+	sdl.SetTextureColorMod(Gfx_Ctx.base_rect_texture, color.r, color.g, color.b)
+	sdl.SetTextureAlphaMod(Gfx_Ctx.base_rect_texture, color.a)
+
+	// Draw the 1px texture stretched to the rect size
+	draw_image_pixels(Gfx_Ctx.base_rect_texture, nil, x, y, w, h, color)
+
+	return 0
+}
+
 // lua_graphics_clear implements: graphics.clear([color])
 // Clears the entire render target. The color argument is optional and defaults to black.
 lua_graphics_clear :: proc "c" (L: ^lua.State) -> c.int {
@@ -132,12 +353,13 @@ lua_graphics_clear :: proc "c" (L: ^lua.State) -> c.int {
 
 	nargs := lua.gettop(L)
 
-  // 5. COLOR TINT: Pull integer, default to Solid Black, cast to u32rgba
-  raw_color := lua.L_optinteger(L, 1, 0x000000FF)
-  color := u32rgba(raw_color)
+	// 5. COLOR TINT: Pull integer, default to 255 (Black), cast to u32, unpack.
+	raw_color := lua.L_optinteger(L, 1, 255)
+	color := unpack_color(cast(u32)raw_color)
 
-  set_global_sdl_color(color)
-  sdl.RenderClear(Renderer)
+	// Route through the cache to prevent state desync
+	set_render_color(color)
+	sdl.RenderClear(Renderer)
 
 	return 0
 }
@@ -160,11 +382,12 @@ lua_graphics_draw_debug_text :: proc "c" (L: ^lua.State) -> c.int {
 	text_len: c.size_t
 	text_c := lua.L_checklstring(L, 3, &text_len)
 
-  // 5. COLOR TINT: Pull integer, default to Solid White, cast to u32rgba
-  raw_color := lua.L_optinteger(L, 4, 0xFFFFFFFF)
-  color := u32rgba(raw_color)
+	// 5. COLOR TINT: Pull integer, default to -1 (White), cast to u32, unpack.
+	raw_color := lua.L_optinteger(L, 4, -1)
+	color := unpack_color(cast(u32)raw_color)
 
-  set_global_sdl_color(color)
+	// 3. Apply state and draw
+	set_render_color(color)
 
 	if !sdl.RenderDebugText(Renderer, x, y, text_c) {
 		fmt.eprintln("Debug text failed:", sdl.GetError())
@@ -173,8 +396,6 @@ lua_graphics_draw_debug_text :: proc "c" (L: ^lua.State) -> c.int {
 	return 0
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////////////////////
 
 // lua_graphics_load_image implements: graphics.load_image(path) -> Image | nil, err
 lua_graphics_load_image :: proc "c" (L: ^lua.State) -> c.int {
@@ -289,6 +510,56 @@ lua_graphics_get_image_size :: proc "c" (L: ^lua.State) -> c.int {
 	lua.pushnumber(L, cast(lua.Number)img.height)
 
 	return 2
+}
+
+
+//---------------------------------------------
+// DRAW TRANSFORMATION
+//---------------------------------------------
+
+// lua_graphics_set_draw_rotation: graphics.set_draw_rotation(angle: number = 0)
+lua_graphics_set_draw_rotation :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	Gfx_Ctx.pending.rotation = cast(f32)lua.L_optnumber(L, 1, 0.0)
+	return 0
+}
+
+// lua_graphics_set_draw_scale: graphics.set_draw_scale(sx: number = 1, sy: number = sx)
+lua_graphics_set_draw_scale :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	sx := lua.L_optnumber(L, 1, 1.0)
+	// If sy isn't provided, we default to sx to perform a uniform scale.
+	sy := lua.L_optnumber(L, 2, sx) 
+	
+	Gfx_Ctx.pending.scale.x = cast(f32)sx
+	Gfx_Ctx.pending.scale.y = cast(f32)sy
+	return 0
+}
+
+// lua_graphics_set_draw_origin: graphics.set_draw_origin(ox: number = 0, oy: number = 0)
+lua_graphics_set_draw_origin :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	Gfx_Ctx.pending.origin.x = cast(f32)lua.L_optnumber(L, 1, 0.0)
+	Gfx_Ctx.pending.origin.y = cast(f32)lua.L_optnumber(L, 2, 0.0)
+	return 0
+}
+
+// lua_graphics_begin_transform_group: graphics.begin_transform_group()
+lua_graphics_begin_transform_group :: proc "c" (L: ^lua.State) -> c.int {
+	Gfx_Ctx.group_depth += 1
+	return 0
+}
+
+// lua_graphics_end_transform_group: graphics.end_transform_group()
+lua_graphics_end_transform_group :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	Gfx_Ctx.group_depth = math.max(0, Gfx_Ctx.group_depth - 1)
+	
+	// If we've popped the last group, reset the pen to neutral defaults.
+	if Gfx_Ctx.group_depth == 0 {
+		reset_pending_transforms()
+	}
+	return 0
 }
 
 //---------------------------------------------
@@ -1348,20 +1619,20 @@ register_graphics_api :: proc(L: ^lua.State) {
 	lua.pushcfunction(L, lua_graphics_clear)
 	lua.setfield(L, -2, cstring("clear"))
 
+	lua.pushcfunction(L, lua_graphics_draw_rect)
+	lua.setfield(L, -2, cstring("draw_rect"))
+
 	lua.pushcfunction(L, lua_graphics_draw_debug_text)
 	lua.setfield(L, -2, cstring("draw_debug_text"))
 
-  // lua.pushcfunction(L, lua_graphics_draw_rect)
-	// lua.setfield(L, -2, cstring("draw_rect"))
+	lua.pushcfunction(L, lua_graphics_draw_image)
+	lua.setfield(L, -2, cstring("draw_image"))
 
-	// lua.pushcfunction(L, lua_graphics_draw_image)
-	// lua.setfield(L, -2, cstring("draw_image"))
+	lua.pushcfunction(L, lua_graphics_draw_image_region)
+	lua.setfield(L, -2, cstring("draw_image_region"))
 
-	// lua.pushcfunction(L, lua_graphics_draw_image_region)
-	// lua.setfield(L, -2, cstring("draw_image_region"))
-
-	// lua.pushcfunction(L, lua_graphics_draw_sprite)
-	// lua.setfield(L, -2, cstring("draw_sprite"))
+	lua.pushcfunction(L, lua_graphics_draw_sprite)
+	lua.setfield(L, -2, cstring("draw_sprite"))
 
 	// RESOURCE LOADERS
 	lua.pushcfunction(L, lua_graphics_load_image)
@@ -1377,21 +1648,21 @@ register_graphics_api :: proc(L: ^lua.State) {
 	lua.pushcfunction(L, lua_graphics_get_image_size)
 	lua.setfield(L, -2, cstring("get_image_size"))
 
-	// // TRANSFORMATION STATE
-	// lua.pushcfunction(L, lua_graphics_set_draw_rotation)
-	// lua.setfield(L, -2, cstring("set_draw_rotation"))
+	// TRANSFORMATION STATE
+	lua.pushcfunction(L, lua_graphics_set_draw_rotation)
+	lua.setfield(L, -2, cstring("set_draw_rotation"))
 
-	// lua.pushcfunction(L, lua_graphics_set_draw_scale)
-	// lua.setfield(L, -2, cstring("set_draw_scale"))
+	lua.pushcfunction(L, lua_graphics_set_draw_scale)
+	lua.setfield(L, -2, cstring("set_draw_scale"))
 
-	// lua.pushcfunction(L, lua_graphics_set_draw_origin)
-	// lua.setfield(L, -2, cstring("set_draw_origin"))
+	lua.pushcfunction(L, lua_graphics_set_draw_origin)
+	lua.setfield(L, -2, cstring("set_draw_origin"))
 
-	// lua.pushcfunction(L, lua_graphics_begin_transform_group)
-	// lua.setfield(L, -2, cstring("begin_transform_group"))
+	lua.pushcfunction(L, lua_graphics_begin_transform_group)
+	lua.setfield(L, -2, cstring("begin_transform_group"))
 
-	// lua.pushcfunction(L, lua_graphics_end_transform_group)
-	// lua.setfield(L, -2, cstring("end_transform_group"))
+	lua.pushcfunction(L, lua_graphics_end_transform_group)
+	lua.setfield(L, -2, cstring("end_transform_group"))
 	
 //------------------------------------------------
 // - PIXELMAP IO & ALLOCATION
