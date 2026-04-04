@@ -141,6 +141,9 @@ lua_window_init :: proc "c" (L: ^lua.State) -> c.int {
 	if !sdl.SetRenderVSync(Renderer, 1) {
 		fmt.eprintln("VSync failed:", sdl.GetError())
 	}
+
+	//SANITIZE SDL COLOR STATE
+	//sdl.SetRenderDrawColor(Renderer, 255, 255, 255, 255)
 	
 	return 0
 }

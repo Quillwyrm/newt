@@ -5,7 +5,7 @@ import "core:fmt"
 import "core:strings"
 import "core:math"
 import "core:c"
-import "core:unicode/utf8"
+import "core:math/linalg"
 import sdl "vendor:sdl3"
 import stbi "vendor:stb/image"
 import "vendor:sdl3/ttf"
@@ -21,8 +21,6 @@ import lua "luajit"
 
 // Scissor/clip rect
 
-// Camera: A dedicated abstraction or module for view transforms.
-
 // Text & Fonts: Integration with SDL_ttf for font loading and text rendering.
 
 // Animation System: Logic for handling sprite/atlas frames over time.
@@ -30,8 +28,9 @@ import lua "luajit"
 // Shaders (see notes)
 
 //DONE!!!  
+//TRANSFORMS
 //Image IO
-//Image drawing prims (GPU)
+//Image drawing prims (GPU) ****
 //Atlas/Sprite idx system
 //transform pipeline (scale/rot/origin) 
 //Pixelmap API (CPU Read/Write)
@@ -64,17 +63,28 @@ Pixelmap :: struct {
 u32rgba :: distinct u32
 
 Gfx_Ctx: struct {
-    current_sdl_color:  u32rgba, 
-    default_scale_mode: sdl.ScaleMode,
+	current_sdl_color:  u32rgba, 
+	default_scale_mode: sdl.ScaleMode,
+
+	transform : struct {
+		matrix_stack: [32]matrix[3, 3]f32,
+		group_depth:  int,
+	}
 }
+
+
 
 
 //HELPERS---------
 
+// CPU state only. Safe to call at boot.
 init_graphics_state :: proc() {
-    Gfx_Ctx.current_sdl_color = u32rgba(0xFFFFFFFF)
-    sdl.SetRenderDrawColor(Renderer, 255, 255, 255, 255)
-    Gfx_Ctx.default_scale_mode = .NEAREST
+	Gfx_Ctx.current_sdl_color = u32rgba(0xFFFFFFFF)
+	Gfx_Ctx.default_scale_mode = .LINEAR
+	
+	// '1' is the Odin literal for an Identity Matrix
+	Gfx_Ctx.transform.matrix_stack[0] = 1 
+	Gfx_Ctx.transform.group_depth = 0
 }
 
 // load_image_from_path handles the hardware-level pipeline: Disk -> CPU RAM -> GPU VRAM.
@@ -111,6 +121,41 @@ set_global_sdl_color :: proc(c: u32rgba) {
     }
 }
 
+unpack_fcolor :: #force_inline proc(c: u32rgba) -> sdl.FColor {
+	return sdl.FColor{
+		f32((u32(c) >> 24) & 0xFF) / 255.0,
+		f32((u32(c) >> 16) & 0xFF) / 255.0,
+		f32((u32(c) >> 8)  & 0xFF) / 255.0,
+		f32(u32(c) & 0xFF)         / 255.0,
+	}
+}
+
+// ---------------------------------------------------------
+// RENDER GEOMETRY PIPELINE
+// ---------------------------------------------------------
+
+// draw_image_geometry submits a flat, un-transformed quad to the GPU.
+draw_image_geometry :: proc(tex: ^sdl.Texture, x, y, w, h: f32, color: u32rgba, m: matrix[3, 3]f32) {
+	fc := unpack_fcolor(color)
+
+	// Apply the local X/Y offsets directly to the vertices BEFORE multiplying by the world matrix.
+	tl := (m * [3]f32{x, y, 1}).xy
+	tr := (m * [3]f32{x + w, y, 1}).xy
+	br := (m * [3]f32{x + w, y + h, 1}).xy
+	bl := (m * [3]f32{x, y + h, 1}).xy
+
+	verts := [4]sdl.Vertex{
+		{ position = cast(sdl.FPoint)tl, color = fc, tex_coord = {0.0, 0.0} },
+		{ position = cast(sdl.FPoint)tr, color = fc, tex_coord = {1.0, 0.0} },
+		{ position = cast(sdl.FPoint)br, color = fc, tex_coord = {1.0, 1.0} },
+		{ position = cast(sdl.FPoint)bl, color = fc, tex_coord = {0.0, 1.0} },
+	}
+
+	indices := [6]c.int{0, 1, 2, 0, 2, 3}
+
+	sdl.RenderGeometry(Renderer, tex, raw_data(verts[:]), 4, raw_data(indices[:]), 6)
+}
+
 // ---------------------------------------------------------
 // PIXELMAP GEOMETRY & INTERNAL HELPERS
 // ---------------------------------------------------------
@@ -125,53 +170,209 @@ u32_rgba_to_abgr :: #force_inline proc(c: u32) -> u32 {
 // GRAPHICS API: LUA BINDINGS
 //=========================================================================================
 
+// lua_graphics_draw_image implements: graphics.draw_image(img, x, y, [color])
+lua_graphics_draw_image :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+
+  // L_checkudata throws a Lua error if arg 1 is missing or wrong type
+  img := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
+  if img == nil || img.texture == nil do return 0
+
+  x := f32(lua.L_checknumber(L, 2))
+  y := f32(lua.L_checknumber(L, 3))
+  raw_color := lua.L_optinteger(L, 4, 0xFFFFFFFF)
+
+  world_m := Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth]
+  draw_image_geometry(img.texture, x, y, img.width, img.height, u32rgba(raw_color), world_m)
+
+  return 0
+}
+
 // lua_graphics_clear implements: graphics.clear([color])
-// Clears the entire render target. The color argument is optional and defaults to black.
+// Clears the entire render target. Defaults to black.
 lua_graphics_clear :: proc "c" (L: ^lua.State) -> c.int {
-	context = runtime.default_context()
+  context = runtime.default_context()
 
-	nargs := lua.gettop(L)
-
-  // 5. COLOR TINT: Pull integer, default to Solid Black, cast to u32rgba
   raw_color := lua.L_optinteger(L, 1, 0x000000FF)
-  color := u32rgba(raw_color)
-
-  set_global_sdl_color(color)
+  set_global_sdl_color(u32rgba(raw_color))
   sdl.RenderClear(Renderer)
 
-	return 0
+  return 0
 }
 
 // lua_graphics_draw_debug_text implements: graphics.draw_debug_text(x, y, text, [color])
 // Draws simple 8x8 bitmap text to the screen for debugging purposes.
 lua_graphics_draw_debug_text :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+
+  x := cast(f32)lua.L_checknumber(L, 1)
+  y := cast(f32)lua.L_checknumber(L, 2)
+
+  text_len: c.size_t
+  text_c := lua.L_checklstring(L, 3, &text_len)
+
+  raw_color := lua.L_optinteger(L, 4, 0xFFFFFFFF)
+  set_global_sdl_color(u32rgba(raw_color))
+
+  if !sdl.RenderDebugText(Renderer, x, y, text_c) {
+    fmt.eprintln("Debug text failed:", sdl.GetError())
+  }
+
+  return 0
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+// lua_graphics_begin_transform implements: graphics.begin_transform()
+lua_graphics_begin_transform :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
-	nargs := lua.gettop(L)
-	if nargs < 3 {
-		lua.L_error(L, cstring("graphics.draw_debug_text expects: x, y, text, [color]"))
+	if Gfx_Ctx.transform.group_depth >= 31 {
+		lua.L_error(L, cstring("Transform stack overflow: Max depth is 32."))
 		return 0
 	}
 
-	// 1. Extract coordinates and string
-	x := cast(f32)lua.L_checknumber(L, 1)
-	y := cast(f32)lua.L_checknumber(L, 2)
-
-	text_len: c.size_t
-	text_c := lua.L_checklstring(L, 3, &text_len)
-
-  // 5. COLOR TINT: Pull integer, default to Solid White, cast to u32rgba
-  raw_color := lua.L_optinteger(L, 4, 0xFFFFFFFF)
-  color := u32rgba(raw_color)
-
-  set_global_sdl_color(color)
-
-	if !sdl.RenderDebugText(Renderer, x, y, text_c) {
-		fmt.eprintln("Debug text failed:", sdl.GetError())
-	}
+	current_m := Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth]
+	
+	Gfx_Ctx.transform.group_depth += 1
+	Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth] = current_m
 
 	return 0
 }
+
+// lua_graphics_end_transform implements: graphics.end_transform()
+lua_graphics_end_transform :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+
+	if Gfx_Ctx.transform.group_depth == 0 {
+		lua.L_error(L, cstring("Transform stack underflow: No group to end."))
+		return 0
+	}
+
+	Gfx_Ctx.transform.group_depth -= 1
+	return 0
+}
+
+// graphics.use_screen_space()
+// Wipes all inherited transforms (position, rotation, scale) for the current block, 
+// allowing you to draw directly to absolute screen coordinates.
+// Use this for: Drawing flat UI, nameplates, or targeting brackets while inside a transformed entity.
+// Note: This effect is scoped and ends as soon as graphics.end_transform() is called.
+lua_graphics_use_screen_space :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+
+	// '1' is the Odin literal for a clean slate matrix
+	Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth] = 1 
+	
+	return 0
+}
+
+// lua_graphics_set_translation implements: graphics.set_translation(x, y)
+lua_graphics_set_translation :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	tx := f32(lua.L_checknumber(L, 1))
+	ty := f32(lua.L_checknumber(L, 2))
+
+	T := matrix[3, 3]f32{
+		1, 0, tx,
+		0, 1, ty,
+		0, 0, 1,
+	}
+	
+	depth := Gfx_Ctx.transform.group_depth
+	Gfx_Ctx.transform.matrix_stack[depth] *= T
+	return 0
+}
+
+// lua_graphics_set_rotation implements: graphics.set_rotation(radians)
+lua_graphics_set_rotation :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	r := f32(lua.L_checknumber(L, 1))
+	c := math.cos(r)
+	s := math.sin(r)
+
+	R := matrix[3, 3]f32{
+		c, -s, 0,
+		s,  c, 0,
+		0,  0, 1,
+	}
+
+	depth := Gfx_Ctx.transform.group_depth
+	Gfx_Ctx.transform.matrix_stack[depth] *= R
+	return 0
+}
+
+// lua_graphics_set_scale implements: graphics.set_scale(sx, [sy])
+// sy defaults to sx if omitted for uniform scaling.
+lua_graphics_set_scale :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	sx := f32(lua.L_checknumber(L, 1))
+	sy := f32(lua.L_optnumber(L, 2, lua.Number(sx)))
+	
+	S := matrix[3, 3]f32{
+		sx, 0,  0,
+		0,  sy, 0,
+		0,  0,  1,
+	}
+
+	depth := Gfx_Ctx.transform.group_depth
+	Gfx_Ctx.transform.matrix_stack[depth] *= S
+	return 0
+}
+
+// lua_graphics_set_origin implements: graphics.set_origin(ox, oy)
+lua_graphics_set_origin :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	ox := f32(lua.L_checknumber(L, 1))
+	oy := f32(lua.L_checknumber(L, 2))
+
+	O := matrix[3, 3]f32{
+		1, 0, -ox,
+		0, 1, -oy,
+		0, 0, 1,
+	}
+
+	depth := Gfx_Ctx.transform.group_depth
+	Gfx_Ctx.transform.matrix_stack[depth] *= O
+	return 0
+}
+
+// graphics.screen_to_local(x, y) -> lx, ly
+// Reverses the active transform stack to convert a screen coordinate into the current local space.
+// Use this for: Checking if the mouse is hovering over a rotated or scaled entity.
+lua_graphics_screen_to_local :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+
+  sx := f32(lua.L_checknumber(L, 1))
+  sy := f32(lua.L_checknumber(L, 2))
+
+  m   := Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth]
+  inv := linalg.inverse(m)
+  local_pos := (inv * [3]f32{sx, sy, 1.0}).xy
+
+  lua.pushnumber(L, cast(lua.Number)local_pos.x)
+  lua.pushnumber(L, cast(lua.Number)local_pos.y)
+  return 2
+}
+
+// graphics.local_to_screen(lx, ly) -> sx, sy
+// Applies the active transform stack to convert a local coordinate into an absolute screen coordinate.
+// Use this for: Finding exactly where an entity is on the screen to draw a UI element over it.
+lua_graphics_local_to_screen :: proc "c" (L: ^lua.State) -> c.int {
+  context = runtime.default_context()
+
+  lx := f32(lua.L_checknumber(L, 1))
+  ly := f32(lua.L_checknumber(L, 2))
+
+  m := Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth]
+  screen_pos := (m * [3]f32{lx, ly, 1.0}).xy
+
+  lua.pushnumber(L, cast(lua.Number)screen_pos.x)
+  lua.pushnumber(L, cast(lua.Number)screen_pos.y)
+  return 2
+}
+
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1345,6 +1546,9 @@ register_graphics_api :: proc(L: ^lua.State) {
 	lua.newtable(L) // [graphics]
 
 	// RENDERING VERBS
+  lua.pushcfunction(L, lua_graphics_draw_image)
+  lua.setfield(L, -2, cstring("draw_image"))
+
 	lua.pushcfunction(L, lua_graphics_clear)
 	lua.setfield(L, -2, cstring("clear"))
 
@@ -1377,21 +1581,34 @@ register_graphics_api :: proc(L: ^lua.State) {
 	lua.pushcfunction(L, lua_graphics_get_image_size)
 	lua.setfield(L, -2, cstring("get_image_size"))
 
-	// // TRANSFORMATION STATE
-	// lua.pushcfunction(L, lua_graphics_set_draw_rotation)
-	// lua.setfield(L, -2, cstring("set_draw_rotation"))
 
-	// lua.pushcfunction(L, lua_graphics_set_draw_scale)
-	// lua.setfield(L, -2, cstring("set_draw_scale"))
+  // TRANSFORMATION STATE
+  lua.pushcfunction(L, lua_graphics_set_translation)
+  lua.setfield(L, -2, cstring("set_translation"))
 
-	// lua.pushcfunction(L, lua_graphics_set_draw_origin)
-	// lua.setfield(L, -2, cstring("set_draw_origin"))
+  lua.pushcfunction(L, lua_graphics_set_rotation)
+  lua.setfield(L, -2, cstring("set_rotation"))
 
-	// lua.pushcfunction(L, lua_graphics_begin_transform_group)
-	// lua.setfield(L, -2, cstring("begin_transform_group"))
+  lua.pushcfunction(L, lua_graphics_set_scale)
+  lua.setfield(L, -2, cstring("set_scale"))
 
-	// lua.pushcfunction(L, lua_graphics_end_transform_group)
-	// lua.setfield(L, -2, cstring("end_transform_group"))
+  lua.pushcfunction(L, lua_graphics_set_origin)
+  lua.setfield(L, -2, cstring("set_origin"))
+
+  lua.pushcfunction(L, lua_graphics_begin_transform)
+  lua.setfield(L, -2, cstring("begin_transform"))
+
+  lua.pushcfunction(L, lua_graphics_end_transform)
+  lua.setfield(L, -2, cstring("end_transform"))
+
+  lua.pushcfunction(L, lua_graphics_use_screen_space)
+  lua.setfield(L, -2, cstring("use_screen_space"))
+
+  lua.pushcfunction(L, lua_graphics_screen_to_local)
+  lua.setfield(L, -2, cstring("screen_to_local"))
+
+  lua.pushcfunction(L, lua_graphics_local_to_screen)
+  lua.setfield(L, -2, cstring("local_to_screen"))
 	
 //------------------------------------------------
 // - PIXELMAP IO & ALLOCATION

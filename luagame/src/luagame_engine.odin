@@ -241,6 +241,8 @@ main :: proc() {
   lua.L_openlibs(Lua)
   register_lua_api()
 
+  init_graphics_state()
+
   // Resolve the executable path to ensure relative asset loading works across different OS environments.
   exe_dir, err := os.get_executable_directory(context.temp_allocator)
   if err != os.ERROR_NONE {
@@ -299,7 +301,7 @@ main :: proc() {
   }
   
   // Finalize internal graphics state (e.g., base rect textures and default filtering).
-  init_graphics_state()
+  //init_graphics_state()
 
   // ---------------------------------------------------------------------
   // Timing
@@ -345,6 +347,21 @@ main :: proc() {
 
     // Execute user logic and draw commands.
     if !call_lua_number(cstring("update"), dt) { break }
+
+    // ---------------------------------------------------------
+    // ENGINE AUTO-CLEAR (Anti-Garbage Baseline)
+    // ---------------------------------------------------------
+    // 1. Set hardware brush to Black
+    sdl.SetRenderDrawColor(Renderer, 0, 0, 0, 255)
+    
+    // 2. Wipe the uninitialized VRAM
+    sdl.RenderClear(Renderer)
+    
+    // 3. Sync your internal state tracker so it knows the brush is currently Black
+    Gfx_Ctx.current_sdl_color = u32rgba(0x000000FF)
+    // ---------------------------------------------------------
+
+    // Execute user draw commands
     if !call_lua_noargs(cstring("draw")) { break }
 
     // Flip the backbuffer to the physical display.
