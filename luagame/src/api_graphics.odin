@@ -13,7 +13,7 @@ import lua "luajit"
 
 //TODO:
 
-// Primitives: draw_line, 1px unfilled rects, and draw_poly (plus unfilled variant). ect.
+// 1px: debug_line, outline debug_rect, 
 
 // Render Targets: Support for rendering to textures.
 
@@ -23,37 +23,33 @@ import lua "luajit"
 
 // Text & Fonts: Integration with SDL_ttf for font loading and text rendering.
 
-// Animation System: Logic for handling sprite/atlas frames over time.
+// Particle System
 
 // Shaders (see notes)
 
-//DONE!!!  
-//TRANSFORMS
+//Lua-side modules:
+//sprite/animation system
+
+
+//DONE!!!
+//TRANSFORM PIPELINE
 //Image IO
-//Image drawing prims (GPU) ****
-//Atlas/Sprite idx system
-//transform pipeline (scale/rot/origin) 
+//Image/region/rect drawing (GPU)
 //Pixelmap API (CPU Read/Write)
 
 //=========================================================================================
 // GRAPHICS API: STATE, TYPES & HELPERS
 //=========================================================================================
 
-//TYPES---------
+// ---------------------------------------------------------
+// TYPES AND GLOBAL CONTEXT
+// ---------------------------------------------------------
 
 // Image represents a hardware texture allocated in GPU VRAM.
 Image :: struct {
   texture: ^sdl.Texture,
   width:   f32,
   height:  f32,
-}
-
-Atlas :: struct {
-	image:  Image, 
-	cell_w: f32,
-	cell_h: f32,
-	cols:   int,
-	rows:   int,
 }
 
 Pixelmap :: struct {
@@ -72,10 +68,9 @@ Gfx_Ctx: struct {
 	}
 }
 
-
-
-
-//HELPERS---------
+// ---------------------------------------------------------
+// GRAPHICS SYSTEM HELPERS
+// ---------------------------------------------------------
 
 // CPU state only. Safe to call at boot.
 init_graphics_state :: proc() {
@@ -131,24 +126,23 @@ unpack_fcolor :: #force_inline proc(c: u32rgba) -> sdl.FColor {
 }
 
 // ---------------------------------------------------------
-// RENDER GEOMETRY PIPELINE
+// RENDER GEOMETRY PIPELINE HELPERS
 // ---------------------------------------------------------
 
-// draw_image_geometry submits a flat, un-transformed quad to the GPU.
-draw_image_geometry :: proc(tex: ^sdl.Texture, x, y, w, h: f32, color: u32rgba, m: matrix[3, 3]f32) {
+// draw_geometry submits a textured quad with explicit UV coordinates.
+draw_geometry :: proc(tex: ^sdl.Texture, x, y, w, h: f32, u0, v0, u1, v1: f32, color: u32rgba, m: matrix[3, 3]f32) {
 	fc := unpack_fcolor(color)
 
-	// Apply the local X/Y offsets directly to the vertices BEFORE multiplying by the world matrix.
 	tl := (m * [3]f32{x, y, 1}).xy
 	tr := (m * [3]f32{x + w, y, 1}).xy
 	br := (m * [3]f32{x + w, y + h, 1}).xy
 	bl := (m * [3]f32{x, y + h, 1}).xy
 
 	verts := [4]sdl.Vertex{
-		{ position = cast(sdl.FPoint)tl, color = fc, tex_coord = {0.0, 0.0} },
-		{ position = cast(sdl.FPoint)tr, color = fc, tex_coord = {1.0, 0.0} },
-		{ position = cast(sdl.FPoint)br, color = fc, tex_coord = {1.0, 1.0} },
-		{ position = cast(sdl.FPoint)bl, color = fc, tex_coord = {0.0, 1.0} },
+		{ position = cast(sdl.FPoint)tl, color = fc, tex_coord = {u0, v0} },
+		{ position = cast(sdl.FPoint)tr, color = fc, tex_coord = {u1, v0} },
+		{ position = cast(sdl.FPoint)br, color = fc, tex_coord = {u1, v1} },
+		{ position = cast(sdl.FPoint)bl, color = fc, tex_coord = {u0, v1} },
 	}
 
 	indices := [6]c.int{0, 1, 2, 0, 2, 3}
@@ -157,7 +151,7 @@ draw_image_geometry :: proc(tex: ^sdl.Texture, x, y, w, h: f32, color: u32rgba, 
 }
 
 // ---------------------------------------------------------
-// PIXELMAP GEOMETRY & INTERNAL HELPERS
+// PIXELMAP HELPERS
 // ---------------------------------------------------------
 
 // Helper to flip Lua's 0xRRGGBBAA to the physical 0xAABBGGRR memory layout.
@@ -170,22 +164,110 @@ u32_rgba_to_abgr :: #force_inline proc(c: u32) -> u32 {
 // GRAPHICS API: LUA BINDINGS
 //=========================================================================================
 
+// ---------------------------------------------------------
+// IMAGE I/O
+// ---------------------------------------------------------
+
+// lua_graphics_load_image implements: graphics.load_image(path) -> Image | nil, err
+lua_graphics_load_image :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    if lua.gettop(L) != 1 {
+        lua.L_error(L, cstring("graphics.load_image expects 1 argument: path"))
+        return 0
+    }
+
+    path_cstr := cast(cstring)lua.L_checklstring(L, 1, nil)
+
+    // 1. LOAD: Dispatch to the hardware-level helper.
+    img, ok := load_image_from_path(path_cstr)
+    if !ok {
+        lua.pushnil(L)
+        lua.pushstring(L, cstring("Failed to load image texture"))
+        return 2
+    }
+
+    // 2. BIND TO LUA: Allocate userdata and copy the Image POD.
+    data := cast(^Image)lua.newuserdata(L, size_of(Image))
+    data^ = img
+
+    // 3. ATTACH SAFETY NET: Apply the metatable for GC.
+    lua.L_getmetatable(L, cstring("Image_Meta"))
+    lua.setmetatable(L, -2)
+
+    return 1
+}
+
+// ---------------------------------------------------------
+// GPU DRAWING
+// ---------------------------------------------------------
+
 // lua_graphics_draw_image implements: graphics.draw_image(img, x, y, [color])
 lua_graphics_draw_image :: proc "c" (L: ^lua.State) -> c.int {
-  context = runtime.default_context()
+	context = runtime.default_context()
 
-  // L_checkudata throws a Lua error if arg 1 is missing or wrong type
-  img := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
-  if img == nil || img.texture == nil do return 0
+	img := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
+	if img == nil || img.texture == nil do return 0
 
-  x := f32(lua.L_checknumber(L, 2))
-  y := f32(lua.L_checknumber(L, 3))
-  raw_color := lua.L_optinteger(L, 4, 0xFFFFFFFF)
+	x := f32(lua.L_checknumber(L, 2))
+	y := f32(lua.L_checknumber(L, 3))
+	raw_color := lua.L_optinteger(L, 4, 0xFFFFFFFF)
 
-  world_m := Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth]
-  draw_image_geometry(img.texture, x, y, img.width, img.height, u32rgba(raw_color), world_m)
+	world_m := Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth]
+	
+	// Full image UVs: 0.0 to 1.0
+	draw_geometry(img.texture, x, y, img.width, img.height, 0.0, 0.0, 1.0, 1.0, u32rgba(raw_color), world_m)
 
-  return 0
+	return 0
+}
+
+// lua_graphics_draw_image_region implements: graphics.draw_image_region(img, sx, sy, sw, sh, x, y, [color])
+lua_graphics_draw_image_region :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+
+	img := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
+	if img == nil || img.texture == nil do return 0
+
+	sx := f32(lua.L_checknumber(L, 2))
+	sy := f32(lua.L_checknumber(L, 3))
+	sw := f32(lua.L_checknumber(L, 4))
+	sh := f32(lua.L_checknumber(L, 5))
+	
+	dx := f32(lua.L_checknumber(L, 6))
+	dy := f32(lua.L_checknumber(L, 7))
+
+	raw_color := lua.L_optinteger(L, 8, 0xFFFFFFFF)
+	
+	// Normalize pixel coordinates into UV space
+	u0 := sx / img.width
+	v0 := sy / img.height
+	u1 := (sx + sw) / img.width
+	v1 := (sy + sh) / img.height
+
+	world_m := Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth]
+
+	draw_geometry(img.texture, dx, dy, sw, sh, u0, v0, u1, v1, u32rgba(raw_color), world_m)
+
+	return 0
+}
+
+// lua_graphics_draw_rect implements: graphics.draw_rect(x, y, w, h, [color])
+// Draws a filled rectangle that respects the active transform stack.
+lua_graphics_draw_rect :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+
+	x := f32(lua.L_checknumber(L, 1))
+	y := f32(lua.L_checknumber(L, 2))
+	w := f32(lua.L_checknumber(L, 3))
+	h := f32(lua.L_checknumber(L, 4))
+	raw_color := lua.L_optinteger(L, 5, 0xFFFFFFFF)
+
+	world_m := Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth]
+	
+	// Pass nil for texture. UVs (0,0,0,0) are ignored by SDL when untextured.
+	draw_geometry(nil, x, y, w, h, 0.0, 0.0, 0.0, 0.0, u32rgba(raw_color), world_m)
+
+	return 0
 }
 
 // lua_graphics_clear implements: graphics.clear([color])
@@ -198,6 +280,48 @@ lua_graphics_clear :: proc "c" (L: ^lua.State) -> c.int {
   sdl.RenderClear(Renderer)
 
   return 0
+}
+
+// ---------------------------------------------------------
+// DEBUG DRAWS (DONT RESPECT TRANSFORMS)
+// ---------------------------------------------------------
+
+// lua_graphics_debug_line implements: graphics.debug_line(x1, y1, x2, y2, [color])
+// Draws a 1px thick line directly to the screen, ignoring the transform stack.
+// Use this for: Raycasts, velocity vectors, and quick debug indicators.
+lua_graphics_debug_line :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+
+	x1 := cast(f32)lua.L_checknumber(L, 1)
+	y1 := cast(f32)lua.L_checknumber(L, 2)
+	x2 := cast(f32)lua.L_checknumber(L, 3)
+	y2 := cast(f32)lua.L_checknumber(L, 4)
+	raw_color := lua.L_optinteger(L, 5, 0xFFFFFFFF)
+
+	set_global_sdl_color(u32rgba(raw_color))
+	sdl.RenderLine(Renderer, x1, y1, x2, y2)
+
+	return 0
+}
+
+// lua_graphics_debug_rect implements: graphics.debug_rect(x, y, w, h, [color])
+// Draws a 1px hollow rectangle directly to the screen, ignoring the transform stack.
+// Use this for: Hitboxes, bounds checking, and unbatched development visuals.
+lua_graphics_debug_rect :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+
+	x := cast(f32)lua.L_checknumber(L, 1)
+	y := cast(f32)lua.L_checknumber(L, 2)
+	w := cast(f32)lua.L_checknumber(L, 3)
+	h := cast(f32)lua.L_checknumber(L, 4)
+	raw_color := lua.L_optinteger(L, 5, 0xFFFFFFFF)
+
+	set_global_sdl_color(u32rgba(raw_color))
+	
+	rect := sdl.FRect{x, y, w, h}
+	sdl.RenderRect(Renderer, &rect)
+
+	return 0
 }
 
 // lua_graphics_draw_debug_text implements: graphics.draw_debug_text(x, y, text, [color])
@@ -221,8 +345,9 @@ lua_graphics_draw_debug_text :: proc "c" (L: ^lua.State) -> c.int {
   return 0
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////
+// ---------------------------------------------------------
+// TRANSFORM PIPELINE
+// ---------------------------------------------------------
 
 // lua_graphics_begin_transform implements: graphics.begin_transform()
 lua_graphics_begin_transform :: proc "c" (L: ^lua.State) -> c.int {
@@ -373,80 +498,8 @@ lua_graphics_local_to_screen :: proc "c" (L: ^lua.State) -> c.int {
   return 2
 }
 
-
-/////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////////////////////
-
-// lua_graphics_load_image implements: graphics.load_image(path) -> Image | nil, err
-lua_graphics_load_image :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
-
-    if lua.gettop(L) != 1 {
-        lua.L_error(L, cstring("graphics.load_image expects 1 argument: path"))
-        return 0
-    }
-
-    path_cstr := cast(cstring)lua.L_checklstring(L, 1, nil)
-
-    // 1. LOAD: Dispatch to the hardware-level helper.
-    img, ok := load_image_from_path(path_cstr)
-    if !ok {
-        lua.pushnil(L)
-        lua.pushstring(L, cstring("Failed to load image texture"))
-        return 2
-    }
-
-    // 2. BIND TO LUA: Allocate userdata and copy the Image POD.
-    data := cast(^Image)lua.newuserdata(L, size_of(Image))
-    data^ = img
-
-    // 3. ATTACH SAFETY NET: Apply the metatable for GC.
-    lua.L_getmetatable(L, cstring("Image_Meta"))
-    lua.setmetatable(L, -2)
-
-    return 1
-}
-
-// lua_graphics_load_atlas implements: graphics.load_atlas(path, cell_w, cell_h) -> Atlas | nil, err
-lua_graphics_load_atlas :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
-
-    if lua.gettop(L) != 3 {
-        lua.L_error(L, cstring("graphics.load_atlas expects 3 args: path, cell_w, cell_h"))
-        return 0
-    }
-
-    path_cstr := cast(cstring)lua.L_checklstring(L, 1, nil)
-    cell_w    := f32(lua.L_checknumber(L, 2))
-    cell_h    := f32(lua.L_checknumber(L, 3))
-
-    // 1. LOAD: Reuse the hardware-level helper.
-    img, ok := load_image_from_path(path_cstr)
-    if !ok {
-        lua.pushnil(L)
-        lua.pushstring(L, cstring("Failed to load atlas texture"))
-        return 2
-    }
-
-    // 2. BIND TO LUA: Allocate Atlas userdata and calculate the grid.
-    atlas := cast(^Atlas)lua.newuserdata(L, size_of(Atlas))
-    atlas^ = Atlas{
-        image  = img,
-        cell_w = cell_w,
-        cell_h = cell_h,
-        cols   = int(img.width / cell_w),
-        rows   = int(img.height / cell_h),
-    }
-
-    // 3. META: Attach Atlas_Meta for separate garbage collection.
-    lua.L_getmetatable(L, cstring("Atlas_Meta"))
-    lua.setmetatable(L, -2)
-
-    return 1
-}
-
 //---------------------------------------------
-// DRAW UTIL
+// DRAW UTILITIES
 //---------------------------------------------
 
 // lua_graphics_set_default_filter implements: graphics.set_default_filter("nearest" | "linear")
@@ -1486,18 +1539,6 @@ lua_image_gc :: proc "c" (L: ^lua.State) -> c.int {
   return 0
 }
 
-// lua_atlas_gc: Destroys the underlying VRAM texture of the Atlas composition.
-lua_atlas_gc :: proc "c" (L: ^lua.State) -> c.int {
-  context = runtime.default_context()
-  atlas := cast(^Atlas)lua.L_checkudata(L, 1, cstring("Atlas_Meta"))
-
-  if atlas != nil && atlas.image.texture != nil {
-    sdl.DestroyTexture(atlas.image.texture)
-    atlas.image.texture = nil
-  }
-  return 0
-}
-
 // lua_pixelmap_gc: Destroys the CPU-side SDL Surface.
 lua_pixelmap_gc :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
@@ -1519,12 +1560,6 @@ setup_graphics_metatables :: proc(L: ^lua.State) {
   lua.setfield(L, -2, cstring("__gc"))
   lua.pop(L, 1)
 
-  // 2. ATLAS METATABLE 
-  lua.L_newmetatable(L, cstring("Atlas_Meta"))
-  lua.pushcfunction(L, lua_atlas_gc)
-  lua.setfield(L, -2, cstring("__gc"))
-  lua.pop(L, 1)
-
   // 3. PIXELMAP METATABLE
   lua.L_newmetatable(L, cstring("Pixelmap_Meta"))
   lua.pushcfunction(L, lua_pixelmap_gc)
@@ -1538,8 +1573,6 @@ setup_graphics_metatables :: proc(L: ^lua.State) {
 
 // register_graphics_api initializes the internal graphics state and binds
 // the 'graphics' table to the Lua global environment.
-// register_graphics_api initializes the internal graphics state and binds
-// the 'graphics' table to the Lua global environment.
 register_graphics_api :: proc(L: ^lua.State) {
 	setup_graphics_metatables(L)
 
@@ -1549,30 +1582,27 @@ register_graphics_api :: proc(L: ^lua.State) {
   lua.pushcfunction(L, lua_graphics_draw_image)
   lua.setfield(L, -2, cstring("draw_image"))
 
-	lua.pushcfunction(L, lua_graphics_clear)
+	lua.pushcfunction(L, lua_graphics_draw_image_region)
+	lua.setfield(L, -2, cstring("draw_image_region"))
+
+  lua.pushcfunction(L, lua_graphics_draw_rect)
+	lua.setfield(L, -2, cstring("draw_rect"))
+
+  lua.pushcfunction(L, lua_graphics_clear)
 	lua.setfield(L, -2, cstring("clear"))
 
-	lua.pushcfunction(L, lua_graphics_draw_debug_text)
+  lua.pushcfunction(L, lua_graphics_draw_debug_text)
 	lua.setfield(L, -2, cstring("draw_debug_text"))
 
-  // lua.pushcfunction(L, lua_graphics_draw_rect)
-	// lua.setfield(L, -2, cstring("draw_rect"))
+  lua.pushcfunction(L, lua_graphics_debug_line)
+	lua.setfield(L, -2, cstring("debug_line"))
 
-	// lua.pushcfunction(L, lua_graphics_draw_image)
-	// lua.setfield(L, -2, cstring("draw_image"))
-
-	// lua.pushcfunction(L, lua_graphics_draw_image_region)
-	// lua.setfield(L, -2, cstring("draw_image_region"))
-
-	// lua.pushcfunction(L, lua_graphics_draw_sprite)
-	// lua.setfield(L, -2, cstring("draw_sprite"))
+	lua.pushcfunction(L, lua_graphics_debug_rect)
+	lua.setfield(L, -2, cstring("debug_rect"))
 
 	// RESOURCE LOADERS
 	lua.pushcfunction(L, lua_graphics_load_image)
 	lua.setfield(L, -2, cstring("load_image"))
-
-	lua.pushcfunction(L, lua_graphics_load_atlas)
-	lua.setfield(L, -2, cstring("load_atlas"))
 	
 	lua.pushcfunction(L, lua_graphics_set_default_filter)
 	lua.setfield(L, -2, cstring("set_default_filter"))
