@@ -81,6 +81,7 @@ These functions reside in the global `core` module but are frequently used with 
 
 ## Hardware Rendering (VRAM)
 Operations performed directly on the GPU using hardware textures. These are highly efficient, respect the active transform stack, and support global blend modes.
+---
 
 ### draw_image
 Draws a full image to the screen.
@@ -255,11 +256,19 @@ x, y, w, h = graphics.get_clip_rect()
 
 ---
 
-## Transformations & Coordinate Spaces
-The engine maintains a matrix stack (up to 32 deep). Transformations apply to all `draw_image` and `draw_rect` calls, allowing you to easily rotate, scale, and move complex groupings of entities.
+## Draw Transforms
+Transform blocks let you temporarily change how things are drawn — you can move, rotate, or scale every `draw_` call inside a block.  
+
+You must call `begin_transform()` before using any transform functions.
+All `set_` functions only affect drawing inside an active transform block.  
+
+Everything you draw inside the block is affected, in the order you apply the transforms.
 
 ### begin_transform
-Pushes a copy of the current transform state onto the stack.
+Starts a new transform group.  
+
+You must call this before using any transform functions.
+All transforms applied after this will affect everything you draw until `end_transform()` is called.
 
 #### Usage
 ```lua
@@ -269,7 +278,9 @@ graphics.begin_transform()
 ---
 
 ### end_transform
-Pops the current transform state off the stack, restoring the previous state.
+Ends the current transform group.  
+
+After this, drawing goes back to normal, and transform functions no longer have any effect until a new group is started.
 
 #### Usage
 ```lua
@@ -279,7 +290,9 @@ graphics.end_transform()
 ---
 
 ### set_translation
-Moves the local coordinate space origin.
+Moves everything you draw inside the current transform group.  
+
+Must be called inside a transform group.
 
 #### Usage
 ```lua
@@ -292,7 +305,11 @@ graphics.set_translation(x, y)
 ---
 
 ### set_rotation
-Rotates the local coordinate space.
+Rotates everything you draw inside the current transform group.  
+
+Rotation happens around the current origin (see set_origin).  
+
+Must be called inside a transform group.
 
 #### Usage
 ```lua
@@ -305,7 +322,11 @@ graphics.set_rotation(radians)
 ---
 
 ### set_scale
-Scales the local coordinate space.
+Scales everything you draw inside the current transform group.  
+
+Scaling happens relative to the current origin (see set_origin).  
+
+Must be called inside a transform group.  
 
 #### Usage
 ```lua
@@ -319,7 +340,12 @@ graphics.set_scale(sx, sy?)
 ---
 
 ### set_origin
-Offsets the pivot point used for scaling and rotation.
+Sets the pivot point used for rotation and scaling.  
+
+By default, rotation and scaling happen around the top-left corner.
+Changing the origin lets you rotate or scale around a different point (for example, the center).  
+
+Must be called inside a transform group.
 
 #### Usage
 ```lua
@@ -332,7 +358,13 @@ graphics.set_origin(ox, oy)
 ---
 
 ### use_screen_space
-Wipes all inherited transforms (position, rotation, scale) for the current block, allowing you to draw directly to absolute screen coordinates. Ends when `end_transform()` is called.
+Ignores all transforms in the current group.  
+
+Drawing after this will use screen coordinates (top-left = 0,0), regardless of any transforms applied earlier in the group.  
+
+Still ends when `end_transform()` is called.  
+
+Must be called inside a transform group.
 
 #### Usage
 ```lua
@@ -342,7 +374,9 @@ graphics.use_screen_space()
 ---
 
 ### screen_to_local
-Reverses the active transform stack to convert an absolute screen coordinate into the current local space.
+Converts a screen position into the current transform.  
+
+Useful for matching input (like the mouse) to transformed drawing.
 
 #### Usage
 ```lua
@@ -358,7 +392,7 @@ lx, ly = graphics.screen_to_local(sx, sy)
 ---
 
 ### local_to_screen
-Applies the active transform stack to convert a local coordinate into an absolute screen coordinate.
+Converts a position inside the current transform into screen coordinates.
 
 #### Usage
 ```lua
@@ -370,6 +404,29 @@ sx, sy = graphics.local_to_screen(lx, ly)
 
 #### Returns
 * `number: sx`, `number: sy` - Screen space coordinates.
+
+---
+
+## Important Notes
+
+* Transform functions (`set_translation`, `set_rotation`, etc.) only work inside a `begin_transform()` / `end_transform()` block.
+
+* Transforms are applied **in the order you call them**.
+
+  This means:
+
+  * Moving, then rotating → rotates around the moved position
+  * Rotating, then moving → moves in a rotated direction
+  * Scaling before vs after rotation also changes the result
+
+  Small changes in order can produce very different results.
+
+* Transforms affect **all draw calls inside the group**.
+
+* They do **not** affect values you pass directly into draw functions.
+
+  If you manually pass `x, y` to a draw call,
+  `screen_to_local()` may not match what you see on screen.
 
 ---
 
