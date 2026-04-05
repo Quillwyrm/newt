@@ -257,20 +257,25 @@ x, y, w, h = graphics.get_clip_rect()
 ---
 
 ## Draw Transforms
-Transform blocks let you temporarily change how things are drawn — you can move, rotate, or scale every `draw_` call inside a block.  
+
+Transform blocks let you temporarily change how things are drawn. You can move, rotate, or scale every `draw_` call inside a block.
 
 You must call `begin_transform()` before using any transform functions.
-All `set_` functions only affect drawing inside an active transform block.  
+All `set_` transform functions only work inside an active transform block.
 
-Everything you draw inside the block is affected, in the order you apply the transforms.
+Transforms are applied in the order you call them, and affect everything drawn until the block ends.
+
+---
 
 ### begin_transform
-Starts a new transform group.  
+
+Starts a new transform block.
 
 You must call this before using any transform functions.
-All transforms applied after this will affect everything you draw until `end_transform()` is called.
+All transforms applied after this affect everything you draw until `end_transform()` is called.
 
 #### Usage
+
 ```lua
 graphics.begin_transform()
 ```
@@ -278,11 +283,13 @@ graphics.begin_transform()
 ---
 
 ### end_transform
-Ends the current transform group.  
 
-After this, drawing goes back to normal, and transform functions no longer have any effect until a new group is started.
+Ends the current transform block.
+
+After this, drawing returns to normal. Transform functions have no effect until a new block is started.
 
 #### Usage
+
 ```lua
 graphics.end_transform()
 ```
@@ -290,83 +297,97 @@ graphics.end_transform()
 ---
 
 ### set_translation
-Moves everything you draw inside the current transform group.  
 
-Must be called inside a transform group.
+Moves everything you draw inside the current transform block.
+
+Must be called inside a transform block.
 
 #### Usage
+
 ```lua
 graphics.set_translation(x, y)
 ```
 
 #### Arguments
-* `number: x`, `number: y` - Offset amounts.
+
+* `number: x`, `number: y` — Offset amounts.
 
 ---
 
 ### set_rotation
-Rotates everything you draw inside the current transform group.  
 
-Rotation happens around the current origin (see set_origin).  
+Rotates everything you draw inside the current transform block.
 
-Must be called inside a transform group.
+Rotation happens around the current origin (see `set_origin`).
+
+Must be called inside a transform block.
 
 #### Usage
+
 ```lua
 graphics.set_rotation(radians)
 ```
 
 #### Arguments
-* `number: radians` - Angle of rotation.
+
+* `number: radians` — Angle of rotation.
 
 ---
 
 ### set_scale
-Scales everything you draw inside the current transform group.  
 
-Scaling happens relative to the current origin (see set_origin).  
+Scales everything you draw inside the current transform block.
 
-Must be called inside a transform group.  
+Scaling happens relative to the current origin (see `set_origin`).
+
+Must be called inside a transform block.
 
 #### Usage
+
 ```lua
 graphics.set_scale(sx, sy?)
 ```
 
 #### Arguments
-* `number: sx` - X-axis scale factor.
-* `number: sy` (Optional) - Y-axis scale factor. Defaults to `sx` if omitted for uniform scaling.
+
+* `number: sx` — Horizontal scale.
+* `number: sy` (optional) — Vertical scale. Defaults to `sx`.
 
 ---
 
 ### set_origin
-Sets the pivot point used for rotation and scaling.  
+
+Sets the pivot point used for rotation and scaling.
 
 By default, rotation and scaling happen around the top-left corner.
-Changing the origin lets you rotate or scale around a different point (for example, the center).  
+Changing the origin lets you rotate or scale around a different point (for example, the center).
 
-Must be called inside a transform group.
+Must be called inside a transform block.
 
 #### Usage
+
 ```lua
 graphics.set_origin(ox, oy)
 ```
 
 #### Arguments
-* `number: ox`, `number: oy` - The pivot coordinates within the local space.
+
+* `number: ox`, `number: oy` — Pivot position.
 
 ---
 
 ### use_screen_space
-Ignores all transforms in the current group.  
 
-Drawing after this will use screen coordinates (top-left = 0,0), regardless of any transforms applied earlier in the group.  
+Ignores all transforms in the current block.
 
-Still ends when `end_transform()` is called.  
+Drawing after this uses screen coordinates (top-left = 0,0), regardless of any transforms applied earlier in the block.
 
-Must be called inside a transform group.
+Still ends when `end_transform()` is called.
+
+Must be called inside a transform block.
 
 #### Usage
+
 ```lua
 graphics.use_screen_space()
 ```
@@ -374,36 +395,44 @@ graphics.use_screen_space()
 ---
 
 ### screen_to_local
-Converts a screen position into the current transform.  
+
+Converts a screen position into the current transform.
 
 Useful for matching input (like the mouse) to transformed drawing.
 
 #### Usage
+
 ```lua
 lx, ly = graphics.screen_to_local(sx, sy)
 ```
 
 #### Arguments
-* `number: sx`, `number: sy` - Screen coordinates.
+
+* `number: sx`, `number: sy` — Screen coordinates.
 
 #### Returns
-* `number: lx`, `number: ly` - Local space coordinates.
+
+* `number: lx`, `number: ly` — Position inside the current transform.
 
 ---
 
 ### local_to_screen
+
 Converts a position inside the current transform into screen coordinates.
 
 #### Usage
+
 ```lua
 sx, sy = graphics.local_to_screen(lx, ly)
 ```
 
 #### Arguments
-* `number: lx`, `number: ly` - Local space coordinates.
+
+* `number: lx`, `number: ly` — Position inside the current transform.
 
 #### Returns
-* `number: sx`, `number: sy` - Screen space coordinates.
+
+* `number: sx`, `number: sy` — Screen coordinates.
 
 ---
 
@@ -413,20 +442,25 @@ sx, sy = graphics.local_to_screen(lx, ly)
 
 * Transforms are applied **in the order you call them**.
 
-  This means:
+  A common pattern is:
 
-  * Moving, then rotating → rotates around the moved position
-  * Rotating, then moving → moves in a rotated direction
-  * Scaling before vs after rotation also changes the result
+  * Translate → Rotate → Scale (TRS)
 
-  Small changes in order can produce very different results.
+  Changing the order changes the result:
 
-* Transforms affect **all draw calls inside the group**.
+  * Move, then rotate → rotates around the moved position
+  * Rotate, then move → moves in a rotated direction
+  * Scaling before vs after rotation also produces different results
+
+* Transforms affect **all draw calls inside the block**.
 
 * They do **not** affect values you pass directly into draw functions.
 
-  If you manually pass `x, y` to a draw call,
-  `screen_to_local()` may not match what you see on screen.
+  If you pass `x, y` into a draw call,
+  `screen_to_local()` and `local_to_screen()` may not match what you see.
+
+  If you need correct coordinate conversion, apply movement using `set_translation()` instead of draw arguments.
+
 
 ---
 
