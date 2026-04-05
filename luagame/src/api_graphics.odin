@@ -2,7 +2,6 @@ package main
 
 import "base:runtime"
 import "core:fmt"
-import "core:strings"
 import "core:math"
 import "core:c"
 import "core:math/linalg"
@@ -12,14 +11,6 @@ import "vendor:sdl3/ttf"
 import lua "luajit"
 
 //TODO:
-
-// Render Targets: Support for rendering to textures.
-
-// Scissor/clip rect
-
-//--
-
-//BIGBOYS:
 
 // Text & Fonts: Integration with SDL_ttf for font loading and text rendering.
 
@@ -34,6 +25,8 @@ import lua "luajit"
 
 
 //DONE!!!
+// Render Targets: Support for rendering to textures.
+// Scissor/clip rect
 // Blend Modes: Global or per-draw blending control.
 // 1px: debug_line, outline debug_rect, 
 //TRANSFORM PIPELINE
@@ -131,6 +124,13 @@ unpack_fcolor :: #force_inline proc(c: u32rgba) -> sdl.FColor {
 	}
 }
 
+@(private)
+check_render_safety :: #force_inline proc(L: ^lua.State, fn_name: cstring) {
+    if Renderer == nil {
+        lua.L_error(L, "%s error: Renderer is nil. Did you forget to call window.init() in runtime.init()?", fn_name)
+    }
+}
+
 // ---------------------------------------------------------
 // RENDER GEOMETRY PIPELINE HELPERS
 // ---------------------------------------------------------
@@ -181,6 +181,7 @@ u32_rgba_to_abgr :: #force_inline proc(c: u32) -> u32 {
 // lua_graphics_load_image implements: graphics.load_image(path) -> Image | nil, err
 lua_graphics_load_image :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
+    check_render_safety(L,"graphics.load_image")
 
     if lua.gettop(L) != 1 {
         lua.L_error(L, cstring("graphics.load_image expects 1 argument: path"))
@@ -215,6 +216,7 @@ lua_graphics_load_image :: proc "c" (L: ^lua.State) -> c.int {
 // lua_graphics_draw_image implements: graphics.draw_image(img, x, y, [color])
 lua_graphics_draw_image :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
+  check_render_safety(L, "graphics.draw_image")
 
 	img := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
 	if img == nil || img.texture == nil do return 0
@@ -234,6 +236,7 @@ lua_graphics_draw_image :: proc "c" (L: ^lua.State) -> c.int {
 // lua_graphics_draw_image_region implements: graphics.draw_image_region(img, sx, sy, sw, sh, x, y, [color])
 lua_graphics_draw_image_region :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
+  check_render_safety(L, "graphics.draw_image_region")
 
 	img := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
 	if img == nil || img.texture == nil do return 0
@@ -265,6 +268,7 @@ lua_graphics_draw_image_region :: proc "c" (L: ^lua.State) -> c.int {
 // Draws a filled rectangle that respects the active transform stack.
 lua_graphics_draw_rect :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
+  check_render_safety(L, "graphics.draw_rect")
 
 	x := f32(lua.L_checknumber(L, 1))
 	y := f32(lua.L_checknumber(L, 2))
@@ -284,6 +288,7 @@ lua_graphics_draw_rect :: proc "c" (L: ^lua.State) -> c.int {
 // Clears the entire render target. Defaults to black.
 lua_graphics_clear :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
+  check_render_safety(L, "graphics.clear")
 
   raw_color := lua.L_optinteger(L, 1, 0x000000FF)
   set_global_sdl_color(u32rgba(raw_color))
@@ -301,6 +306,7 @@ lua_graphics_clear :: proc "c" (L: ^lua.State) -> c.int {
 // Use this for: Raycasts, velocity vectors, and quick debug indicators.
 lua_graphics_debug_line :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
+  check_render_safety(L, "graphics.debug_line")
 
 	x1 := cast(f32)lua.L_checknumber(L, 1)
 	y1 := cast(f32)lua.L_checknumber(L, 2)
@@ -319,6 +325,7 @@ lua_graphics_debug_line :: proc "c" (L: ^lua.State) -> c.int {
 // Use this for: Hitboxes, bounds checking, and unbatched development visuals.
 lua_graphics_debug_rect :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
+  check_render_safety(L, "graphics.debug_rect")
 
 	x := cast(f32)lua.L_checknumber(L, 1)
 	y := cast(f32)lua.L_checknumber(L, 2)
@@ -334,10 +341,11 @@ lua_graphics_debug_rect :: proc "c" (L: ^lua.State) -> c.int {
 	return 0
 }
 
-// lua_graphics_draw_debug_text implements: graphics.draw_debug_text(x, y, text, [color])
+// lua_graphics_debug_text implements: graphics.debug_text(x, y, text, [color])
 // Draws simple 8x8 bitmap text to the screen for debugging purposes.
-lua_graphics_draw_debug_text :: proc "c" (L: ^lua.State) -> c.int {
+lua_graphics_debug_text :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
+  check_render_safety(L, "graphics.debug_text")
 
   x := cast(f32)lua.L_checknumber(L, 1)
   y := cast(f32)lua.L_checknumber(L, 2)
@@ -563,12 +571,13 @@ parse_gpu_blend_mode :: #force_inline proc(mode_str: cstring) -> sdl.BlendMode {
 	if mode_str == nil do return sdl.BLENDMODE_BLEND 
 
 	switch string(mode_str) {
-	case "replace":  return sdl.BLENDMODE_NONE
-	case "blend":    return sdl.BLENDMODE_BLEND
-	case "add":      return sdl.BLENDMODE_ADD
-	case "multiply": return sdl.BLENDMODE_MUL
-	case "modulate": return sdl.BLENDMODE_MOD
-	case:            return sdl.BLENDMODE_BLEND
+	case "replace":       return sdl.BLENDMODE_NONE
+	case "blend":         return sdl.BLENDMODE_BLEND
+	case "add":           return sdl.BLENDMODE_ADD
+	case "multiply":      return sdl.BLENDMODE_MUL
+	case "modulate":      return sdl.BLENDMODE_MOD
+  case "premultiplied": return sdl.BLENDMODE_BLEND_PREMULTIPLIED
+	case:                 return sdl.BLENDMODE_BLEND
 	}
 }
 
@@ -576,6 +585,8 @@ parse_gpu_blend_mode :: #force_inline proc(mode_str: cstring) -> sdl.BlendMode {
 // Sets the global hardware blending mode for all subsequent draw calls.
 lua_graphics_set_blend_mode :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
+  check_render_safety(L, "graphics.set_blend_mode")
+
 	mode_str := lua.L_optstring(L, 1, "blend")
 	mode := parse_gpu_blend_mode(mode_str)
 
@@ -590,6 +601,7 @@ lua_graphics_set_blend_mode :: proc "c" (L: ^lua.State) -> c.int {
 // Passing no arguments disables the clipping entirely.
 lua_graphics_set_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
+  check_render_safety(L, "graphics.set_clip_rect")
 
 	// Disable clipping if called with zero arguments: graphics.set_clip_rect()
 	if lua.gettop(L) == 0 {
@@ -615,6 +627,7 @@ lua_graphics_set_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
 // Returns nothing if clipping is disabled.
 lua_graphics_get_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
+  check_render_safety(L, "graphics.get_clip_rect")
 
 	rect: sdl.Rect
 	enabled := sdl.GetRenderClipRect(Renderer, &rect)
@@ -627,6 +640,70 @@ lua_graphics_get_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
 	lua.pushinteger(L, cast(lua.Integer)rect.h)
 
 	return 4
+}
+
+// 2. Implement the Canvas Creation
+// graphics.new_canvas(w, h) -> Image
+lua_graphics_new_canvas :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+  check_render_safety(L, "graphics.new_canvas")
+
+	w := f32(lua.L_checknumber(L, 1))
+	h := f32(lua.L_checknumber(L, 2))
+
+	// Create with .TARGET access
+	texture := sdl.CreateTexture(Renderer, .RGBA32, .TARGET, cast(c.int)w, cast(c.int)h)
+	if texture == nil {
+		lua.pushnil(L)
+		lua.pushstring(L, sdl.GetError())
+		return 2
+	}
+
+	sdl.SetTextureBlendMode(texture, {.BLEND})
+	sdl.SetTextureScaleMode(texture, Gfx_Ctx.default_scale_mode)
+
+	data := cast(^Image)lua.newuserdata(L, size_of(Image))
+	data^ = Image{
+		texture = texture,
+		width   = w,
+		height  = h,
+	}
+
+	lua.L_getmetatable(L, cstring("Image_Meta"))
+	lua.setmetatable(L, -2)
+
+	return 1
+}
+
+// 3. Implement the Target Switcher with Driver-Level Safety
+// graphics.set_canvas([image])
+lua_graphics_set_canvas :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+  check_render_safety(L, "graphics.set_canvas")
+
+	// graphics.set_canvas() or graphics.set_canvas(nil) resets to backbuffer
+	if lua.gettop(L) == 0 || lua.isnil(L, 1) {
+		sdl.SetRenderTarget(Renderer, nil)
+		return 0
+	}
+
+	img := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
+	if img == nil || img.texture == nil do return 0
+
+	// DRIVER QUERY: Instead of a struct bool, ask SDL3 for the access flag
+	props := sdl.GetTextureProperties(img.texture)
+	access := cast(sdl.TextureAccess)sdl.GetNumberProperty(props, sdl.PROP_TEXTURE_ACCESS_NUMBER, cast(i64)sdl.TextureAccess.STATIC)
+
+	if access != .TARGET {
+		lua.L_error(L, "graphics.set_canvas: Image is not a render target (must be created with new_canvas)")
+		return 0
+	}
+
+	if !sdl.SetRenderTarget(Renderer, img.texture) {
+		lua.L_error(L, sdl.GetError())
+	}
+
+	return 0
 }
 
 //---------------------------------------------
@@ -1471,6 +1548,7 @@ lua_graphics_blit_region :: proc "c" (L: ^lua.State) -> c.int {
 // lua_graphics_new_image_from_pixelmap implements: graphics.new_image_from_pixelmap(pmap) -> img
 lua_graphics_new_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
+  check_render_safety(L, "graphics.new_image_from_pixelmap")
 	
 	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
 	if pmap == nil || pmap.surface == nil do return 0
@@ -1504,6 +1582,7 @@ lua_graphics_new_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 // Syncs the entire CPU pixelmap to the GPU image at an optional destination offset.
 lua_graphics_update_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
+  check_render_safety(L, "graphics.update_image_from_pixelmap")
 	
 	img  := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
 	pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, cstring("Pixelmap_Meta"))
@@ -1527,6 +1606,7 @@ lua_graphics_update_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 // Pushes a specific snip of CPU memory across the PCI-e bus to a specific location on the GPU texture.
 lua_graphics_update_image_region_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
+  check_render_safety(L, "graphics.update_image_region_from_pixelmap")
 	
 	img  := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
 	pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, cstring("Pixelmap_Meta"))
@@ -1683,6 +1763,13 @@ register_graphics_api :: proc(L: ^lua.State) {
 	lua.pushcfunction(L, lua_graphics_set_default_filter)
 	lua.setfield(L, -2, cstring("set_default_filter"))
 
+  // RENDER TARGETS
+  lua.pushcfunction(L, lua_graphics_new_canvas)
+  lua.setfield(L, -2, cstring("new_canvas"))
+
+  lua.pushcfunction(L, lua_graphics_set_canvas)
+  lua.setfield(L, -2, cstring("set_canvas"))
+
 
 	// --- FRAME & PIPELINE STATE ---
 	lua.pushcfunction(L, lua_graphics_clear)
@@ -1728,8 +1815,8 @@ register_graphics_api :: proc(L: ^lua.State) {
 
 
 	// --- DEBUG DRAWING ---
-	lua.pushcfunction(L, lua_graphics_draw_debug_text)
-	lua.setfield(L, -2, cstring("draw_debug_text"))
+	lua.pushcfunction(L, lua_graphics_debug_text)
+	lua.setfield(L, -2, cstring("debug_text"))
 
 	lua.pushcfunction(L, lua_graphics_debug_line)
 	lua.setfield(L, -2, cstring("debug_line"))
