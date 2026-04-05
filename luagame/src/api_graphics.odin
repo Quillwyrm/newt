@@ -13,13 +13,13 @@ import lua "luajit"
 
 //TODO:
 
-// 1px: debug_line, outline debug_rect, 
-
 // Render Targets: Support for rendering to textures.
 
-// Blend Modes: Global or per-draw blending control.
-
 // Scissor/clip rect
+
+//--
+
+//BIGBOYS:
 
 // Text & Fonts: Integration with SDL_ttf for font loading and text rendering.
 
@@ -27,11 +27,15 @@ import lua "luajit"
 
 // Shaders (see notes)
 
+//---
+
 //Lua-side modules:
 //sprite/animation system
 
 
 //DONE!!!
+// Blend Modes: Global or per-draw blending control.
+// 1px: debug_line, outline debug_rect, 
 //TRANSFORM PIPELINE
 //Image IO
 //Image/region/rect drawing (GPU)
@@ -61,6 +65,7 @@ u32rgba :: distinct u32
 Gfx_Ctx: struct {
 	current_sdl_color:  u32rgba, 
 	default_scale_mode: sdl.ScaleMode,
+  current_blend_mode: sdl.BlendMode,
 
 	transform : struct {
 		matrix_stack: [32]matrix[3, 3]f32,
@@ -76,6 +81,7 @@ Gfx_Ctx: struct {
 init_graphics_state :: proc() {
 	Gfx_Ctx.current_sdl_color = u32rgba(0xFFFFFFFF)
 	Gfx_Ctx.default_scale_mode = .LINEAR
+  Gfx_Ctx.current_blend_mode = sdl.BLENDMODE_BLEND
 	
 	// '1' is the Odin literal for an Identity Matrix
 	Gfx_Ctx.transform.matrix_stack[0] = 1 
@@ -146,6 +152,10 @@ draw_geometry :: proc(tex: ^sdl.Texture, x, y, w, h: f32, u0, v0, u1, v1: f32, c
 	}
 
 	indices := [6]c.int{0, 1, 2, 0, 2, 3}
+
+  if tex != nil {
+		sdl.SetTextureBlendMode(tex, Gfx_Ctx.current_blend_mode)
+	}
 
 	sdl.RenderGeometry(Renderer, tex, raw_data(verts[:]), 4, raw_data(indices[:]), 6)
 }
@@ -543,6 +553,80 @@ lua_graphics_get_image_size :: proc "c" (L: ^lua.State) -> c.int {
 	lua.pushnumber(L, cast(lua.Number)img.height)
 
 	return 2
+}
+
+// ---------------------------------------------------------
+// RENDER STATE
+// ---------------------------------------------------------
+
+parse_gpu_blend_mode :: #force_inline proc(mode_str: cstring) -> sdl.BlendMode {
+	if mode_str == nil do return sdl.BLENDMODE_BLEND 
+
+	switch string(mode_str) {
+	case "replace":  return sdl.BLENDMODE_NONE
+	case "blend":    return sdl.BLENDMODE_BLEND
+	case "add":      return sdl.BLENDMODE_ADD
+	case "multiply": return sdl.BLENDMODE_MUL
+	case "modulate": return sdl.BLENDMODE_MOD
+	case:            return sdl.BLENDMODE_BLEND
+	}
+}
+
+// lua_graphics_set_blend_mode implements: graphics.set_blend_mode([mode])
+// Sets the global hardware blending mode for all subsequent draw calls.
+lua_graphics_set_blend_mode :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+	mode_str := lua.L_optstring(L, 1, "blend")
+	mode := parse_gpu_blend_mode(mode_str)
+
+	sdl.SetRenderDrawBlendMode(Renderer, mode)
+	Gfx_Ctx.current_blend_mode = mode // <-- ADD THIS
+
+	return 0
+}
+
+// lua_graphics_set_clip_rect implements: graphics.set_clip_rect([x, y, w, h])
+// Sets a hardware clipping rectangle in absolute window coordinates.
+// Passing no arguments disables the clipping entirely.
+lua_graphics_set_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+
+	// Disable clipping if called with zero arguments: graphics.set_clip_rect()
+	if lua.gettop(L) == 0 {
+		sdl.SetRenderClipRect(Renderer, nil)
+		return 0
+	}
+
+	// Clip hardware requires integers.
+	// NOTE: This operates in physical screen-space and ignores the current transform matrix.
+	x := cast(c.int)lua.L_checkinteger(L, 1)
+	y := cast(c.int)lua.L_checkinteger(L, 2)
+	w := cast(c.int)lua.L_checkinteger(L, 3)
+	h := cast(c.int)lua.L_checkinteger(L, 4)
+
+	rect := sdl.Rect{x, y, w, h}
+	sdl.SetRenderClipRect(Renderer, &rect)
+
+	return 0
+}
+
+// lua_graphics_get_clip_rect implements: x, y, w, h = graphics.get_clip_rect()
+// Returns the current hardware clip rectangle. 
+// Returns nothing if clipping is disabled.
+lua_graphics_get_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
+	context = runtime.default_context()
+
+	rect: sdl.Rect
+	enabled := sdl.GetRenderClipRect(Renderer, &rect)
+
+	if !enabled do return 0
+
+	lua.pushinteger(L, cast(lua.Integer)rect.x)
+	lua.pushinteger(L, cast(lua.Integer)rect.y)
+	lua.pushinteger(L, cast(lua.Integer)rect.w)
+	lua.pushinteger(L, cast(lua.Integer)rect.h)
+
+	return 4
 }
 
 //---------------------------------------------
@@ -1578,108 +1662,115 @@ register_graphics_api :: proc(L: ^lua.State) {
 
 	lua.newtable(L) // [graphics]
 
-	// RENDERING VERBS
-  lua.pushcfunction(L, lua_graphics_draw_image)
-  lua.setfield(L, -2, cstring("draw_image"))
+  // --- HIGH-LEVEL DRAWING (VRAM) ---
+	lua.pushcfunction(L, lua_graphics_draw_image)
+	lua.setfield(L, -2, cstring("draw_image"))
 
 	lua.pushcfunction(L, lua_graphics_draw_image_region)
 	lua.setfield(L, -2, cstring("draw_image_region"))
 
-  lua.pushcfunction(L, lua_graphics_draw_rect)
+	lua.pushcfunction(L, lua_graphics_draw_rect)
 	lua.setfield(L, -2, cstring("draw_rect"))
 
-  lua.pushcfunction(L, lua_graphics_clear)
+
+	// --- VRAM RESOURCE MANAGEMENT ---
+	lua.pushcfunction(L, lua_graphics_load_image)
+	lua.setfield(L, -2, cstring("load_image"))
+
+	lua.pushcfunction(L, lua_graphics_get_image_size)
+	lua.setfield(L, -2, cstring("get_image_size"))
+
+	lua.pushcfunction(L, lua_graphics_set_default_filter)
+	lua.setfield(L, -2, cstring("set_default_filter"))
+
+
+	// --- FRAME & PIPELINE STATE ---
+	lua.pushcfunction(L, lua_graphics_clear)
 	lua.setfield(L, -2, cstring("clear"))
 
-  lua.pushcfunction(L, lua_graphics_draw_debug_text)
+	lua.pushcfunction(L, lua_graphics_set_blend_mode)
+	lua.setfield(L, -2, cstring("set_blend_mode"))
+
+	lua.pushcfunction(L, lua_graphics_set_clip_rect)
+	lua.setfield(L, -2, cstring("set_clip_rect"))
+
+	lua.pushcfunction(L, lua_graphics_get_clip_rect)
+	lua.setfield(L, -2, cstring("get_clip_rect"))
+
+
+	// --- TRANSFORMATIONS & COORDINATE SPACES ---
+	lua.pushcfunction(L, lua_graphics_begin_transform)
+	lua.setfield(L, -2, cstring("begin_transform"))
+
+	lua.pushcfunction(L, lua_graphics_end_transform)
+	lua.setfield(L, -2, cstring("end_transform"))
+
+	lua.pushcfunction(L, lua_graphics_set_translation)
+	lua.setfield(L, -2, cstring("set_translation"))
+
+	lua.pushcfunction(L, lua_graphics_set_rotation)
+	lua.setfield(L, -2, cstring("set_rotation"))
+
+	lua.pushcfunction(L, lua_graphics_set_scale)
+	lua.setfield(L, -2, cstring("set_scale"))
+
+	lua.pushcfunction(L, lua_graphics_set_origin)
+	lua.setfield(L, -2, cstring("set_origin"))
+
+	lua.pushcfunction(L, lua_graphics_use_screen_space)
+	lua.setfield(L, -2, cstring("use_screen_space"))
+
+	lua.pushcfunction(L, lua_graphics_screen_to_local)
+	lua.setfield(L, -2, cstring("screen_to_local"))
+
+	lua.pushcfunction(L, lua_graphics_local_to_screen)
+	lua.setfield(L, -2, cstring("local_to_screen"))
+
+
+	// --- DEBUG DRAWING ---
+	lua.pushcfunction(L, lua_graphics_draw_debug_text)
 	lua.setfield(L, -2, cstring("draw_debug_text"))
 
-  lua.pushcfunction(L, lua_graphics_debug_line)
+	lua.pushcfunction(L, lua_graphics_debug_line)
 	lua.setfield(L, -2, cstring("debug_line"))
 
 	lua.pushcfunction(L, lua_graphics_debug_rect)
 	lua.setfield(L, -2, cstring("debug_rect"))
 
-	// RESOURCE LOADERS
-	lua.pushcfunction(L, lua_graphics_load_image)
-	lua.setfield(L, -2, cstring("load_image"))
-	
-	lua.pushcfunction(L, lua_graphics_set_default_filter)
-	lua.setfield(L, -2, cstring("set_default_filter"))
+  //TODO: RENAME PIXELMAP API
 
-	// GETTERS
-	lua.pushcfunction(L, lua_graphics_get_image_size)
-	lua.setfield(L, -2, cstring("get_image_size"))
-
-
-  // TRANSFORMATION STATE
-  lua.pushcfunction(L, lua_graphics_set_translation)
-  lua.setfield(L, -2, cstring("set_translation"))
-
-  lua.pushcfunction(L, lua_graphics_set_rotation)
-  lua.setfield(L, -2, cstring("set_rotation"))
-
-  lua.pushcfunction(L, lua_graphics_set_scale)
-  lua.setfield(L, -2, cstring("set_scale"))
-
-  lua.pushcfunction(L, lua_graphics_set_origin)
-  lua.setfield(L, -2, cstring("set_origin"))
-
-  lua.pushcfunction(L, lua_graphics_begin_transform)
-  lua.setfield(L, -2, cstring("begin_transform"))
-
-  lua.pushcfunction(L, lua_graphics_end_transform)
-  lua.setfield(L, -2, cstring("end_transform"))
-
-  lua.pushcfunction(L, lua_graphics_use_screen_space)
-  lua.setfield(L, -2, cstring("use_screen_space"))
-
-  lua.pushcfunction(L, lua_graphics_screen_to_local)
-  lua.setfield(L, -2, cstring("screen_to_local"))
-
-  lua.pushcfunction(L, lua_graphics_local_to_screen)
-  lua.setfield(L, -2, cstring("local_to_screen"))
-	
-//------------------------------------------------
-// - PIXELMAP IO & ALLOCATION
+  // --- PIXELMAP: LIFECYCLE & I/O ---
   lua.pushcfunction(L, lua_graphics_new_pixelmap)
   lua.setfield(L, -2, cstring("new_pixelmap"))
 
   lua.pushcfunction(L, lua_graphics_load_pixelmap)
   lua.setfield(L, -2, cstring("load_pixelmap"))
 
-  lua.pushcfunction(L, lua_graphics_get_pixelmap_size)
-  lua.setfield(L, -2, cstring("get_pixelmap_size"))
-
   lua.pushcfunction(L, lua_graphics_save_pixelmap)
   lua.setfield(L, -2, cstring("save_pixelmap"))
 
-  // - PIXELMAP ATOMIC OPS
-  lua.pushcfunction(L, lua_graphics_pixelmap_set_pixel)
-  lua.setfield(L, -2, cstring("pixelmap_set_pixel"))
+  lua.pushcfunction(L, lua_graphics_get_pixelmap_size)
+  lua.setfield(L, -2, cstring("get_pixelmap_size"))
 
-  lua.pushcfunction(L, lua_graphics_pixelmap_get_pixel)
-  lua.setfield(L, -2, cstring("pixelmap_get_pixel"))
-  
-  lua.pushcfunction(L, lua_graphics_pixelmap_flood_fill)
-  lua.setfield(L, -2, cstring("pixelmap_flood_fill"))
+  // --- PIXELMAP: SOFTWARE RASTERIZATION ---
+  lua.pushcfunction(L, lua_graphics_blit)
+  lua.setfield(L, -2, cstring("blit"))
 
-  lua.pushcfunction(L, lua_graphics_pixelmap_raycast)
-  lua.setfield(L, -2, cstring("pixelmap_raycast"))
-  
-  // - PIXELMAP GEOMETRY (BLITS)
-  lua.pushcfunction(L, lua_graphics_blit_line)
-  lua.setfield(L, -2, cstring("blit_line"))
+  lua.pushcfunction(L, lua_graphics_blit_region)
+  lua.setfield(L, -2, cstring("blit_region"))
 
   lua.pushcfunction(L, lua_graphics_blit_rect)
   lua.setfield(L, -2, cstring("blit_rect"))
-  
+
+  lua.pushcfunction(L, lua_graphics_blit_line)
+  lua.setfield(L, -2, cstring("blit_line"))
+
   lua.pushcfunction(L, lua_graphics_blit_triangle)
   lua.setfield(L, -2, cstring("blit_triangle"))
-  
+
   lua.pushcfunction(L, lua_graphics_blit_circle)
   lua.setfield(L, -2, cstring("blit_circle"))
-  
+
   lua.pushcfunction(L, lua_graphics_blit_circle_outline)
   lua.setfield(L, -2, cstring("blit_circle_outline"))
 
@@ -1689,14 +1780,20 @@ register_graphics_api :: proc(L: ^lua.State) {
   lua.pushcfunction(L, lua_graphics_blit_capsule)
   lua.setfield(L, -2, cstring("blit_capsule"))
 
-  // - PIXELMAP ARRAY-TO-ARRAY (BLITS)
-  lua.pushcfunction(L, lua_graphics_blit)
-  lua.setfield(L, -2, cstring("blit"))
+  // --- PIXELMAP: ATOMIC OPS & ANALYSIS ---
+  lua.pushcfunction(L, lua_graphics_pixelmap_set_pixel)
+  lua.setfield(L, -2, cstring("pixelmap_set_pixel"))
 
-  lua.pushcfunction(L, lua_graphics_blit_region)
-  lua.setfield(L, -2, cstring("blit_region"))
+  lua.pushcfunction(L, lua_graphics_pixelmap_get_pixel)
+  lua.setfield(L, -2, cstring("pixelmap_get_pixel"))
 
-  // - VRAM SYNC
+  lua.pushcfunction(L, lua_graphics_pixelmap_flood_fill)
+  lua.setfield(L, -2, cstring("pixelmap_flood_fill"))
+
+  lua.pushcfunction(L, lua_graphics_pixelmap_raycast)
+  lua.setfield(L, -2, cstring("pixelmap_raycast"))
+
+  // --- PIXELMAP: VRAM SYNC ---
   lua.pushcfunction(L, lua_graphics_new_image_from_pixelmap)
   lua.setfield(L, -2, cstring("new_image_from_pixelmap"))
 
@@ -1705,16 +1802,17 @@ register_graphics_api :: proc(L: ^lua.State) {
 
   lua.pushcfunction(L, lua_graphics_update_image_region_from_pixelmap)
   lua.setfield(L, -2, cstring("update_image_region_from_pixelmap"))
-  
-  // -- FFI & MEMORY
-  lua.pushcfunction(L, lua_graphics_pixelmap_get_cptr)
-  lua.setfield(L, -2, cstring("get_pixelmap_cptr"))
 
+  // --- PIXELMAP: FFI & MEMORY ---
   lua.pushcfunction(L, lua_graphics_pixelmap_clone)
   lua.setfield(L, -2, cstring("pixelmap_clone"))
-  
-  //SETUP API TABLE
-  lua.setglobal(L, cstring("graphics"))
+
+  lua.pushcfunction(L, lua_graphics_pixelmap_get_cptr)
+  lua.setfield(L, -2, cstring("pixelmap_get_cptr"))
+
+
+	// FINAL REGISTRATION
+	lua.setglobal(L, cstring("graphics"))
 }
 
 
