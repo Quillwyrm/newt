@@ -261,7 +261,7 @@ x, y, w, h = graphics.get_clip_rect()
 Transform blocks let you temporarily change how things are drawn. You can move, rotate, or scale every `draw_` call inside a block.
 
 You must call `begin_transform()` before using any transform functions.
-All `set_` transform functions only work inside an active transform block.
+All `set_` functions only work inside an active transform block.
 
 Transforms are applied in the order you call them, and affect everything drawn until the block ends.
 
@@ -269,10 +269,7 @@ Transforms are applied in the order you call them, and affect everything drawn u
 
 ### begin_transform
 
-Starts a new transform block.
-
-You must call this before using any transform functions.
-All transforms applied after this affect everything you draw until `end_transform()` is called.
+Starts a new transform block. All transforms applied after this affect everything you draw until `end_transform()` is called. Must be called before using any transform functions.
 
 #### Usage
 
@@ -284,9 +281,7 @@ graphics.begin_transform()
 
 ### end_transform
 
-Ends the current transform block.
-
-After this, drawing returns to normal. Transform functions have no effect until a new block is started.
+Ends the current transform block. Drawing returns to normal, and transform functions have no effect until a new block is started.
 
 #### Usage
 
@@ -298,9 +293,7 @@ graphics.end_transform()
 
 ### set_translation
 
-Moves everything you draw inside the current transform block.
-
-Must be called inside a transform block.
+Moves everything you draw inside the current transform block. Must be called inside a transform block.
 
 #### Usage
 
@@ -316,11 +309,7 @@ graphics.set_translation(x, y)
 
 ### set_rotation
 
-Rotates everything you draw inside the current transform block.
-
-Rotation happens around the current origin (see `set_origin`).
-
-Must be called inside a transform block.
+Rotates everything you draw inside the current transform block, around the current origin (see `set_origin`). Must be called inside a transform block.
 
 #### Usage
 
@@ -336,11 +325,7 @@ graphics.set_rotation(radians)
 
 ### set_scale
 
-Scales everything you draw inside the current transform block.
-
-Scaling happens relative to the current origin (see `set_origin`).
-
-Must be called inside a transform block.
+Scales everything you draw inside the current transform block, relative to the current origin (see `set_origin`). Must be called inside a transform block.
 
 #### Usage
 
@@ -357,12 +342,7 @@ graphics.set_scale(sx, sy?)
 
 ### set_origin
 
-Sets the pivot point used for rotation and scaling.
-
-By default, rotation and scaling happen around the top-left corner.
-Changing the origin lets you rotate or scale around a different point (for example, the center).
-
-Must be called inside a transform block.
+Sets the pivot point used for rotation and scaling. By default this is the top-left corner; changing it lets you rotate or scale around another point (for example, the center). Must be called inside a transform block.
 
 #### Usage
 
@@ -378,13 +358,7 @@ graphics.set_origin(ox, oy)
 
 ### use_screen_space
 
-Ignores all transforms in the current block.
-
-Drawing after this uses screen coordinates (top-left = 0,0), regardless of any transforms applied earlier in the block.
-
-Still ends when `end_transform()` is called.
-
-Must be called inside a transform block.
+Ignores all transforms in the current block, so drawing uses screen coordinates (top-left = 0,0). Still ends when `end_transform()` is called. Must be called inside a transform block.
 
 #### Usage
 
@@ -396,9 +370,7 @@ graphics.use_screen_space()
 
 ### screen_to_local
 
-Converts a screen position into the current transform.
-
-Useful for matching input (like the mouse) to transformed drawing.
+Converts a screen position into the current transform. Useful for matching input (like the mouse) to transformed drawing.
 
 #### Usage
 
@@ -460,7 +432,6 @@ sx, sy = graphics.local_to_screen(lx, ly)
   `screen_to_local()` and `local_to_screen()` may not match what you see.
 
   If you need correct coordinate conversion, apply movement using `set_translation()` instead of draw arguments.
-
 
 ---
 
