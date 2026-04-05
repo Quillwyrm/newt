@@ -5,102 +5,132 @@ The Luagame graphics API manages both hardware-accelerated rendering (VRAM) and 
 ### Related Core API
 These functions reside in the global `core` module but are frequently used with graphics.
 
-* [`free(userdata)`](core.md#free) - Manually destroys `Atlas`, `Image`, or `Pixelmap` userdata to reclaim memory.
+* [`free(userdata)`](core.md#free) - Manually destroys `Image` or `Pixelmap` userdata to reclaim memory.
 * [`rgba(r, g, b, a)`](core.md#rgba) - Constructs packed color integers for drawing operations.
 
 ---
 
 ## Functions
 
-### Hardware Rendering (VRAM)
-Operations performed directly on the GPU using hardware-accelerated textures. These are highly efficient for final display and complex transformations but do not allow for direct, per-pixel modification by the CPU.
+**Hardware Rendering (VRAM)**
+* [`draw_image`](#draw_image)
+* [`draw_image_region`](#draw_image_region)
+* [`draw_rect`](#draw_rect)
+* [`load_image`](#load_image)
+* [`get_image_size`](#get_image_size)
+* [`set_default_filter`](#set_default_filter)
+* [`new_canvas`](#new_canvas)
+* [`set_canvas`](#set_canvas)
 
-**Rendering Verbs**
-* [`clear`](#graphicsclear)
-* [`draw_debug_text`](#graphicsdraw_debug_text)
+**Frame & Pipeline State**
+* [`clear`](#clear)
+* [`set_blend_mode`](#set_blend_mode)
+* [`set_clip_rect`](#set_clip_rect)
+* [`get_clip_rect`](#get_clip_rect)
 
-**Resource Loaders**
-* [`load_image`](#graphicsload_image)
-* [`load_atlas`](#graphicsload_atlas)
-* [`set_default_filter`](#graphicsset_default_filter)
+**Transformations & Coordinate Spaces**
+* [`begin_transform`](#begin_transform)
+* [`end_transform`](#end_transform)
+* [`set_translation`](#set_translation)
+* [`set_rotation`](#set_rotation)
+* [`set_scale`](#set_scale)
+* [`set_origin`](#set_origin)
+* [`use_screen_space`](#use_screen_space)
+* [`screen_to_local`](#screen_to_local)
+* [`local_to_screen`](#local_to_screen)
 
-**Getters**
-* [`get_image_size`](#graphicsget_image_size)
+**Debug Drawing**
+* [`debug_text`](#debug_text)
+* [`debug_line`](#debug_line)
+* [`debug_rect`](#debug_rect)
 
-### Pixelmap (CPU Rasterizer)
-Pixelmaps are CPU-resident buffers of raw pixel data (backed by SDL Surfaces). Unlike Images, which live in VRAM, Pixelmaps reside in system RAM to allow for low-level software rasterization, procedural generation, and direct per-pixel read/write access. 
+**Pixelmap: Lifecycle & I/O**
+* [`new_pixelmap`](#new_pixelmap)
+* [`load_pixelmap`](#load_pixelmap)
+* [`save_pixelmap`](#save_pixelmap)
+* [`get_pixelmap_size`](#get_pixelmap_size)
 
-Once modified, a Pixelmap can be "synced" or uploaded to an Image to be drawn by the hardware-accelerated pipeline. All `blit_` functions respect a unified blend mode system: `"replace"`, `"blend"`, `"add"`, `"multiply"`, `"erase"`, or `"mask"`.
+**Pixelmap: Software Rasterization**
+* [`blit`](#blit)
+* [`blit_region`](#blit_region)
+* [`blit_rect`](#blit_rect)
+* [`blit_line`](#blit_line)
+* [`blit_triangle`](#blit_triangle)
+* [`blit_circle`](#blit_circle)
+* [`blit_circle_outline`](#blit_circle_outline)
+* [`blit_circle_pixel_outline`](#blit_circle_pixel_outline)
+* [`blit_capsule`](#blit_capsule)
 
-**IO & Lifecycle**
-* [`new_pixelmap`](#graphicsnew_pixelmap)
-* [`load_pixelmap`](#graphicsload_pixelmap)
-* [`save_pixelmap`](#graphicssave_pixelmap)
+**Pixelmap: Atomic Ops & Analysis**
+* [`pixelmap_set_pixel`](#pixelmap_set_pixel)
+* [`pixelmap_get_pixel`](#pixelmap_get_pixel)
+* [`pixelmap_flood_fill`](#pixelmap_flood_fill)
+* [`pixelmap_raycast`](#pixelmap_raycast)
 
-**Queries & Atomic Ops**
-* [`get_pixelmap_size`](#graphicsget_pixelmap_size)
-* [`pixelmap_get_pixel`](#graphicspixelmap_get_pixel)
-* [`pixelmap_set_pixel`](#graphicspixelmap_set_pixel)
-* [`pixelmap_flood_fill`](#graphicspixelmap_flood_fill)
-* [`pixelmap_raycast`](#graphicspixelmap_raycast)
+**Pixelmap: VRAM Sync**
+* [`new_image_from_pixelmap`](#new_image_from_pixelmap)
+* [`update_image_from_pixelmap`](#update_image_from_pixelmap)
+* [`update_image_region_from_pixelmap`](#update_image_region_from_pixelmap)
 
+**Pixelmap: Memory & FFI**
+* [`pixelmap_clone`](#pixelmap_clone)
+* [`pixelmap_get_cptr`](#pixelmap_get_cptr)
 
-**Geometry (Blits)**
-* [`blit_line`](#graphicsblit_line)
-* [`blit_rect`](#graphicsblit_rect)
-* [`blit_triangle`](#graphicsblit_triangle)
-* [`blit_circle`](#graphicsblit_circle)
-* [`blit_circle_outline`](#graphicsblit_circle_outline)
-* [`blit_circle_pixel_outline`](#graphicsblit_circle_pixel_outline)
-* [`blit_capsule`](#graphicsblit_capsule)
-
-**Composition**
-* [`blit`](#graphicsblit)
-* [`blit_region`](#graphicsblit_region)
-
-**VRAM Sync**
-* [`new_image_from_pixelmap`](#graphicsnew_image_from_pixelmap)
-* [`update_image_from_pixelmap`](#graphicsupdate_image_from_pixelmap)
-* [`update_image_region_from_pixelmap`](#graphicsupdate_image_region_from_pixelmap)
-
-**FFI utilities**
-* [`get_pixelmap_cptr`](#graphicsget_pixelmap_cptr)
-* [`pixelmap_clone`](#graphicspixelmap_clone)
 
 ---
 
-## Hardware Rendering
+## Hardware Rendering (VRAM)
+Operations performed directly on the GPU using hardware textures. These are highly efficient, respect the active transform stack, and support global blend modes.
 
-### graphics.clear
-Clears the entire render target.
+### draw_image
+Draws a full image to the screen.
 
 #### Usage
 ```lua
-graphics.clear(color?)
+graphics.draw_image(img, x, y, color?)
 ```
 
 #### Arguments
-* `number: color` (Optional) - The color to clear with. Defaults to black (`0x000000FF`).
+* `userdata: img` - The Image object to draw.
+* `number: x`, `number: y` - Local space coordinates.
+* `number: color` (Optional) - A tint color. Defaults to white (`0xFFFFFFFF`).
 
 ---
 
-### graphics.draw_debug_text
-Draws simple 8x8 bitmap text to the screen for debugging.
+### draw_image_region
+Draws a rectangular sub-region (snip) of an image. Useful for sprite sheets.
 
 #### Usage
 ```lua
-graphics.draw_debug_text(x, y, text, color?)
+graphics.draw_image_region(img, sx, sy, sw, sh, dx, dy, color?)
 ```
 
 #### Arguments
-* `number: x`, `number: y` - Screen coordinates.
-* `string: text` - The string to render.
-* `number: color` (Optional) - Packed color integer. Defaults to white (`0xFFFFFFFF`).
+* `userdata: img` - The Image object.
+* `number: sx`, `number: sy` - Source X and Y (top-left of the snip).
+* `number: sw`, `number: sh` - Source width and height.
+* `number: dx`, `number: dy` - Destination X and Y (where to draw it).
+* `number: color` (Optional) - A tint color. Defaults to white.
 
 ---
 
-### graphics.load_image
-Loads an image file (e.g., PNG) from disk into GPU VRAM.
+### draw_rect
+Draws a solid filled rectangle that respects the active transform stack.
+
+#### Usage
+```lua
+graphics.draw_rect(x, y, w, h, color?)
+```
+
+#### Arguments
+* `number: x`, `number: y` - Top-left coordinates.
+* `number: w`, `number: h` - Width and height.
+* `number: color` (Optional) - Packed color integer. Defaults to white.
+
+---
+
+### load_image
+Loads an image file (e.g., PNG) from disk directly into GPU VRAM.
 
 #### Usage
 ```lua
@@ -113,39 +143,12 @@ img, err = graphics.load_image(path)
 
 ---
 
-### graphics.load_atlas
-Loads an image and partitions it into a grid for sprite drawing.
+### get_image_size
+Returns the pixel dimensions of an Image.
 
 #### Usage
 ```lua
-atlas, err = graphics.load_atlas(path, cell_w, cell_h)
-```
-
-#### Returns
-* `userdata: atlas` - An Atlas object, or `nil` on failure.
-* `string: err` - Error message if loading failed.
-
----
-
-### graphics.set_default_filter
-Sets the scaling filter used for hardware textures loaded after this call.
-
-#### Usage
-```lua
-graphics.set_default_filter(mode)
-```
-
-#### Arguments
-* `string: mode` - Either `"nearest"` or `"linear"`.
-
----
-
-### graphics.get_image_size
-Returns the pixel dimensions of an Image or Atlas.
-
-#### Usage
-```lua
-w, h = graphics.get_image_size(object)
+w, h = graphics.get_image_size(img)
 ```
 
 #### Returns
@@ -154,10 +157,276 @@ w, h = graphics.get_image_size(object)
 
 ---
 
-## Pixelmap (CPU Rasterizer)
+### set_default_filter
+Sets the scaling filter used for hardware textures loaded or created *after* this call.
 
-### graphics.new_pixelmap
-Allocates a new CPU-side buffer for software rasterization, initialized to transparent black.
+#### Usage
+```lua
+graphics.set_default_filter(mode)
+```
+
+#### Arguments
+* `string: mode` - Either `"nearest"` (pixel art) or `"linear"` (smooth).
+
+---
+
+### new_canvas
+Creates a blank, hardware-accelerated Image that can be used as a render target.
+
+#### Usage
+```lua
+canvas = graphics.new_canvas(w, h)
+```
+
+#### Arguments
+* `number: w`, `number: h` - Dimensions of the canvas in pixels.
+
+#### Returns
+* `userdata: canvas` - An Image object configured as a render target.
+
+---
+
+### set_canvas
+Redirects all subsequent hardware drawing operations to a specific canvas (Image) instead of the screen.
+
+#### Usage
+```lua
+graphics.set_canvas(canvas?)
+```
+
+#### Arguments
+* `userdata: canvas` (Optional) - The canvas to draw into. If omitted or `nil`, drawing resets to the main screen.
+
+---
+
+## Frame & Pipeline State
+
+### clear
+Clears the active render target (the screen or the current canvas).
+
+#### Usage
+```lua
+graphics.clear(color?)
+```
+
+#### Arguments
+* `number: color` (Optional) - The background color. Defaults to black (`0x000000FF`).
+
+---
+
+### set_blend_mode
+Sets the global hardware blending mode for all subsequent GPU draw calls.
+
+#### Usage
+```lua
+graphics.set_blend_mode(mode?)
+```
+
+#### Arguments
+* `string: mode` (Optional) - The blend operation. Valid options: `"blend"` (default), `"replace"`, `"add"`, `"multiply"`, `"modulate"`, `"premultiplied"`.
+
+---
+
+### set_clip_rect
+Sets a hardware clipping rectangle (scissor box) in absolute window coordinates. Drawing outside this box is discarded.
+
+#### Usage
+```lua
+graphics.set_clip_rect(x?, y?, w?, h?)
+```
+
+#### Arguments
+* `number: x`, `number: y` (Optional) - Top-left coordinates.
+* `number: w`, `number: h` (Optional) - Width and height.
+* *Note: Calling with no arguments disables clipping entirely.*
+
+---
+
+### get_clip_rect
+Returns the current hardware clip rectangle, if one is active.
+
+#### Usage
+```lua
+x, y, w, h = graphics.get_clip_rect()
+```
+
+#### Returns
+* `number: x`, `number: y`, `number: w`, `number: h` - The rectangle bounds. Returns nothing if clipping is disabled.
+
+---
+
+## Transformations & Coordinate Spaces
+The engine maintains a matrix stack (up to 32 deep). Transformations apply to all `draw_image` and `draw_rect` calls, allowing you to easily rotate, scale, and move complex groupings of entities.
+
+### begin_transform
+Pushes a copy of the current transform state onto the stack.
+
+#### Usage
+```lua
+graphics.begin_transform()
+```
+
+---
+
+### end_transform
+Pops the current transform state off the stack, restoring the previous state.
+
+#### Usage
+```lua
+graphics.end_transform()
+```
+
+---
+
+### set_translation
+Moves the local coordinate space origin.
+
+#### Usage
+```lua
+graphics.set_translation(x, y)
+```
+
+#### Arguments
+* `number: x`, `number: y` - Offset amounts.
+
+---
+
+### set_rotation
+Rotates the local coordinate space.
+
+#### Usage
+```lua
+graphics.set_rotation(radians)
+```
+
+#### Arguments
+* `number: radians` - Angle of rotation.
+
+---
+
+### set_scale
+Scales the local coordinate space.
+
+#### Usage
+```lua
+graphics.set_scale(sx, sy?)
+```
+
+#### Arguments
+* `number: sx` - X-axis scale factor.
+* `number: sy` (Optional) - Y-axis scale factor. Defaults to `sx` if omitted for uniform scaling.
+
+---
+
+### set_origin
+Offsets the pivot point used for scaling and rotation.
+
+#### Usage
+```lua
+graphics.set_origin(ox, oy)
+```
+
+#### Arguments
+* `number: ox`, `number: oy` - The pivot coordinates within the local space.
+
+---
+
+### use_screen_space
+Wipes all inherited transforms (position, rotation, scale) for the current block, allowing you to draw directly to absolute screen coordinates. Ends when `end_transform()` is called.
+
+#### Usage
+```lua
+graphics.use_screen_space()
+```
+
+---
+
+### screen_to_local
+Reverses the active transform stack to convert an absolute screen coordinate into the current local space.
+
+#### Usage
+```lua
+lx, ly = graphics.screen_to_local(sx, sy)
+```
+
+#### Arguments
+* `number: sx`, `number: sy` - Screen coordinates.
+
+#### Returns
+* `number: lx`, `number: ly` - Local space coordinates.
+
+---
+
+### local_to_screen
+Applies the active transform stack to convert a local coordinate into an absolute screen coordinate.
+
+#### Usage
+```lua
+sx, sy = graphics.local_to_screen(lx, ly)
+```
+
+#### Arguments
+* `number: lx`, `number: ly` - Local space coordinates.
+
+#### Returns
+* `number: sx`, `number: sy` - Screen space coordinates.
+
+---
+
+## Debug Drawing
+These functions draw primitive shapes directly to the screen via SDL. They operate in absolute screen-space and **ignore** the transform stack. Useful for hitboxes, raycasts, and development data.
+
+### debug_text
+Draws simple 8x8 bitmap text to the screen.
+
+#### Usage
+```lua
+graphics.debug_text(x, y, text, color?)
+```
+
+#### Arguments
+* `number: x`, `number: y` - Screen coordinates.
+* `string: text` - The string to render.
+* `number: color` (Optional) - Packed color integer. Defaults to white.
+
+---
+
+### debug_line
+Draws a 1px thick line between two absolute screen points.
+
+#### Usage
+```lua
+graphics.debug_line(x1, y1, x2, y2, color?)
+```
+
+#### Arguments
+* `number: x1`, `number: y1`, `number: x2`, `number: y2` - Start and end coordinates.
+* `number: color` (Optional) - Packed color integer. Defaults to white.
+
+---
+
+### debug_rect
+Draws a 1px hollow rectangle.
+
+#### Usage
+```lua
+graphics.debug_rect(x, y, w, h, color?)
+```
+
+#### Arguments
+* `number: x`, `number: y` - Top-left coordinates.
+* `number: w`, `number: h` - Width and height.
+* `number: color` (Optional) - Packed color integer. Defaults to white.
+
+---
+
+## Pixelmap (CPU Rasterizer)
+Pixelmaps are CPU-resident buffers of raw pixel data. Unlike Images (VRAM), Pixelmaps live in system RAM to allow for software rasterization, procedural generation, and per-pixel read/write access. 
+
+*Note: Software rendering blend modes differ slightly from the GPU. Valid `blit_` modes are: `"blend"` (default), `"replace"`, `"add"`, `"multiply"`, `"erase"`, and `"mask"`.*
+
+### new_pixelmap
+Allocates a new CPU-side buffer, initialized to transparent black.
 
 #### Usage
 ```lua
@@ -166,7 +435,7 @@ pm = graphics.new_pixelmap(w, h)
 
 ---
 
-### graphics.load_pixelmap
+### load_pixelmap
 Loads an image from disk directly into a CPU Pixelmap.
 
 #### Usage
@@ -180,7 +449,7 @@ pm, w, h = graphics.load_pixelmap(path)
 
 ---
 
-### graphics.save_pixelmap
+### save_pixelmap
 Saves the contents of a Pixelmap to a PNG file on disk.
 
 #### Usage
@@ -190,17 +459,7 @@ ok, err = graphics.save_pixelmap(pm, path)
 
 ---
 
-### graphics.pixelmap_clone
-Creates a deep copy of a Pixelmap into a new buffer.
-
-#### Usage
-```lua
-new_pm = graphics.pixelmap_clone(pm)
-```
-
----
-
-### graphics.get_pixelmap_size
+### get_pixelmap_size
 Returns the pixel dimensions of a Pixelmap.
 
 #### Usage
@@ -210,7 +469,113 @@ w, h = graphics.get_pixelmap_size(pm)
 
 ---
 
-### graphics.pixelmap_get_pixel
+### blit
+Copies the entire contents of one Pixelmap onto another.
+
+#### Usage
+```lua
+graphics.blit(dst, src, dx, dy, mode?)
+```
+
+#### Arguments
+* `userdata: dst` - The destination Pixelmap.
+* `userdata: src` - The source Pixelmap.
+* `number: dx`, `number: dy` - Destination coordinates.
+* `string: mode` (Optional) - CPU Blend mode. Defaults to `"blend"`.
+
+---
+
+### blit_region
+Copies a sub-region of one Pixelmap onto another.
+
+#### Usage
+```lua
+graphics.blit_region(dst, src, sx, sy, w, h, dx, dy, mode?)
+```
+
+---
+
+### blit_rect
+Draws a solid filled rectangle on a Pixelmap.
+
+#### Usage
+```lua
+graphics.blit_rect(pm, x, y, w, h, color?, mode?)
+```
+
+---
+
+### blit_line
+Draws a 1px thick line between two points using the Bresenham algorithm.
+
+#### Usage
+```lua
+graphics.blit_line(pm, x1, y1, x2, y2, color?, mode?)
+```
+
+---
+
+### blit_triangle
+Draws a solid filled triangle using edge-equation rasterization.
+
+#### Usage
+```lua
+graphics.blit_triangle(pm, x1, y1, x2, y2, x3, y3, color?, mode?)
+```
+
+---
+
+### blit_circle
+Draws a solid filled float-precision circle.
+
+#### Usage
+```lua
+graphics.blit_circle(pm, cx, cy, radius, color?, mode?)
+```
+
+---
+
+### blit_circle_outline
+Draws a circle outline with variable thickness.
+
+#### Usage
+```lua
+graphics.blit_circle_outline(pm, cx, cy, radius, thickness, color?, mode?)
+```
+
+---
+
+### blit_circle_pixel_outline
+Draws a 1px thick circle outline using the Bresenham integer algorithm.
+
+#### Usage
+```lua
+graphics.blit_circle_pixel_outline(pm, cx, cy, radius, color?, mode?)
+```
+
+---
+
+### blit_capsule
+Draws a thick rounded line (capsule).
+
+#### Usage
+```lua
+graphics.blit_capsule(pm, x1, y1, x2, y2, radius, color?, mode?)
+```
+
+---
+
+### pixelmap_set_pixel
+Sets a single pixel value in memory. This is a raw memory write and does *not* perform alpha blending.
+
+#### Usage
+```lua
+graphics.pixelmap_set_pixel(pm, x, y, color)
+```
+
+---
+
+### pixelmap_get_pixel
 Returns the raw color value of a specific pixel.
 
 #### Usage
@@ -220,17 +585,7 @@ color = graphics.pixelmap_get_pixel(pm, x, y)
 
 ---
 
-### graphics.pixelmap_set_pixel
-Sets a single pixel value in memory. This is a raw write and does not perform alpha blending.
-
-#### Usage
-```lua
-graphics.pixelmap_set_pixel(pm, x, y, color)
-```
-
----
-
-### graphics.pixelmap_flood_fill
+### pixelmap_flood_fill
 Performs a high-performance scanline flood fill from a starting point.
 
 #### Usage
@@ -240,7 +595,7 @@ graphics.pixelmap_flood_fill(pm, x, y, color)
 
 ---
 
-### graphics.pixelmap_raycast
+### pixelmap_raycast
 Traces a line and returns the first non-transparent pixel encountered.
 
 #### Usage
@@ -255,107 +610,7 @@ hit, x, y, color = graphics.pixelmap_raycast(pm, x1, y1, x2, y2)
 
 ---
 
-### graphics.get_pixelmap_cptr
-Returns a raw C pointer to the pixel data as `lightuserdata` for use with FFI.
-
-#### Usage
-```lua
-ptr = graphics.get_pixelmap_cptr(pm)
-```
-
----
-
-### graphics.blit_line
-Draws a 1px thick line between two points using the Bresenham algorithm.
-
-#### Usage
-```lua
-graphics.blit_line(pm, x1, y1, x2, y2, color?, mode?)
-```
-
----
-
-### graphics.blit_rect
-Draws a solid filled rectangle.
-
-#### Usage
-```lua
-graphics.blit_rect(pm, x, y, w, h, color?, mode?)
-```
-
----
-
-### graphics.blit_triangle
-Draws a solid filled triangle using edge-equation rasterization.
-
-#### Usage
-```lua
-graphics.blit_triangle(pm, x1, y1, x2, y2, x3, y3, color?, mode?)
-```
-
----
-
-### graphics.blit_circle
-Draws a solid filled circle.
-
-#### Usage
-```lua
-graphics.blit_circle(pm, cx, cy, radius, color?, mode?)
-```
-
----
-
-### graphics.blit_circle_outline
-Draws a circle outline with variable thickness.
-
-#### Usage
-```lua
-graphics.blit_circle_outline(pm, cx, cy, radius, thickness, color?, mode?)
-```
-
----
-
-### graphics.blit_circle_pixel_outline
-Draws a 1px thick circle outline using the Bresenham circle algorithm.
-
-#### Usage
-```lua
-graphics.blit_circle_pixel_outline(pm, cx, cy, radius, color?, mode?)
-```
-
----
-
-### graphics.blit_capsule
-Draws a thick rounded line (capsule).
-
-#### Usage
-```lua
-graphics.blit_capsule(pm, x1, y1, x2, y2, radius, color?, mode?)
-```
-
----
-
-### graphics.blit
-Copies the entire contents of one Pixelmap onto another.
-
-#### Usage
-```lua
-graphics.blit(dst, src, dx, dy, mode?)
-```
-
----
-
-### graphics.blit_region
-Copies a sub-region of one Pixelmap onto another.
-
-#### Usage
-```lua
-graphics.blit_region(dst, src, sx, sy, w, h, dx, dy, mode?)
-```
-
----
-
-### graphics.new_image_from_pixelmap
+### new_image_from_pixelmap
 Creates a hardware-accelerated `Image` (VRAM) from a CPU `Pixelmap`.
 
 #### Usage
@@ -365,20 +620,45 @@ img = graphics.new_image_from_pixelmap(pm)
 
 ---
 
-### graphics.update_image_from_pixelmap
-Syncs an entire Pixelmap to an existing GPU Image.
+### update_image_from_pixelmap
+Syncs an entire Pixelmap to an existing GPU Image. Extremely fast way to push software-rendered frames to the screen.
 
 #### Usage
 ```lua
 graphics.update_image_from_pixelmap(img, pm, dx?, dy?)
 ```
 
+#### Arguments
+* `userdata: img` - Destination GPU Image.
+* `userdata: pm` - Source CPU Pixelmap.
+* `number: dx`, `number: dy` (Optional) - Destination offset coordinates. Defaults to `0, 0`.
+
 ---
 
-### graphics.update_image_region_from_pixelmap
-Pushes a sub-region of a Pixelmap to a location on a GPU Image.
+### update_image_region_from_pixelmap
+Pushes a specific sub-region (snip) of a CPU Pixelmap across the PCI-e bus to a location on a GPU Image. Crucial for updating small dirty rects (like a destructible terrain crater) without uploading the entire texture.
 
 #### Usage
 ```lua
 graphics.update_image_region_from_pixelmap(img, pm, sx, sy, w, h, dx, dy)
+```
+
+---
+
+### pixelmap_clone
+Creates a deep copy of a Pixelmap into a new buffer.
+
+#### Usage
+```lua
+new_pm = graphics.pixelmap_clone(pm)
+```
+
+---
+
+### pixelmap_get_cptr
+Returns a raw C pointer to the pixel data as `lightuserdata` for use with LuaJIT FFI.
+
+#### Usage
+```lua
+ptr = graphics.pixelmap_get_cptr(pm)
 ```
