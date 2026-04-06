@@ -3,16 +3,12 @@ package main
 import "base:runtime"
 import "core:mem"
 import "core:c"
-import "core:fmt"
 import "core:strings"
 import lua "luajit"
 import sdl "vendor:sdl3"
-import "vendor:sdl3/ttf"
-
 
 //========================================================================================================================================
 // HOST HELPERS & STATE
-// 
 //========================================================================================================================================
 
 //Quit queue state for lua quitting sdl
@@ -24,9 +20,9 @@ Cursor_Cache : [12]^sdl.Cursor
 
 @(private)
 check_window_safety :: #force_inline proc(L: ^lua.State, fn_name: cstring) {
-    if Window == nil {
-        lua.L_error(L, "%s error: Window is nil. Did you forget to call window.init() in runtime.init()?", fn_name)
-    }
+	if Window == nil || Renderer == nil {
+		lua.L_error(L, "%s: window system not initialized. Did you forget to call window.init() in runtime.init()?", fn_name)
+	}
 }
 
 // read_window_flags parses {"fullscreen","borderless","resizable"} into three booleans.
@@ -54,7 +50,7 @@ read_window_flags :: proc(L: ^lua.State, idx: lua.Index) -> (fullscreen, borderl
 		} else if s == "resizable" {
 			resizable = true
 		} else {
-			lua.L_error(L, cstring("window.init: unknown flag"))
+			lua.L_error(L, "window.init: unknown flag '%s'", p)
 		}
 
 		lua.pop(L, 1)
@@ -84,11 +80,13 @@ apply_window_flags :: proc "contextless" (fullscreen, borderless, resizable: boo
 window_shutdown :: proc() {
 	if Renderer != nil {
 		sdl.DestroyRenderer(Renderer)
-	}
-	if Window != nil {
-		sdl.DestroyWindow(Window)
+		Renderer = nil
 	}
 
+	if Window != nil {
+		sdl.DestroyWindow(Window)
+		Window = nil
+	}
 }
 
 
@@ -105,14 +103,14 @@ window_shutdown :: proc() {
 lua_window_init :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
-	if Window != nil {
+	if Window != nil || Renderer != nil {
 		lua.L_error(L, cstring("window.init: already initialized"))
 		return 0
 	}
 
 	nargs := lua.gettop(L)
 	if nargs < 3 {
-		lua.L_error(L, cstring("window.init expects: width, height, title, [flags]"))
+		lua.L_error(L, "window.init: expected width, height, title, [flags]")
 		return 0
 	}
 
@@ -132,26 +130,36 @@ lua_window_init :: proc "c" (L: ^lua.State) -> c.int {
 	if borderless do flags |= {.BORDERLESS}
 	if resizable do flags |= {.RESIZABLE}
 
+	// Step 1: create the SDL window.
 	Window = sdl.CreateWindow(title_c, c.int(w), c.int(h), flags)
 	if Window == nil {
-		fmt.eprintln("Window failed:", sdl.GetError())
+		lua.L_error(L, "window.init: SDL_CreateWindow failed: %s", sdl.GetError())
 		return 0
 	}
 
+	// Step 2: create the renderer. If this fails, roll back the window.
 	Renderer = sdl.CreateRenderer(Window, nil)
 	if Renderer == nil {
-		fmt.eprintln("Renderer failed:", sdl.GetError())
+		sdl.DestroyWindow(Window)
+		Window = nil
+
+		lua.L_error(L, "window.init: SDL_CreateRenderer failed: %s", sdl.GetError())
 		return 0
 	}
 
-	// Hard-set VSync for now.
+	// Step 3: VSync is currently mandatory for Luagame.
+	// If this fails, init is considered unsuccessful and we fully roll back.
 	if !sdl.SetRenderVSync(Renderer, 1) {
-		fmt.eprintln("VSync failed:", sdl.GetError())
+		sdl.DestroyRenderer(Renderer)
+		Renderer = nil
+
+		sdl.DestroyWindow(Window)
+		Window = nil
+
+		lua.L_error(L, "window.init: SDL_SetRenderVSync failed: %s", sdl.GetError())
+		return 0
 	}
 
-	//SANITIZE SDL COLOR STATE
-	//sdl.SetRenderDrawColor(Renderer, 255, 255, 255, 255)
-	
 	return 0
 }
 
@@ -173,14 +181,14 @@ lua_window_should_close :: proc "c" (L: ^lua.State) -> c.int {
 // GETTERS
 // ---------------------------------
 
-// window.size() -> (w, h) pixels
+// window.get_size() -> (w, h) pixels
 lua_window_get_size :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
-    check_window_safety(L,"window.get_size")
+	context = runtime.default_context()
+	check_window_safety(L, "window.get_size")
 
 	w, h: c.int
 	if !sdl.GetWindowSize(Window, &w, &h) {
-		lua.L_error(L, cstring("window.size: GetWindowSize failed"))
+		lua.L_error(L, "window.get_size: failed to query window size: %s", sdl.GetError())
 		return 0
 	}
 
@@ -189,14 +197,14 @@ lua_window_get_size :: proc "c" (L: ^lua.State) -> c.int {
 	return 2
 }
 
-// window.position() -> (x, y) pixels
+// window.get_position() -> (x, y) pixels
 lua_window_get_position :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
-    check_window_safety(L,"window.get_position")
+	context = runtime.default_context()
+	check_window_safety(L, "window.get_position")
 
 	x, y: c.int
 	if !sdl.GetWindowPosition(Window, &x, &y) {
-		lua.L_error(L, cstring("window.position: GetWindowPosition failed"))
+		lua.L_error(L, "window.get_position: failed to query window position: %s", sdl.GetError())
 		return 0
 	}
 
@@ -267,7 +275,7 @@ lua_window_set_size :: proc "c" (L: ^lua.State) -> c.int {
 	h := lua.L_checkinteger(L, 2)
 
 	if !sdl.SetWindowSize(Window, cast(c.int)(w), cast(c.int)(h)) {
-		lua.L_error(L, cstring("window.set_size: SetWindowSize failed"))
+		lua.L_error(L, "window.set_size: failed to set window size: %s", sdl.GetError())
 		return 0
 	}
 
@@ -283,7 +291,7 @@ lua_window_set_position :: proc "c" (L: ^lua.State) -> c.int {
 	y := lua.L_checkinteger(L, 2)
 
 	if !sdl.SetWindowPosition(Window, cast(c.int)(x), cast(c.int)(y)) {
-		lua.L_error(L, cstring("window.set_position: SetWindowPosition failed"))
+		lua.L_error(L, "window.set_position: failed to set window position: %s", sdl.GetError())
 		return 0
 	}
 
@@ -296,7 +304,7 @@ lua_window_maximize :: proc "c" (L: ^lua.State) -> c.int {
     check_window_safety(L,"window.maximize")
 
 	if !sdl.MaximizeWindow(Window) {
-		lua.L_error(L, cstring("window.maximize: MaximizeWindow failed"))
+		lua.L_error(L, "window.maximize: failed to maximize window: %s", sdl.GetError())
 		return 0
 	}
 
@@ -309,7 +317,7 @@ lua_window_minimize :: proc "c" (L: ^lua.State) -> c.int {
     check_window_safety(L,"window.minimize")
 
 	if !sdl.MinimizeWindow(Window) {
-		lua.L_error(L, cstring("window.minimize: MinimizeWindow failed"))
+		lua.L_error(L, "window.minimize: failed to minimize window: %s", sdl.GetError())
 		return 0
 	}
 
@@ -324,7 +332,7 @@ lua_window_minimize :: proc "c" (L: ^lua.State) -> c.int {
 // window.set_cursor(name)
 lua_window_set_cursor :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
-    check_window_safety(L,"window.minimize")
+    check_window_safety(L,"window.set_cursor")
 
 	len: c.size_t
 	p := lua.L_checklstring(L, 1, &len)
@@ -359,7 +367,7 @@ lua_window_set_cursor :: proc "c" (L: ^lua.State) -> c.int {
 	} else if name == "hand" {
 		idx = 11; id = .POINTER
 	} else {
-		lua.L_error(L, cstring("window.set_cursor: unknown cursor"))
+		lua.L_error(L, "window.set_cursor: unknown cursor '%s'", p)
 		return 0
 	}
 
@@ -367,14 +375,14 @@ lua_window_set_cursor :: proc "c" (L: ^lua.State) -> c.int {
 	if cursor == nil {
 		cursor = sdl.CreateSystemCursor(id)
 		if cursor == nil {
-			lua.L_error(L, cstring("window.set_cursor: CreateSystemCursor failed: %s"), sdl.GetError())
+			lua.L_error(L, "window.set_cursor: failed to create system cursor: %s", sdl.GetError())
 			return 0
 		}
 		Cursor_Cache[idx] = cursor
 	}
 
 	if !sdl.SetCursor(cursor) {
-		lua.L_error(L, cstring("window.set_cursor: SetCursor failed: %s"), sdl.GetError())
+		lua.L_error(L, "window.set_cursor: failed to set cursor: %s", sdl.GetError())
 		return 0
 	}
 
@@ -387,7 +395,7 @@ lua_window_cursor_show :: proc "c" (L: ^lua.State) -> c.int {
     check_window_safety(L,"window.cursor_show")
 
 	if !sdl.ShowCursor() {
-		lua.L_error(L, cstring("window.cursor_show: ShowCursor failed: %s"), sdl.GetError())
+		lua.L_error(L, "window.cursor_show: failed to show cursor: %s", sdl.GetError())
 		return 0
 	}
 	return 0
@@ -399,7 +407,7 @@ lua_window_cursor_hide :: proc "c" (L: ^lua.State) -> c.int {
     check_window_safety(L,"window.cursor_hide")
 
 	if !sdl.HideCursor() {
-		lua.L_error(L, cstring("window.cursor_hide: HideCursor failed: %s"), sdl.GetError())
+		lua.L_error(L, "window.cursor_hide: failed to hide cursor: %s", sdl.GetError())
 		return 0
 	}
 	return 0
@@ -426,7 +434,7 @@ lua_window_get_clipboard :: proc "c" (L: ^lua.State) -> c.int {
 
 	p := sdl.GetClipboardText()
 	if p == nil {
-		lua.L_error(L, cstring("window.get_clipboard: GetClipboardText failed: %s"), sdl.GetError())
+		lua.L_error(L, "window.get_clipboard: failed to get clipboard text: %s", sdl.GetError())
 		return 0
 	}
 
@@ -457,7 +465,7 @@ lua_window_set_clipboard :: proc "c" (L: ^lua.State) -> c.int {
 	}
 
 	if !sdl.SetClipboardText(cast(cstring)(p)) {
-		lua.L_error(L, cstring("window.set_clipboard: SetClipboardText failed: %s"), sdl.GetError())
+		lua.L_error(L, "window.set_clipboard: failed to set clipboard text: %s", sdl.GetError())
 		return 0
 	}
 

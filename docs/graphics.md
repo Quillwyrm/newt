@@ -260,8 +260,8 @@ x, y, w, h = graphics.get_clip_rect()
 
 Transform blocks let you temporarily change how things are drawn. You can move, rotate, or scale every `draw_` call inside a block.
 
-You must call `begin_transform()` before using any transform functions.
-All `set_` functions only work inside an active transform block.
+You must call `begin_transform()` before using any `set_` transform functions,
+these functions only work inside an active transform block.
 
 Transforms are applied in the order you call them, and affect everything drawn until the block ends.
 

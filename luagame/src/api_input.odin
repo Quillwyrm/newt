@@ -404,11 +404,11 @@ lua_input_down :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if !Input_Initialized {
-		lua.L_error(L, cstring("input.down: input not initialized"))
+		lua.L_error(L, "input.down: input system not initialized")
 		return 0
 	}
 	if lua.gettop(L) != 1 {
-		lua.L_error(L, cstring("input.down expects 1 arg: name"))
+		lua.L_error(L, "input.down: expected 1 argument: name")
 		return 0
 	}
 
@@ -423,13 +423,13 @@ lua_input_down :: proc "c" (L: ^lua.State) -> c.int {
 
 	idx, ok := Token_To_Index[name]
 	if !ok {
-		lua.L_error(L, cstring("input.down: unknown token '%.*s'"), c.int(name_len), name_c)
+		lua.L_error(L, "input.down: unknown token '%.*s'", c.int(name_len), name_c)
 		return 0
 	}
 
 	state_i := Key_State_Index[idx]
 	if state_i < 0 {
-		lua.L_error(L, cstring("input.down: token '%.*s' not supported on this keyboard/layout"), c.int(name_len), name_c)
+		lua.L_error(L, "input.down: token '%.*s' not supported on this keyboard/layout", c.int(name_len), name_c)
 		return 0
 	}
 
@@ -442,11 +442,11 @@ lua_input_pressed :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if !Input_Initialized {
-		lua.L_error(L, cstring("input.pressed: input not initialized"))
+		lua.L_error(L, "input.pressed: input system not initialized")
 		return 0
 	}
 	if lua.gettop(L) != 1 {
-		lua.L_error(L, cstring("input.pressed expects 1 arg: name"))
+		lua.L_error(L, "input.pressed: expected 1 argument: name")
 		return 0
 	}
 
@@ -461,7 +461,7 @@ lua_input_pressed :: proc "c" (L: ^lua.State) -> c.int {
 
 	idx, ok := Token_To_Index[name]
 	if !ok {
-		lua.L_error(L, cstring("input.pressed: unknown token '%.*s'"), c.int(name_len), name_c)
+		lua.L_error(L, "input.pressed: unknown token '%.*s'", c.int(name_len), name_c)
 		return 0
 	}
 
@@ -474,11 +474,11 @@ lua_input_repeated :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if !Input_Initialized {
-		lua.L_error(L, cstring("input.repeated: input not initialized"))
+		lua.L_error(L, "input.repeated: input system not initialized")
 		return 0
 	}
 	if lua.gettop(L) != 1 {
-		lua.L_error(L, cstring("input.repeated expects 1 arg: name"))
+		lua.L_error(L, "input.repeated: expected 1 argument: name")
 		return 0
 	}
 
@@ -487,13 +487,13 @@ lua_input_repeated :: proc "c" (L: ^lua.State) -> c.int {
 	name := strings.string_from_ptr(cast(^byte)(name_c), int(name_len))
 
 	if _, is_mouse := mouse_token_to_index(name); is_mouse {
-		lua.L_error(L, cstring("input.repeated: '%.*s' is a mouse token"), c.int(name_len), name_c)
+		lua.L_error(L, "input.repeated: '%.*s' is a mouse token", c.int(name_len), name_c)
 		return 0
 	}
 
 	idx, ok := Token_To_Index[name]
 	if !ok {
-		lua.L_error(L, cstring("input.repeated: unknown token '%.*s'"), c.int(name_len), name_c)
+		lua.L_error(L, "input.repeated: unknown token '%.*s'", c.int(name_len), name_c)
 		return 0
 	}
 
@@ -506,11 +506,11 @@ lua_input_released :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if !Input_Initialized {
-		lua.L_error(L, cstring("input.released: input not initialized"))
+		lua.L_error(L, "input.released: input system not initialized")
 		return 0
 	}
 	if lua.gettop(L) != 1 {
-		lua.L_error(L, cstring("input.released expects 1 arg: name"))
+		lua.L_error(L, "input.released: expected 1 argument: name")
 		return 0
 	}
 
@@ -525,7 +525,7 @@ lua_input_released :: proc "c" (L: ^lua.State) -> c.int {
 
 	idx, ok := Token_To_Index[name]
 	if !ok {
-		lua.L_error(L, cstring("input.released: unknown token '%.*s'"), c.int(name_len), name_c)
+		lua.L_error(L, "input.released: unknown token '%.*s'", c.int(name_len), name_c)
 		return 0
 	}
 
@@ -538,11 +538,11 @@ lua_input_get_mouse_position :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if !Input_Initialized {
-		lua.L_error(L, cstring("input.get_mouse_position: input not initialized"))
+		lua.L_error(L, "input.get_mouse_position: input system not initialized")
 		return 0
 	}
 	if lua.gettop(L) != 0 {
-		lua.L_error(L, cstring("input.get_mouse_position expects 0 args"))
+		lua.L_error(L, "input.get_mouse_position: expected 0 arguments")
 		return 0
 	}
 
@@ -559,11 +559,11 @@ lua_input_get_mouse_wheel :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if !Input_Initialized {
-		lua.L_error(L, cstring("input.get_mouse_wheel: input not initialized"))
+		lua.L_error(L, "input.get_mouse_wheel: input system not initialized")
 		return 0
 	}
 	if lua.gettop(L) != 0 {
-		lua.L_error(L, cstring("input.get_mouse_wheel expects 0 args"))
+		lua.L_error(L, "input.get_mouse_wheel: expected 0 arguments")
 		return 0
 	}
 
@@ -577,20 +577,20 @@ lua_input_start_text :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if !Input_Initialized {
-		lua.L_error(L, cstring("input.start_text: input not initialized"))
+		lua.L_error(L, "input.start_text: input system not initialized")
 		return 0
 	}
 	if lua.gettop(L) != 0 {
-		lua.L_error(L, cstring("input.start_text expects 0 args"))
+		lua.L_error(L, "input.start_text: expected 0 arguments")
 		return 0
 	}
 	if Window == nil {
-		lua.L_error(L, cstring("input.start_text: window not initialized"))
+		lua.L_error(L, "input.start_text: window system not initialized. Did you forget to call window.init() in runtime.init()?")
 		return 0
 	}
 
 	if !sdl.StartTextInput(Window) {
-		lua.L_error(L, cstring("input.start_text: SDL_StartTextInput failed: %s"), sdl.GetError())
+		lua.L_error(L, "input.start_text: SDL_StartTextInput failed: %s", sdl.GetError())
 		return 0
 	}
 
@@ -603,20 +603,20 @@ lua_input_stop_text :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if !Input_Initialized {
-		lua.L_error(L, cstring("input.stop_text: input not initialized"))
+		lua.L_error(L, "input.stop_text: input system not initialized")
 		return 0
 	}
 	if lua.gettop(L) != 0 {
-		lua.L_error(L, cstring("input.stop_text expects 0 args"))
+		lua.L_error(L, "input.stop_text: expected 0 arguments")
 		return 0
 	}
 	if Window == nil {
-		lua.L_error(L, cstring("input.stop_text: window not initialized"))
+		lua.L_error(L, "input.stop_text: window system not initialized. Did you forget to call window.init() in runtime.init()?")
 		return 0
 	}
 
 	if !sdl.StopTextInput(Window) {
-		lua.L_error(L, cstring("input.stop_text: SDL_StopTextInput failed: %s"), sdl.GetError())
+		lua.L_error(L, "input.stop_text: SDL_StopTextInput failed: %s", sdl.GetError())
 		return 0
 	}
 
@@ -629,11 +629,11 @@ lua_input_get_text :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if !Input_Initialized {
-		lua.L_error(L, cstring("input.get_text: input not initialized"))
+		lua.L_error(L, "input.get_text: input system not initialized")
 		return 0
 	}
 	if lua.gettop(L) != 0 {
-		lua.L_error(L, cstring("input.get_text expects 0 args"))
+		lua.L_error(L, "input.get_text: expected 0 arguments")
 		return 0
 	}
 

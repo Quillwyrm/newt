@@ -3,7 +3,7 @@ local gfx = graphics
 -- =============================================================================
 -- Engine Configuration (MUST BE BEFORE ENGINE INIT)
 -- =============================================================================
-audio.config_track_delay_times({ 
+audio.config_bus_delay_times({ 
     [1] = 0, 
     [3] = 0.1,  
     [4] = 0.5, 
@@ -43,7 +43,7 @@ local bgm_paused = false
 local master_muted = false
 local delay_active = false
 
--- Filter State (Track 2)
+-- Filter State (bus 2)
 local current_filter = "NONE"
 local current_lpf, target_lpf = 20000, 20000
 local current_hpf, target_hpf = 10, 10
@@ -56,9 +56,8 @@ local function lerp(a, b, t)
     return a + (b - a) * t
 end
 
-local function apply_filter_preset(track_id, label, lpf, hpf)
+local function apply_filter_preset(bus_id, label, lpf, hpf)
     current_filter = label
-    -- Set targets instead of snapping immediately
     if label ~= "UNDERWATER" then
         target_lpf = lpf
         target_hpf = hpf
@@ -80,39 +79,32 @@ runtime.init = function()
         audio.set_voice_looping(bgm_handle, true)
     end
 
-    audio.set_track_delay_feedback(3, 0.5)
-    audio.set_track_delay_feedback(4, 0.5)
-    audio.set_track_delay_feedback(5, 0.5)
+    audio.set_bus_delay_feedback(3, 0.5)
+    audio.set_bus_delay_feedback(4, 0.5)
+    audio.set_bus_delay_feedback(5, 0.5)
 end
 
 runtime.update = function(dt)
     timer = timer + dt
 
-    -- 0. Process Filter Interpolation (The Pop Fix)
-    -- This dictates how fast the filter glides to the new target. 
-    -- 15.0 * dt usually resolves the slide in ~50-80ms.
+    -- 0. Process Filter Interpolation
     local slide_speed = 15.0 * dt 
 
     if current_filter == "UNDERWATER" then
-        -- LPF is dynamically swept by the oscillator
         local sweep_osc = math.sin(timer * 2.0)
         local min_freq = 200
         local max_freq = 3000
         local normalized_sweep = (sweep_osc + 1.0) / 2.0
         current_lpf = min_freq * math.exp(normalized_sweep * math.log(max_freq / min_freq))
         
-        -- HPF still lerps smoothly to its underwater target
         current_hpf = lerp(current_hpf, target_hpf, slide_speed)
     else
-        -- Standard presets smoothly lerp both boundaries
         current_lpf = lerp(current_lpf, target_lpf, slide_speed)
         current_hpf = lerp(current_hpf, target_hpf, slide_speed)
     end
 
-    -- Apply the current interpolated values to the engine every frame
-    audio.set_track_lpf(2, current_lpf)
-    audio.set_track_hpf(2, current_hpf)
-
+    audio.set_bus_lpf(2, current_lpf)
+    audio.set_bus_hpf(2, current_hpf)
 
     -- 1. Player Movement & Velocity
     local speed = 400
@@ -176,7 +168,7 @@ runtime.update = function(dt)
         ambient.active = not ambient.active
     end
 
-    -- Test Multi-Track Delays
+    -- Test Multi-bus Delays
     if input.pressed("4") then audio.play(snd_sfx, 3, 0.8) end 
     if input.pressed("5") then audio.play(snd_sfx, 4, 0.8) end 
     if input.pressed("6") then audio.play(snd_sfx, 5, 0.8) end 
@@ -190,7 +182,7 @@ runtime.update = function(dt)
     if input.pressed("e") then
         delay_active = not delay_active
         local feedback = delay_active and 0.8 or 0.0
-        audio.set_track_delay_feedback(1, feedback)
+        audio.set_bus_delay_feedback(1, feedback)
     end
 
     -- Pause/Resume BGM
@@ -202,7 +194,7 @@ runtime.update = function(dt)
     -- Master Fade
     if input.pressed("f") then
         master_muted = not master_muted
-        audio.fade_track(0, master_muted and 0 or 1, 0.5) 
+        audio.fade_bus(0, master_muted and 0 or 1, 0.5) 
     end
 
     -- Hold for Warble
@@ -230,61 +222,71 @@ end
 runtime.draw = function()
     gfx.clear(C.BG)
     
-    gfx.set_draw_origin(10, 10)
-    gfx.draw_rect(400, 400, 20, 20, C.RED)
-    gfx.set_draw_origin(0, 0)
-    gfx.draw_debug_text(340, 430, "Spatial Static SFX", C.RED)
+    -- Red Box (Transform block handles the origin shift)
+    gfx.begin_transform()
+        gfx.set_translation(400, 400)
+        gfx.set_origin(10, 10)
+        gfx.draw_rect(0, 0, 20, 20, C.RED)
+    gfx.end_transform()
+    
+    gfx.debug_text(340, 430, "Spatial Static SFX", C.RED)
 
+    -- Drone (Absolute math is fine since no scaling/rotation is needed)
     if drone.active then
         gfx.draw_rect(drone.x-10, drone.y-10, 20, 20, C.CYAN)
-        gfx.draw_debug_text(drone.x-40, drone.y+20, "Drone (ON)", C.CYAN)
+        gfx.debug_text(drone.x-40, drone.y+20, "Drone (ON)", C.CYAN)
     else
         gfx.draw_rect(drone.x-10, drone.y-10, 20, 20, C.UI_TEXT)
-        gfx.draw_debug_text(drone.x-40, drone.y+20, "Drone (OFF)", C.UI_TEXT)
+        gfx.debug_text(drone.x-40, drone.y+20, "Drone (OFF)", C.UI_TEXT)
     end
 
+    -- Ambient (Absolute math is fine since no scaling/rotation is needed)
     if ambient.active then
         gfx.draw_rect(ambient.x-10, ambient.y-10, 20, 20, C.MAGENTA)
-        gfx.draw_debug_text(ambient.x-40, ambient.y+20, "Static Ambient (ON)", C.MAGENTA)
+        gfx.debug_text(ambient.x-40, ambient.y+20, "Static Ambient (ON)", C.MAGENTA)
     else
         gfx.draw_rect(ambient.x-10, ambient.y-10, 20, 20, C.UI_TEXT)
-        gfx.draw_debug_text(ambient.x-40, ambient.y+20, "Static Ambient (OFF)", C.UI_TEXT)
+        gfx.debug_text(ambient.x-40, ambient.y+20, "Static Ambient (OFF)", C.UI_TEXT)
     end
 
+    -- Player Image (TRS block handles movement, scale, and origin offset)
     if player_img then
-        gfx.set_draw_origin(128, 128)
-        gfx.set_draw_scale(0.15) 
-        gfx.draw_image(player_img, px, py, C.WHITE)
+        gfx.begin_transform()
+            gfx.set_translation(px, py)
+            gfx.set_scale(0.15)
+            gfx.set_origin(128, 128)
+            gfx.draw_image(player_img, 0, 0, C.WHITE)
+        gfx.end_transform()
     end
 
-    gfx.set_draw_origin(0, 0); gfx.set_draw_scale(1.0)
+    -- UI Bar (Automatically draws in absolute screen coordinates)
     gfx.draw_rect(0, 560, 1280, 160, C.BAR_BG)
     
     local col1 = 20
     local col2 = 450
     local col3 = 850
 
-    gfx.draw_debug_text(col1, 575, "-- TRIGGERS --", C.UI_TEXT)
-    gfx.draw_debug_text(col1, 595, "[SPACE] Fire 2D SFX", C.WHITE)
-    gfx.draw_debug_text(col1, 615, "[Z] Fire Spatial SFX (Red Box)", C.RED)
-    gfx.draw_debug_text(col1, 635, "[X] Toggle Drone (Cyan)", C.CYAN)
-    gfx.draw_debug_text(col1, 655, "[C] Toggle Ambient (Magenta)", C.MAGENTA)
+    gfx.debug_text(col1, 575, "-- TRIGGERS --", C.UI_TEXT)
+    gfx.debug_text(col1, 595, "[SPACE] Fire 2D SFX", C.WHITE)
+    gfx.debug_text(col1, 615, "[Z] Fire Spatial SFX (Red Box)", C.RED)
+    gfx.debug_text(col1, 635, "[X] Toggle Drone (Cyan)", C.CYAN)
+    gfx.debug_text(col1, 655, "[C] Toggle Ambient (Magenta)", C.MAGENTA)
 
-    gfx.draw_debug_text(col2, 575, "-- TRACK MODIFIERS --", C.UI_TEXT)
-    gfx.draw_debug_text(col2, 595, "[1/2/3] BGM Filter Presets: " .. current_filter, C.YELLOW)
-    gfx.draw_debug_text(col2, 615, string.format("[E] Toggle Trk1 SFX Delay: %s", delay_active and "ON" or "OFF"), C.YELLOW)
-    gfx.draw_debug_text(col2, 645, "-- MULTI-TRACK DELAY TEST --", C.UI_TEXT)
-    gfx.draw_debug_text(col2, 665, "[4] Slapback | [5] Echo | [6] Canyon", C.WHITE)
+    gfx.debug_text(col2, 575, "-- bus MODIFIERS --", C.UI_TEXT)
+    gfx.debug_text(col2, 595, "[1/2/3] BGM Filter Presets: " .. current_filter, C.YELLOW)
+    gfx.debug_text(col2, 615, string.format("[E] Toggle Trk1 SFX Delay: %s", delay_active and "ON" or "OFF"), C.YELLOW)
+    gfx.debug_text(col2, 645, "-- MULTI-bus DELAY TEST --", C.UI_TEXT)
+    gfx.debug_text(col2, 665, "[4] Slapback | [5] Echo | [6] Canyon", C.WHITE)
 
-    gfx.draw_debug_text(col3, 575, "-- GLOBALS & BGM --", C.UI_TEXT)
-    gfx.draw_debug_text(col3, 595, string.format("[Q] Play/Pause BGM: %s", bgm_paused and "PAUSED" or "PLAYING"), C.WHITE)
-    gfx.draw_debug_text(col3, 615, string.format("[F] Fade Master: %s", master_muted and "MUTED" or "LOUD"), C.WHITE)
-    gfx.draw_debug_text(col3, 635, "[R] Hold to Warble Pitch", C.WHITE)
-    gfx.draw_debug_text(col3, 655, "[T] Print Timestamp to Console", C.WHITE)
+    gfx.debug_text(col3, 575, "-- GLOBALS & BGM --", C.UI_TEXT)
+    gfx.debug_text(col3, 595, string.format("[Q] Play/Pause BGM: %s", bgm_paused and "PAUSED" or "PLAYING"), C.WHITE)
+    gfx.debug_text(col3, 615, string.format("[F] Fade Master: %s", master_muted and "MUTED" or "LOUD"), C.WHITE)
+    gfx.debug_text(col3, 635, "[R] Hold to Warble Pitch", C.WHITE)
+    gfx.debug_text(col3, 655, "[T] Print Timestamp to Console", C.WHITE)
     
     if current_filter == "UNDERWATER" then
-        gfx.draw_debug_text(col2, 550, string.format("LPF SWEEP: %.0f Hz", current_lpf), C.CYAN)
+        gfx.debug_text(col2, 550, string.format("LPF SWEEP: %.0f Hz", current_lpf), C.CYAN)
     else
-        gfx.draw_debug_text(col2, 550, string.format("LPF: %.0f Hz", current_lpf), C.UI_TEXT)
+        gfx.debug_text(col2, 550, string.format("LPF: %.0f Hz", current_lpf), C.UI_TEXT)
     end
 end

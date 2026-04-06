@@ -40,7 +40,7 @@ lua_filesystem_get_resource_dir :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if lua.gettop(L) != 0 {
-		lua.L_error(L, cstring("filesystem.get_resource_dir expects 0 args"))
+		lua.L_error(L, "filesystem.get_resource_dir: expected 0 arguments")
 		return 0
 	}
 
@@ -60,7 +60,7 @@ lua_filesystem_get_working_dir :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if lua.gettop(L) != 0 {
-		lua.L_error(L, cstring("filesystem.get_working_dir expects 0 args"))
+		lua.L_error(L, "filesystem.get_working_dir: expected 0 arguments")
 		return 0
 	}
 
@@ -80,7 +80,7 @@ lua_filesystem_set_working_dir :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if lua.gettop(L) != 1 {
-		lua.L_error(L, cstring("filesystem.set_working_dir expects 1 arg: path"))
+		lua.L_error(L, "filesystem.set_working_dir: expected 1 argument: path")
 		return 0
 	}
 
@@ -104,7 +104,7 @@ lua_filesystem_get_args :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if lua.gettop(L) != 0 {
-		lua.L_error(L, cstring("filesystem.get_args expects 0 args"))
+		lua.L_error(L, "filesystem.get_args: expected 0 arguments")
 		return 0
 	}
 
@@ -131,7 +131,7 @@ lua_filesystem_list_dir :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if lua.gettop(L) != 1 {
-		lua.L_error(L, cstring("filesystem.list_dir expects 1 arg: path"))
+		lua.L_error(L, "filesystem.list_dir: expected 1 argument: path")
 		return 0
 	}
 
@@ -173,7 +173,7 @@ lua_filesystem_info :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if lua.gettop(L) != 1 {
-		lua.L_error(L, cstring("filesystem.info expects 1 arg: path"))
+		lua.L_error(L, "filesystem.info: expected 1 argument: path")
 		return 0
 	}
 
@@ -209,7 +209,7 @@ lua_filesystem_read_file :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if lua.gettop(L) != 1 {
-		lua.L_error(L, cstring("filesystem.read_file expects 1 arg: path"))
+		lua.L_error(L, "filesystem.read_file: expected 1 argument: path")
 		return 0
 	}
 
@@ -234,7 +234,7 @@ lua_filesystem_write_file :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if lua.gettop(L) != 2 {
-		lua.L_error(L, cstring("filesystem.write_file expects 2 args: path, data"))
+		lua.L_error(L, "filesystem.write_file: expected 2 arguments: path, data")
 		return 0
 	}
 
@@ -263,7 +263,7 @@ lua_filesystem_mkdir :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if lua.gettop(L) != 1 {
-		lua.L_error(L, cstring("filesystem.mkdir expects 1 arg: path"))
+		lua.L_error(L, "filesystem.mkdir: expected 1 argument: path")
 		return 0
 	}
 
@@ -287,7 +287,7 @@ lua_filesystem_rename :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if lua.gettop(L) != 2 {
-		lua.L_error(L, cstring("filesystem.rename expects 2 args: old_path, new_path"))
+		lua.L_error(L, "filesystem.rename: expected 2 arguments: old_path, new_path")
 		return 0
 	}
 
@@ -315,7 +315,7 @@ lua_filesystem_remove :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if lua.gettop(L) != 1 {
-		lua.L_error(L, cstring("filesystem.remove expects 1 arg: path"))
+		lua.L_error(L, "filesystem.remove: expected 1 argument: path")
 		return 0
 	}
 

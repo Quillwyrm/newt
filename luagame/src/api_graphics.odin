@@ -1,7 +1,6 @@
 package main
 
 import "base:runtime"
-import "core:fmt"
 import "core:math"
 import "core:c"
 import "core:math/linalg"
@@ -69,6 +68,13 @@ Gfx_Ctx: struct {
 // ---------------------------------------------------------
 // GRAPHICS SYSTEM HELPERS
 // ---------------------------------------------------------
+@(private)
+check_render_safety :: #force_inline proc(L: ^lua.State, fn_name: cstring) {
+	if Renderer == nil {
+		lua.L_error(L, "%s: graphics system not initialized. Did you forget to call window.init() in runtime.init()?", fn_name)
+	}
+}
+
 
 // CPU state only. Safe to call at boot.
 init_graphics_state :: proc() {
@@ -82,26 +88,29 @@ init_graphics_state :: proc() {
 }
 
 // load_image_from_path handles the hardware-level pipeline: Disk -> CPU RAM -> GPU VRAM.
-// Returns an Image struct and a success boolean.
-load_image_from_path :: proc(path: cstring) -> (Image, bool) {
-	// 1. DECODE: Load the PNG from disk into CPU RAM.
+// Returns an Image struct, an error string, and a success boolean.
+load_image_from_path :: proc(path: cstring) -> (Image, cstring, bool) {
 	w, h, channels: c.int
 	pixels := stbi.load(path, &w, &h, &channels, 4)
-	if pixels == nil do return {}, false
+	if pixels == nil {
+		reason := stbi.failure_reason()
+		if reason == nil do reason = cstring("failed to decode image")
+		return {}, reason, false
+	}
 	defer stbi.image_free(pixels)
 
-	// 2. ALLOCATE VRAM: Create hardware texture.
 	texture := sdl.CreateTexture(Renderer, .RGBA32, .STATIC, w, h)
-	if texture == nil do return {}, false
+	if texture == nil {
+		reason := sdl.GetError()
+		if reason == nil do reason = cstring("failed to create texture")
+		return {}, reason, false
+	}
 
-	// 3. UPLOAD: Push decoded bytes to GPU and set alpha blending.
 	sdl.UpdateTexture(texture, nil, pixels, w * 4)
 	sdl.SetTextureBlendMode(texture, {.BLEND})
-	
-	// Apply the global filter preference immediately
 	sdl.SetTextureScaleMode(texture, Gfx_Ctx.default_scale_mode)
 
-	return Image{texture, f32(w), f32(h)}, true
+	return Image{texture, f32(w), f32(h)}, nil, true
 }
 
 set_global_sdl_color :: proc(c: u32rgba) {
@@ -122,13 +131,6 @@ unpack_fcolor :: #force_inline proc(c: u32rgba) -> sdl.FColor {
 		f32((u32(c) >> 8)  & 0xFF) / 255.0,
 		f32(u32(c) & 0xFF)         / 255.0,
 	}
-}
-
-@(private)
-check_render_safety :: #force_inline proc(L: ^lua.State, fn_name: cstring) {
-    if Renderer == nil {
-        lua.L_error(L, "%s error: Renderer is nil. Did you forget to call window.init() in runtime.init()?", fn_name)
-    }
 }
 
 // ---------------------------------------------------------
@@ -180,33 +182,34 @@ u32_rgba_to_abgr :: #force_inline proc(c: u32) -> u32 {
 
 // lua_graphics_load_image implements: graphics.load_image(path) -> Image | nil, err
 lua_graphics_load_image :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
-    check_render_safety(L,"graphics.load_image")
+	context = runtime.default_context()
+	check_render_safety(L, "graphics.load_image")
 
-    if lua.gettop(L) != 1 {
-        lua.L_error(L, cstring("graphics.load_image expects 1 argument: path"))
-        return 0
+	if lua.gettop(L) != 1 {
+		lua.L_error(L, "graphics.load_image: expected 1 argument: path")
+		return 0
+	}
+
+	path_cstr := cast(cstring)lua.L_checklstring(L, 1, nil)
+
+  img, err, ok := load_image_from_path(path_cstr)
+  if !ok {
+    lua.pushnil(L)
+    if err != nil {
+      lua.pushfstring(L, "graphics.load_image: %s", err)
+    } else {
+      lua.pushstring(L, cstring("graphics.load_image: failed to load image"))
     }
+    return 2
+  }
 
-    path_cstr := cast(cstring)lua.L_checklstring(L, 1, nil)
+	data := cast(^Image)lua.newuserdata(L, size_of(Image))
+	data^ = img
 
-    // 1. LOAD: Dispatch to the hardware-level helper.
-    img, ok := load_image_from_path(path_cstr)
-    if !ok {
-        lua.pushnil(L)
-        lua.pushstring(L, cstring("Failed to load image texture"))
-        return 2
-    }
+	lua.L_getmetatable(L, "Image")
+	lua.setmetatable(L, -2)
 
-    // 2. BIND TO LUA: Allocate userdata and copy the Image POD.
-    data := cast(^Image)lua.newuserdata(L, size_of(Image))
-    data^ = img
-
-    // 3. ATTACH SAFETY NET: Apply the metatable for GC.
-    lua.L_getmetatable(L, cstring("Image_Meta"))
-    lua.setmetatable(L, -2)
-
-    return 1
+	return 1
 }
 
 // ---------------------------------------------------------
@@ -218,8 +221,17 @@ lua_graphics_draw_image :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
   check_render_safety(L, "graphics.draw_image")
 
-	img := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
-	if img == nil || img.texture == nil do return 0
+  img := cast(^Image)lua.L_testudata(L, 1, "Image")
+  if img == nil {
+    if lua.isnil(L, 1) {
+      lua.L_error(L, "graphics.draw_image: expected Image, got nil (did graphics.load_image fail?)")
+    } else {
+      lua.L_error(L, "graphics.draw_image: expected Image")
+    }
+    return 0
+  }
+
+  if img.texture == nil do return 0
 
 	x := f32(lua.L_checknumber(L, 2))
 	y := f32(lua.L_checknumber(L, 3))
@@ -238,8 +250,17 @@ lua_graphics_draw_image_region :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
   check_render_safety(L, "graphics.draw_image_region")
 
-	img := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
-	if img == nil || img.texture == nil do return 0
+  img := cast(^Image)lua.L_testudata(L, 1, "Image")
+  if img == nil {
+    if lua.isnil(L, 1) {
+      lua.L_error(L, "graphics.draw_image_region: expected Image, got nil (did graphics.load_image fail?)")
+    } else {
+      lua.L_error(L, "graphics.draw_image_region: expected Image")
+    }
+    return 0
+  }
+
+  if img.texture == nil do return 0
 
 	sx := f32(lua.L_checknumber(L, 2))
 	sy := f32(lua.L_checknumber(L, 3))
@@ -344,23 +365,24 @@ lua_graphics_debug_rect :: proc "c" (L: ^lua.State) -> c.int {
 // lua_graphics_debug_text implements: graphics.debug_text(x, y, text, [color])
 // Draws simple 8x8 bitmap text to the screen for debugging purposes.
 lua_graphics_debug_text :: proc "c" (L: ^lua.State) -> c.int {
-  context = runtime.default_context()
-  check_render_safety(L, "graphics.debug_text")
+	context = runtime.default_context()
+	check_render_safety(L, "graphics.debug_text")
 
-  x := cast(f32)lua.L_checknumber(L, 1)
-  y := cast(f32)lua.L_checknumber(L, 2)
+	x := cast(f32)lua.L_checknumber(L, 1)
+	y := cast(f32)lua.L_checknumber(L, 2)
 
-  text_len: c.size_t
-  text_c := lua.L_checklstring(L, 3, &text_len)
+	text_len: c.size_t
+	text_c := lua.L_checklstring(L, 3, &text_len)
 
-  raw_color := lua.L_optinteger(L, 4, 0xFFFFFFFF)
-  set_global_sdl_color(u32rgba(raw_color))
+	raw_color := lua.L_optinteger(L, 4, 0xFFFFFFFF)
+	set_global_sdl_color(u32rgba(raw_color))
 
-  if !sdl.RenderDebugText(Renderer, x, y, text_c) {
-    fmt.eprintln("Debug text failed:", sdl.GetError())
-  }
+	if !sdl.RenderDebugText(Renderer, x, y, text_c) {
+		lua.L_error(L, "graphics.debug_text: failed to draw debug text: %s", sdl.GetError())
+		return 0
+	}
 
-  return 0
+	return 0
 }
 
 // ---------------------------------------------------------
@@ -372,12 +394,12 @@ lua_graphics_begin_transform :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if Gfx_Ctx.transform.group_depth >= 31 {
-		lua.L_error(L, cstring("Transform stack overflow: Max depth is 32."))
+		lua.L_error(L, "graphics.begin_transform: transform stack overflow (max depth is 32)")
 		return 0
 	}
 
 	current_m := Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth]
-	
+
 	Gfx_Ctx.transform.group_depth += 1
 	Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth] = current_m
 
@@ -389,7 +411,7 @@ lua_graphics_end_transform :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
 	if Gfx_Ctx.transform.group_depth == 0 {
-		lua.L_error(L, cstring("Transform stack underflow: No group to end."))
+		lua.L_error(L, "graphics.end_transform: transform stack underflow (no transform block to end)")
 		return 0
 	}
 
@@ -522,44 +544,36 @@ lua_graphics_local_to_screen :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_graphics_set_default_filter implements: graphics.set_default_filter("nearest" | "linear")
 lua_graphics_set_default_filter :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
-    mode_str := lua.L_checkstring(L, 1)
+	context = runtime.default_context()
 
-    if mode_str == "nearest" {
-        Gfx_Ctx.default_scale_mode = .NEAREST
-    } else if mode_str == "linear" {
-        Gfx_Ctx.default_scale_mode = .LINEAR
-    } else {
-        lua.L_error(L, cstring("Invalid filter mode. Expected 'nearest' or 'linear'"))
-    }
+	mode_str := lua.L_checkstring(L, 1)
 
-    return 0
+	if mode_str == "nearest" {
+		Gfx_Ctx.default_scale_mode = .NEAREST
+	} else if mode_str == "linear" {
+		Gfx_Ctx.default_scale_mode = .LINEAR
+	} else {
+		lua.L_error(L, "graphics.set_default_filter: expected 'nearest' or 'linear'")
+		return 0
+	}
+
+	return 0
 }
 
 // lua_graphics_get_image_size implements: graphics.get_image_size(img) -> w, h
-// Returns the pixel dimensions of an image. Returns 0, 0 if the image is invalid.
+// Returns nil, nil if the image has been freed.
 lua_graphics_get_image_size :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 
-	// 1. Implicit Guard
-	if lua.type(L, 1) != lua.Type.USERDATA {
-		lua.pushnumber(L, 0)
-		lua.pushnumber(L, 0)
+	img := cast(^Image)lua.L_checkudata(L, 1, "Image")
+	if img == nil || img.texture == nil {
+		lua.pushnil(L)
+		lua.pushnil(L)
 		return 2
 	}
 
-	// 2. Type Check
-	img := cast(^Image)lua.L_testudata(L, 1, cstring("Image_Meta"))
-	if img == nil {
-		lua.pushnumber(L, 0)
-		lua.pushnumber(L, 0)
-		return 2
-	}
-
-	// 3. Return both values to the Lua stack
 	lua.pushnumber(L, cast(lua.Number)img.width)
 	lua.pushnumber(L, cast(lua.Number)img.height)
-
 	return 2
 }
 
@@ -567,31 +581,38 @@ lua_graphics_get_image_size :: proc "c" (L: ^lua.State) -> c.int {
 // RENDER STATE
 // ---------------------------------------------------------
 
-parse_gpu_blend_mode :: #force_inline proc(mode_str: cstring) -> sdl.BlendMode {
-	if mode_str == nil do return sdl.BLENDMODE_BLEND 
+parse_gpu_blend_mode_checked :: #force_inline proc(L: ^lua.State, mode_str: cstring, fn_name: cstring) -> sdl.BlendMode {
+	if mode_str == nil do return sdl.BLENDMODE_BLEND
 
 	switch string(mode_str) {
-	case "replace":       return sdl.BLENDMODE_NONE
-	case "blend":         return sdl.BLENDMODE_BLEND
-	case "add":           return sdl.BLENDMODE_ADD
-	case "multiply":      return sdl.BLENDMODE_MUL
-	case "modulate":      return sdl.BLENDMODE_MOD
-  case "premultiplied": return sdl.BLENDMODE_BLEND_PREMULTIPLIED
-	case:                 return sdl.BLENDMODE_BLEND
+	case "replace":
+		return sdl.BLENDMODE_NONE
+	case "blend":
+		return sdl.BLENDMODE_BLEND
+	case "add":
+		return sdl.BLENDMODE_ADD
+	case "multiply":
+		return sdl.BLENDMODE_MUL
+	case "modulate":
+		return sdl.BLENDMODE_MOD
+	case "premultiplied":
+		return sdl.BLENDMODE_BLEND_PREMULTIPLIED
+	case:
+		lua.L_error(L, "%s: unknown blend mode '%s'", fn_name, mode_str)
+		return sdl.BLENDMODE_BLEND
 	}
 }
 
 // lua_graphics_set_blend_mode implements: graphics.set_blend_mode([mode])
-// Sets the global hardware blending mode for all subsequent draw calls.
 lua_graphics_set_blend_mode :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
-  check_render_safety(L, "graphics.set_blend_mode")
+	check_render_safety(L, "graphics.set_blend_mode")
 
 	mode_str := lua.L_optstring(L, 1, "blend")
-	mode := parse_gpu_blend_mode(mode_str)
+	mode := parse_gpu_blend_mode_checked(L, mode_str, "graphics.set_blend_mode")
 
 	sdl.SetRenderDrawBlendMode(Renderer, mode)
-	Gfx_Ctx.current_blend_mode = mode // <-- ADD THIS
+	Gfx_Ctx.current_blend_mode = mode
 
 	return 0
 }
@@ -642,21 +663,26 @@ lua_graphics_get_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
 	return 4
 }
 
-// 2. Implement the Canvas Creation
-// graphics.new_canvas(w, h) -> Image
+// graphics.new_canvas(w, h) -> Image | nil, err
 lua_graphics_new_canvas :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
-  check_render_safety(L, "graphics.new_canvas")
+	check_render_safety(L, "graphics.new_canvas")
 
 	w := f32(lua.L_checknumber(L, 1))
 	h := f32(lua.L_checknumber(L, 2))
 
-	// Create with .TARGET access
 	texture := sdl.CreateTexture(Renderer, .RGBA32, .TARGET, cast(c.int)w, cast(c.int)h)
 	if texture == nil {
 		lua.pushnil(L)
-		lua.pushstring(L, sdl.GetError())
-		return 2
+
+    err := sdl.GetError()
+    if err != nil {
+      lua.pushfstring(L, "graphics.new_canvas: failed to create canvas texture: %s", err)
+    } else {
+      lua.pushstring(L, cstring("graphics.new_canvas: failed to create canvas texture"))
+    }
+
+    return 2
 	}
 
 	sdl.SetTextureBlendMode(texture, {.BLEND})
@@ -669,38 +695,40 @@ lua_graphics_new_canvas :: proc "c" (L: ^lua.State) -> c.int {
 		height  = h,
 	}
 
-	lua.L_getmetatable(L, cstring("Image_Meta"))
+	lua.L_getmetatable(L, "Image")
 	lua.setmetatable(L, -2)
 
 	return 1
 }
 
-// 3. Implement the Target Switcher with Driver-Level Safety
 // graphics.set_canvas([image])
 lua_graphics_set_canvas :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
-  check_render_safety(L, "graphics.set_canvas")
+	check_render_safety(L, "graphics.set_canvas")
 
-	// graphics.set_canvas() or graphics.set_canvas(nil) resets to backbuffer
 	if lua.gettop(L) == 0 || lua.isnil(L, 1) {
 		sdl.SetRenderTarget(Renderer, nil)
 		return 0
 	}
 
-	img := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
+	img := cast(^Image)lua.L_checkudata(L, 1, "Image")
 	if img == nil || img.texture == nil do return 0
 
-	// DRIVER QUERY: Instead of a struct bool, ask SDL3 for the access flag
 	props := sdl.GetTextureProperties(img.texture)
-	access := cast(sdl.TextureAccess)sdl.GetNumberProperty(props, sdl.PROP_TEXTURE_ACCESS_NUMBER, cast(i64)sdl.TextureAccess.STATIC)
+	access := cast(sdl.TextureAccess)sdl.GetNumberProperty(
+		props,
+		sdl.PROP_TEXTURE_ACCESS_NUMBER,
+		cast(i64)sdl.TextureAccess.STATIC,
+	)
 
 	if access != .TARGET {
-		lua.L_error(L, "graphics.set_canvas: Image is not a render target (must be created with new_canvas)")
+		lua.L_error(L, "graphics.set_canvas: image is not a render target (must be created with graphics.new_canvas)")
 		return 0
 	}
 
 	if !sdl.SetRenderTarget(Renderer, img.texture) {
-		lua.L_error(L, sdl.GetError())
+		lua.L_error(L, "graphics.set_canvas: failed to set render target: %s", sdl.GetError())
+		return 0
 	}
 
 	return 0
@@ -751,27 +779,33 @@ lua_graphics_set_canvas :: proc "c" (L: ^lua.State) -> c.int {
 //---------------------------------------------
 
 
-// lua_graphics_new_pixelmap implements: graphics.new_pixelmap(w, h) -> pmap
+// lua_graphics_new_pixelmap implements: graphics.new_pixelmap(w, h) -> pmap | nil, err
 lua_graphics_new_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
+
 	w := cast(c.int)lua.L_checkinteger(L, 1)
 	h := cast(c.int)lua.L_checkinteger(L, 2)
 
-	// Allocate a CPU-side surface with a strict 32-bit RGBA layout.
 	surface := sdl.CreateSurface(w, h, sdl.PixelFormat.RGBA32)
 	if surface == nil {
 		lua.pushnil(L)
-		lua.pushstring(L, sdl.GetError())
-		return 2
+
+    err := sdl.GetError()
+    if err != nil {
+      lua.pushfstring(L, "graphics.new_pixelmap: failed to create pixelmap surface: %s", err)
+    } else {
+      lua.pushstring(L, cstring("graphics.new_pixelmap: failed to create pixelmap surface"))
+    }
+
+    return 2
 	}
 
-	// Initialize to transparent black.
 	sdl.FillSurfaceRect(surface, nil, 0x00000000)
 
 	pmap := cast(^Pixelmap)lua.newuserdata(L, size_of(Pixelmap))
 	pmap^ = Pixelmap{surface = surface}
 
-	lua.L_getmetatable(L, cstring("Pixelmap_Meta"))
+	lua.L_getmetatable(L, "Pixelmap")
 	lua.setmetatable(L, -2)
 
 	return 1
@@ -779,53 +813,65 @@ lua_graphics_new_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_graphics_load_pixelmap implements: graphics.load_pixelmap(path) -> pmap, w, h | nil, err
 lua_graphics_load_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
-    path_cstr := cast(cstring)lua.L_checklstring(L, 1, nil)
+	context = runtime.default_context()
 
-    w, h, channels: c.int
-    pixels := stbi.load(path_cstr, &w, &h, &channels, 4) // Force RGBA
-    if pixels == nil {
-        lua.pushnil(L)
-        lua.pushstring(L, stbi.failure_reason())
-        return 2
-    }
-    defer stbi.image_free(pixels)
+	path_cstr := cast(cstring)lua.L_checklstring(L, 1, nil)
 
-    // Create a new SDL surface that owns its memory, preventing use-after-free bugs.
-    surface := sdl.CreateSurface(w, h, sdl.PixelFormat.RGBA32)
-    if surface == nil {
-        lua.pushnil(L)
-        lua.pushstring(L, sdl.GetError())
-        return 2
+	w, h, channels: c.int
+	pixels := stbi.load(path_cstr, &w, &h, &channels, 4)
+	if pixels == nil {
+		lua.pushnil(L)
+
+    err := stbi.failure_reason()
+    if err != nil {
+      lua.pushfstring(L, "graphics.load_pixelmap: failed to decode image: %s", err)
+    } else {
+      lua.pushstring(L, cstring("graphics.load_pixelmap: failed to decode image"))
     }
 
-    // Copy the STBI bytes into the SDL surface. 
-    // Pitch is width * 4 bytes per pixel.
-    runtime.mem_copy(surface.pixels, pixels, int(surface.pitch * h))
+    return 2
+	}
+	defer stbi.image_free(pixels)
 
-    // 1. Push userdata
-    pmap := cast(^Pixelmap)lua.newuserdata(L, size_of(Pixelmap))
-    pmap^ = Pixelmap{surface = surface}
+	surface := sdl.CreateSurface(w, h, sdl.PixelFormat.RGBA32)
+	if surface == nil {
+		lua.pushnil(L)
 
-    lua.L_getmetatable(L, cstring("Pixelmap_Meta"))
-    lua.setmetatable(L, -2)
+    err := sdl.GetError()
+    if err != nil {
+      lua.pushfstring(L, "graphics.load_pixelmap: failed to create pixelmap surface: %s", err)
+    } else {
+      lua.pushstring(L, cstring("graphics.load_pixelmap: failed to create pixelmap surface"))
+    }
 
-    // 2. Push width and height
-    lua.pushinteger(L, cast(lua.Integer)w)
-    lua.pushinteger(L, cast(lua.Integer)h)
+    return 2
+	}
 
-    // Return all 3 values
-    return 3
+	runtime.mem_copy(surface.pixels, pixels, int(surface.pitch * h))
+
+	pmap := cast(^Pixelmap)lua.newuserdata(L, size_of(Pixelmap))
+	pmap^ = Pixelmap{surface = surface}
+
+	lua.L_getmetatable(L, "Pixelmap")
+	lua.setmetatable(L, -2)
+
+	lua.pushinteger(L, cast(lua.Integer)w)
+	lua.pushinteger(L, cast(lua.Integer)h)
+
+	return 3
 }
 
 // lua_graphics_get_pixelmap_size implements: graphics.get_pixelmap_size(pmap) -> w, h
+// Returns nil, nil if the pixelmap has been freed.
 lua_graphics_get_pixelmap_size :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
-	
-	if lua.type(L, 1) != lua.Type.USERDATA do return 0
 
-	pmap := cast(^Pixelmap)lua.L_testudata(L, 1, cstring("Pixelmap_Meta"))
-	if pmap == nil || pmap.surface == nil do return 0
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
+	if pmap == nil || pmap.surface == nil {
+		lua.pushnil(L)
+		lua.pushnil(L)
+		return 2
+	}
 
 	lua.pushinteger(L, cast(lua.Integer)pmap.surface.w)
 	lua.pushinteger(L, cast(lua.Integer)pmap.surface.h)
@@ -835,17 +881,16 @@ lua_graphics_get_pixelmap_size :: proc "c" (L: ^lua.State) -> c.int {
 // lua_graphics_save_pixelmap implements: graphics.save_pixelmap(pmap, path) -> ok, err?
 lua_graphics_save_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
-	
-	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
 	path_cstr := cast(cstring)lua.L_checklstring(L, 2, nil)
 
 	if pmap == nil || pmap.surface == nil {
 		lua.pushboolean(L, b32(false))
-		lua.pushstring(L, cstring("Invalid pixelmap"))
+		lua.pushstring(L, cstring("graphics.save_pixelmap: pixelmap has been freed"))
 		return 2
 	}
 
-	// Route the raw surface bytes into the stb_image_write PNG encoder.
 	res := stbi.write_png(
 		path_cstr,
 		pmap.surface.w,
@@ -857,7 +902,7 @@ lua_graphics_save_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 
 	if res == 0 {
 		lua.pushboolean(L, b32(false))
-		lua.pushstring(L, cstring("Failed to write PNG (check file path and permissions)"))
+		lua.pushstring(L, cstring("graphics.save_pixelmap: failed to write PNG (check file path and permissions)"))
 		return 2
 	}
 
@@ -873,7 +918,7 @@ lua_graphics_save_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_pixelmap_set_pixel :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
 	
-	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
 	if pmap == nil || pmap.surface == nil do return 0
 
 	x := cast(c.int)lua.L_checkinteger(L, 2)
@@ -892,12 +937,14 @@ lua_graphics_pixelmap_set_pixel :: proc "c" (L: ^lua.State) -> c.int {
 }
 
 // lua_graphics_pixelmap_get_pixel implements: graphics.pixelmap_get_pixel(pmap, x, y) -> color
+// Returns nil if the pixelmap has been freed.
+// Returns 0 for out-of-bounds reads.
 lua_graphics_pixelmap_get_pixel :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
-	
-	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
 	if pmap == nil || pmap.surface == nil {
-		lua.pushinteger(L, 0)
+		lua.pushnil(L)
 		return 1
 	}
 
@@ -912,12 +959,10 @@ lua_graphics_pixelmap_get_pixel :: proc "c" (L: ^lua.State) -> c.int {
 
 	pixels := cast([^]u32)surf.pixels
 	stride := cast(int)surf.pitch / 4
-	
+
 	mem_color := pixels[y * cast(c.int)stride + x]
-	
-	// Byte-swapping is symmetric: ABGR -> RGBA
 	logical_color := u32_rgba_to_abgr(mem_color)
-	
+
 	lua.pushinteger(L, cast(lua.Integer)logical_color)
 	return 1
 }
@@ -926,7 +971,7 @@ lua_graphics_pixelmap_get_pixel :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_pixelmap_flood_fill :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
   
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
   if pmap == nil || pmap.surface == nil do return 0
 
   start_x := cast(int)lua.L_checkinteger(L, 2)
@@ -1010,7 +1055,7 @@ lua_graphics_pixelmap_flood_fill :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_pixelmap_raycast :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
   
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
   if pmap == nil || pmap.surface == nil {
     lua.pushboolean(L, false)
     return 1
@@ -1066,17 +1111,26 @@ PixelmapBlendMode :: enum {
   Mask,
 }
 
-parse_blend_mode :: #force_inline proc(mode_str: cstring) -> PixelmapBlendMode {
-  if mode_str == nil do return .Blend // Safety check in case Lua passes nil
+parse_blend_mode_checked :: #force_inline proc(L: ^lua.State, mode_str: cstring, fn_name: cstring) -> PixelmapBlendMode {
+	if mode_str == nil do return .Blend
 
-  switch string(mode_str) {
-    case "replace":  return .Replace
-    case "add":      return .Add
-    case "multiply": return .Multiply
-    case "erase":    return .Erase
-    case "mask":     return .Mask
-    case:            return .Blend
-  }
+	switch string(mode_str) {
+	case "replace":
+		return .Replace
+	case "blend":
+		return .Blend
+	case "add":
+		return .Add
+	case "multiply":
+		return .Multiply
+	case "erase":
+		return .Erase
+	case "mask":
+		return .Mask
+	case:
+		lua.L_error(L, "%s: unknown blend mode '%s'", fn_name, mode_str)
+		return .Blend
+	}
 }
 
 blend_memory_colors :: #force_inline proc(dst, src: u32, mode: PixelmapBlendMode) -> u32 {
@@ -1170,7 +1224,7 @@ dist_sq_to_segment :: #force_inline proc(p, a, b: [2]f32) -> f32 {
 lua_graphics_blit_rect :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
   
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
   if pmap == nil || pmap.surface == nil do return 0
 
   x := cast(int)lua.L_checkinteger(L, 2)
@@ -1178,7 +1232,7 @@ lua_graphics_blit_rect :: proc "c" (L: ^lua.State) -> c.int {
   w := cast(int)lua.L_checkinteger(L, 4)
   h := cast(int)lua.L_checkinteger(L, 5)
   color_u32 := cast(u32)lua.L_optinteger(L, 6, -1)
-  mode := parse_blend_mode(lua.L_optstring(L, 7, "blend")) // Updated Default
+  mode := parse_blend_mode_checked(L, lua.L_optstring(L, 7, "blend"), "graphics.blit_rect")
 
   if w <= 0 || h <= 0 do return 0
   surf := pmap.surface
@@ -1205,7 +1259,7 @@ lua_graphics_blit_rect :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_blit_triangle :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
   
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
   if pmap == nil || pmap.surface == nil do return 0
 
   x1 := cast(f32)lua.L_checknumber(L, 2)
@@ -1216,7 +1270,7 @@ lua_graphics_blit_triangle :: proc "c" (L: ^lua.State) -> c.int {
   y3 := cast(f32)lua.L_checknumber(L, 7)
   
   color_u32 := cast(u32)lua.L_optinteger(L, 8, -1)
-  mode := parse_blend_mode(lua.L_optstring(L, 9, "blend"))
+  mode := parse_blend_mode_checked(L, lua.L_optstring(L, 9, "blend"), "graphics.blit_triangle")
 
   surf := pmap.surface
   mem_color := u32_rgba_to_abgr(color_u32)
@@ -1261,7 +1315,7 @@ lua_graphics_blit_triangle :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
   
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
   if pmap == nil || pmap.surface == nil do return 0
 
   x0 := cast(int)lua.L_checkinteger(L, 2)
@@ -1269,7 +1323,7 @@ lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
   x1 := cast(int)lua.L_checkinteger(L, 4)
   y1 := cast(int)lua.L_checkinteger(L, 5)
   color_u32 := cast(u32)lua.L_optinteger(L, 6, -1)
-  mode := parse_blend_mode(lua.L_optstring(L, 7, "blend")) // Updated Default
+  mode := parse_blend_mode_checked(L, lua.L_optstring(L, 7, "blend"), "graphics.blit_line")
 
   surf := pmap.surface
   mem_color := u32_rgba_to_abgr(color_u32)
@@ -1294,14 +1348,14 @@ lua_graphics_blit_line :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_blit_circle :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
   
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
   if pmap == nil || pmap.surface == nil do return 0
 
   cx     := cast(f32)lua.L_checknumber(L, 2)
   cy     := cast(f32)lua.L_checknumber(L, 3)
   r      := cast(f32)lua.L_checknumber(L, 4)
   color  := cast(u32)lua.L_optinteger(L, 5, -1)
-  mode   := parse_blend_mode(lua.L_optstring(L, 6, "blend")) // Updated Default
+  mode := parse_blend_mode_checked(L, lua.L_optstring(L, 6, "blend"), "graphics.blit_circle")
 
   surf   := pmap.surface
   mem_c  := u32_rgba_to_abgr(color)
@@ -1332,7 +1386,7 @@ lua_graphics_blit_circle :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_blit_circle_outline :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
   
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
   if pmap == nil || pmap.surface == nil do return 0
 
   cx     := cast(f32)lua.L_checknumber(L, 2)
@@ -1340,7 +1394,7 @@ lua_graphics_blit_circle_outline :: proc "c" (L: ^lua.State) -> c.int {
   r      := cast(f32)lua.L_checknumber(L, 4)
   thick  := cast(f32)lua.L_checknumber(L, 5)
   color  := cast(u32)lua.L_optinteger(L, 6, -1)
-  mode   := parse_blend_mode(lua.L_optstring(L, 7, "blend")) // Updated Default
+  mode := parse_blend_mode_checked(L, lua.L_optstring(L, 7, "blend"), "graphics.blit_circle_outline")
 
   surf   := pmap.surface
   mem_c  := u32_rgba_to_abgr(color)
@@ -1376,14 +1430,14 @@ lua_graphics_blit_circle_outline :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_blit_circle_pixel_outline :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
   
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
   if pmap == nil || pmap.surface == nil do return 0
 
   cx := cast(int)lua.L_checkinteger(L, 2)
   cy := cast(int)lua.L_checkinteger(L, 3)
   radius := cast(int)lua.L_checkinteger(L, 4)
   color_u32 := cast(u32)lua.L_optinteger(L, 5, -1)
-  mode := parse_blend_mode(lua.L_optstring(L, 6, "blend")) // Updated Default
+  mode := parse_blend_mode_checked(L, lua.L_optstring(L, 6, "blend"), "graphics.blit_circle_pixel_outline")
 
   if radius < 0 do return 0
   
@@ -1422,7 +1476,7 @@ lua_graphics_blit_circle_pixel_outline :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_blit_capsule :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
   
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
   if pmap == nil || pmap.surface == nil do return 0
 
   x1 := cast(f32)lua.L_checknumber(L, 2)
@@ -1431,7 +1485,7 @@ lua_graphics_blit_capsule :: proc "c" (L: ^lua.State) -> c.int {
   y2 := cast(f32)lua.L_checknumber(L, 5)
   r  := cast(f32)lua.L_checknumber(L, 6)
   color_u32 := cast(u32)lua.L_optinteger(L, 7, -1)
-  mode := parse_blend_mode(lua.L_optstring(L, 8, "blend")) // Updated Default
+  mode := parse_blend_mode_checked(L, lua.L_optstring(L, 8, "blend"), "graphics.blit_capsule")
 
   surf := pmap.surface
   mem_color := u32_rgba_to_abgr(color_u32)
@@ -1469,13 +1523,13 @@ lua_graphics_blit_capsule :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_blit :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
   
-  dst_pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
-  src_pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, cstring("Pixelmap_Meta"))
+  dst_pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
+  src_pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, "Pixelmap")
   if dst_pmap == nil || dst_pmap.surface == nil || src_pmap == nil || src_pmap.surface == nil do return 0
 
   dest_x := cast(int)lua.L_checkinteger(L, 3)
   dest_y := cast(int)lua.L_checkinteger(L, 4)
-  mode := parse_blend_mode(lua.L_optstring(L, 5, "blend")) // Updated Default
+  mode := parse_blend_mode_checked(L, lua.L_optstring(L, 5, "blend"), "graphics.blit")
 
   dst_surf, src_surf := dst_pmap.surface, src_pmap.surface
   
@@ -1501,8 +1555,8 @@ lua_graphics_blit :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_blit_region :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
   
-  dst_pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
-  src_pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, cstring("Pixelmap_Meta"))
+  dst_pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
+  src_pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, "Pixelmap")
   if dst_pmap == nil || dst_pmap.surface == nil || src_pmap == nil || src_pmap.surface == nil do return 0
 
   src_x := cast(int)lua.L_checkinteger(L, 3)
@@ -1511,7 +1565,7 @@ lua_graphics_blit_region :: proc "c" (L: ^lua.State) -> c.int {
   bh    := cast(int)lua.L_checkinteger(L, 6)
   dst_x := cast(int)lua.L_checkinteger(L, 7)
   dst_y := cast(int)lua.L_checkinteger(L, 8)
-  mode  := parse_blend_mode(lua.L_optstring(L, 9, "blend")) // Updated Default
+  mode := parse_blend_mode_checked(L, lua.L_optstring(L, 9, "blend"), "graphics.blit_region")
 
   dst_surf, src_surf := dst_pmap.surface, src_pmap.surface
   if bw <= 0 || bh <= 0 do return 0
@@ -1545,34 +1599,45 @@ lua_graphics_blit_region :: proc "c" (L: ^lua.State) -> c.int {
 // - VRAM SYNC/ IMAGE MUTATION
 //---------------------------------------------
 
-// lua_graphics_new_image_from_pixelmap implements: graphics.new_image_from_pixelmap(pmap) -> img
+// lua_graphics_new_image_from_pixelmap implements: graphics.new_image_from_pixelmap(pmap) -> img | nil, err
 lua_graphics_new_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
-  check_render_safety(L, "graphics.new_image_from_pixelmap")
-	
-	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
-	if pmap == nil || pmap.surface == nil do return 0
+	check_render_safety(L, "graphics.new_image_from_pixelmap")
+
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
+	if pmap == nil || pmap.surface == nil {
+		lua.pushnil(L)
+		lua.pushstring(L, cstring("graphics.new_image_from_pixelmap: source pixelmap has been freed"))
+		return 2
+	}
 
 	surf := pmap.surface
 
 	texture := sdl.CreateTextureFromSurface(Renderer, surf)
 	if texture == nil {
 		lua.pushnil(L)
-		lua.pushstring(L, sdl.GetError())
-		return 2
+
+    err := sdl.GetError()
+    if err != nil {
+      lua.pushfstring(L, "graphics.new_image_from_pixelmap: failed to create texture from pixelmap: %s", err)
+    } else {
+      lua.pushstring(L, cstring("graphics.new_image_from_pixelmap: failed to create texture from pixelmap"))
+    }
+
+    return 2
 	}
-	
+
 	sdl.SetTextureBlendMode(texture, {.BLEND})
 	sdl.SetTextureScaleMode(texture, Gfx_Ctx.default_scale_mode)
 
 	img := cast(^Image)lua.newuserdata(L, size_of(Image))
 	img^ = Image{
-		texture = texture, 
-		width   = f32(surf.w), 
+		texture = texture,
+		width   = f32(surf.w),
 		height  = f32(surf.h),
 	}
 
-	lua.L_getmetatable(L, cstring("Image_Meta"))
+	lua.L_getmetatable(L, "Image")
 	lua.setmetatable(L, -2)
 
 	return 1
@@ -1584,8 +1649,8 @@ lua_graphics_update_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 	context = runtime.default_context()
   check_render_safety(L, "graphics.update_image_from_pixelmap")
 	
-	img  := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
-	pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, cstring("Pixelmap_Meta"))
+	img  := cast(^Image)lua.L_checkudata(L, 1, "Image")
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, "Pixelmap")
 	
 	if img == nil || img.texture == nil || pmap == nil || pmap.surface == nil do return 0
 
@@ -1608,8 +1673,8 @@ lua_graphics_update_image_region_from_pixelmap :: proc "c" (L: ^lua.State) -> c.
 	context = runtime.default_context()
   check_render_safety(L, "graphics.update_image_region_from_pixelmap")
 	
-	img  := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
-	pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, cstring("Pixelmap_Meta"))
+	img  := cast(^Image)lua.L_checkudata(L, 1, "Image")
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 2, "Pixelmap")
 	
 	if img == nil || img.texture == nil || pmap == nil || pmap.surface == nil do return 0
 
@@ -1649,7 +1714,7 @@ lua_graphics_update_image_region_from_pixelmap :: proc "c" (L: ^lua.State) -> c.
 lua_graphics_pixelmap_get_cptr :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
   
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
   if pmap == nil || pmap.surface == nil {
     lua.pushnil(L)
     return 1
@@ -1660,27 +1725,38 @@ lua_graphics_pixelmap_get_cptr :: proc "c" (L: ^lua.State) -> c.int {
   return 1
 }
 
-// lua_graphics_pixelmap_clone implements: graphics.pixelmap_clone(pmap) -> new_pmap
+// lua_graphics_pixelmap_clone implements: graphics.pixelmap_clone(pmap) -> new_pmap | nil, err
 lua_graphics_pixelmap_clone :: proc "c" (L: ^lua.State) -> c.int {
-  context = runtime.default_context()
-  
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
-  if pmap == nil || pmap.surface == nil do return 0
+	context = runtime.default_context()
 
-  clone_surf := sdl.DuplicateSurface(pmap.surface)
-  if clone_surf == nil {
-    lua.pushnil(L)
-    lua.pushstring(L, sdl.GetError())
+	pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
+	if pmap == nil || pmap.surface == nil {
+		lua.pushnil(L)
+		lua.pushstring(L, cstring("graphics.pixelmap_clone: source pixelmap has been freed"))
+		return 2
+	}
+
+	clone_surf := sdl.DuplicateSurface(pmap.surface)
+	if clone_surf == nil {
+		lua.pushnil(L)
+
+    err := sdl.GetError()
+    if err != nil {
+      lua.pushfstring(L, "graphics.pixelmap_clone: failed to duplicate pixelmap surface: %s", err)
+    } else {
+      lua.pushstring(L, cstring("graphics.pixelmap_clone: failed to duplicate pixelmap surface"))
+    }
+
     return 2
-  }
+	}
 
-  new_pmap := cast(^Pixelmap)lua.newuserdata(L, size_of(Pixelmap))
-  new_pmap^ = Pixelmap{surface = clone_surf}
+	new_pmap := cast(^Pixelmap)lua.newuserdata(L, size_of(Pixelmap))
+	new_pmap^ = Pixelmap{surface = clone_surf}
 
-  lua.L_getmetatable(L, cstring("Pixelmap_Meta"))
-  lua.setmetatable(L, -2)
+	lua.L_getmetatable(L, "Pixelmap")
+	lua.setmetatable(L, -2)
 
-  return 1
+	return 1
 }
 
 //=========================================================================================
@@ -1694,7 +1770,7 @@ lua_graphics_pixelmap_clone :: proc "c" (L: ^lua.State) -> c.int {
 // lua_image_gc: Destroys the VRAM texture.
 lua_image_gc :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
-  img := cast(^Image)lua.L_checkudata(L, 1, cstring("Image_Meta"))
+  img := cast(^Image)lua.L_checkudata(L, 1, "Image")
 
   if img != nil && img.texture != nil {
     sdl.DestroyTexture(img.texture)
@@ -1706,7 +1782,7 @@ lua_image_gc :: proc "c" (L: ^lua.State) -> c.int {
 // lua_pixelmap_gc: Destroys the CPU-side SDL Surface.
 lua_pixelmap_gc :: proc "c" (L: ^lua.State) -> c.int {
   context = runtime.default_context()
-  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, cstring("Pixelmap_Meta"))
+  pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
   
   if pmap != nil && pmap.surface != nil {
     sdl.DestroySurface(pmap.surface)
@@ -1719,15 +1795,15 @@ lua_pixelmap_gc :: proc "c" (L: ^lua.State) -> c.int {
 // linking Odin GC procedures to Lua objects to prevent memory leaks.
 setup_graphics_metatables :: proc(L: ^lua.State) {
   // 1. IMAGE METATABLE
-  lua.L_newmetatable(L, cstring("Image_Meta"))
+  lua.L_newmetatable(L, "Image")
   lua.pushcfunction(L, lua_image_gc)
-  lua.setfield(L, -2, cstring("__gc"))
+  lua.setfield(L, -2, "__gc")
   lua.pop(L, 1)
 
   // 3. PIXELMAP METATABLE
-  lua.L_newmetatable(L, cstring("Pixelmap_Meta"))
+  lua.L_newmetatable(L, "Pixelmap")
   lua.pushcfunction(L, lua_pixelmap_gc)
-  lua.setfield(L, -2, cstring("__gc"))
+  lua.setfield(L, -2, "__gc")
   lua.pop(L, 1)
 }
 
