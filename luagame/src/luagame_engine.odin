@@ -488,6 +488,4 @@ main :: proc() {
 
         if Quit_Requested {running = false}
     }
-
-
 }

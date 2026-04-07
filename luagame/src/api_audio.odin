@@ -91,6 +91,10 @@ import sdl "vendor:sdl3"
 MAX_AUDIO_BUSES :: 8
 MAX_VOICES :: 64
 
+VOICE_INDEX_BITS       :: 6
+VOICE_INDEX_MASK       :: u32((1 << VOICE_INDEX_BITS) - 1)
+VOICE_GENERATION_MASK  :: u64(0x03FF_FFFF)
+
 // Pixels to Meters scaling for 3D spatialization.
 // 100 pixels = 1.0 unit (meter) in Miniaudio.
 AUDIO_SCALE :: 0.01
@@ -157,6 +161,11 @@ check_audio_safety :: #force_inline proc(L: ^lua.State, fn_name: cstring) {
 // Returns true on full success. On any failure, partially initialized state is rolled back.
 audio_init :: proc() -> bool {
     if audio_ctx.initialized do return true
+
+    if MAX_VOICES != (1 << VOICE_INDEX_BITS) {
+        fmt.eprintf("audio_init: MAX_VOICES (%d) does not match packed handle index capacity from VOICE_INDEX_BITS (%d)\n", MAX_VOICES, 1 << VOICE_INDEX_BITS)
+        return false
+    }
 
     config := ma.engine_config_init()
 
@@ -325,16 +334,19 @@ audio_update :: proc() {
 
 // get_voice safely validates a packed handle from Lua and returns the Voice pointer.
 // Returns nil if the voice is dead or the handle is stale.
+//
+// Packed handle layout:
+// - low 6 bits: voice slot index
+// - upper 26 bits: truncated generation stamp
 get_voice :: proc(handle: u32) -> ^Voice {
-    index := handle & 0xFFFF
-    gen := handle >> 16
+    index := handle & VOICE_INDEX_MASK
+    gen := handle >> VOICE_INDEX_BITS
 
     if index >= MAX_VOICES do return nil
 
     voice := &audio_ctx.voices[index]
 
-    // Mask the 64-bit generation down to 16 bits to compare against Lua's stamp
-    if voice.active && u32(voice.generation & 0xFFFF) == gen {
+    if voice.active && u32(voice.generation & VOICE_GENERATION_MASK) == gen {
         return voice
     }
     return nil
@@ -412,8 +424,8 @@ claim_and_init_voice :: proc(sound: ^Sound, bus_idx: int) -> (^Voice, u32, cstri
     audio_ctx.next_generation += 1
     voice.generation = audio_ctx.next_generation
     voice.active = true
-
-    handle := (u32(voice.generation & 0xFFFF) << 16) | u32(voice_idx)
+    
+    handle := (u32(voice.generation & VOICE_GENERATION_MASK) << VOICE_INDEX_BITS) | u32(voice_idx)
     return voice, handle, nil, true
 }
 
