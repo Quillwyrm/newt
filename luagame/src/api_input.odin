@@ -3,10 +3,8 @@ package main
 import "base:runtime"
 import "core:c"
 import "core:strings"
-import math "core:math"
-
-import sdl "vendor:sdl3"
 import lua "luajit"
+import sdl "vendor:sdl3"
 
 //========================================================================================================================================
 // INPUT API
@@ -38,79 +36,120 @@ Key_Def :: struct {
 	key:   sdl.Keycode,
 }
 
-KEYS := [?]Key_Def{
+KEYS := [?]Key_Def {
 	// Letters
-	{"a", sdl.K_A}, {"b", sdl.K_B}, {"c", sdl.K_C}, {"d", sdl.K_D}, {"e", sdl.K_E},
-	{"f", sdl.K_F}, {"g", sdl.K_G}, {"h", sdl.K_H}, {"i", sdl.K_I}, {"j", sdl.K_J},
-	{"k", sdl.K_K}, {"l", sdl.K_L}, {"m", sdl.K_M}, {"n", sdl.K_N}, {"o", sdl.K_O},
-	{"p", sdl.K_P}, {"q", sdl.K_Q}, {"r", sdl.K_R}, {"s", sdl.K_S}, {"t", sdl.K_T},
-	{"u", sdl.K_U}, {"v", sdl.K_V}, {"w", sdl.K_W}, {"x", sdl.K_X}, {"y", sdl.K_Y},
+	{"a", sdl.K_A},
+	{"b", sdl.K_B},
+	{"c", sdl.K_C},
+	{"d", sdl.K_D},
+	{"e", sdl.K_E},
+	{"f", sdl.K_F},
+	{"g", sdl.K_G},
+	{"h", sdl.K_H},
+	{"i", sdl.K_I},
+	{"j", sdl.K_J},
+	{"k", sdl.K_K},
+	{"l", sdl.K_L},
+	{"m", sdl.K_M},
+	{"n", sdl.K_N},
+	{"o", sdl.K_O},
+	{"p", sdl.K_P},
+	{"q", sdl.K_Q},
+	{"r", sdl.K_R},
+	{"s", sdl.K_S},
+	{"t", sdl.K_T},
+	{"u", sdl.K_U},
+	{"v", sdl.K_V},
+	{"w", sdl.K_W},
+	{"x", sdl.K_X},
+	{"y", sdl.K_Y},
 	{"z", sdl.K_Z},
 
 	// Digits
-	{"0", sdl.K_0}, {"1", sdl.K_1}, {"2", sdl.K_2}, {"3", sdl.K_3}, {"4", sdl.K_4},
-	{"5", sdl.K_5}, {"6", sdl.K_6}, {"7", sdl.K_7}, {"8", sdl.K_8}, {"9", sdl.K_9},
+	{"0", sdl.K_0},
+	{"1", sdl.K_1},
+	{"2", sdl.K_2},
+	{"3", sdl.K_3},
+	{"4", sdl.K_4},
+	{"5", sdl.K_5},
+	{"6", sdl.K_6},
+	{"7", sdl.K_7},
+	{"8", sdl.K_8},
+	{"9", sdl.K_9},
 
 	// Whitespace / editing
-	{"space",     sdl.K_SPACE},
-	{"tab",       sdl.K_TAB},
+	{"space", sdl.K_SPACE},
+	{"tab", sdl.K_TAB},
 	{"backspace", sdl.K_BACKSPACE},
-	{"return",    sdl.K_RETURN},
-	{"insert",    sdl.K_INSERT},
-	{"delete",    sdl.K_DELETE},
-	{"clear",     sdl.K_CLEAR},
+	{"return", sdl.K_RETURN},
+	{"insert", sdl.K_INSERT},
+	{"delete", sdl.K_DELETE},
+	{"clear", sdl.K_CLEAR},
 
 	// Navigation
-	{"up",       sdl.K_UP},
-	{"down",     sdl.K_DOWN},
-	{"left",     sdl.K_LEFT},
-	{"right",    sdl.K_RIGHT},
-	{"home",     sdl.K_HOME},
-	{"end",      sdl.K_END},
-	{"pageup",   sdl.K_PAGEUP},
+	{"up", sdl.K_UP},
+	{"down", sdl.K_DOWN},
+	{"left", sdl.K_LEFT},
+	{"right", sdl.K_RIGHT},
+	{"home", sdl.K_HOME},
+	{"end", sdl.K_END},
+	{"pageup", sdl.K_PAGEUP},
 	{"pagedown", sdl.K_PAGEDOWN},
 
 	// Function keys
-	{"f1",  sdl.K_F1},  {"f2",  sdl.K_F2},  {"f3",  sdl.K_F3},  {"f4",  sdl.K_F4},
-	{"f5",  sdl.K_F5},  {"f6",  sdl.K_F6},  {"f7",  sdl.K_F7},  {"f8",  sdl.K_F8},
-	{"f9",  sdl.K_F9},  {"f10", sdl.K_F10}, {"f11", sdl.K_F11}, {"f12", sdl.K_F12},
-	{"f13", sdl.K_F13}, {"f14", sdl.K_F14}, {"f15", sdl.K_F15}, {"f16", sdl.K_F16},
-	{"f17", sdl.K_F17}, {"f18", sdl.K_F18},
+	{"f1", sdl.K_F1},
+	{"f2", sdl.K_F2},
+	{"f3", sdl.K_F3},
+	{"f4", sdl.K_F4},
+	{"f5", sdl.K_F5},
+	{"f6", sdl.K_F6},
+	{"f7", sdl.K_F7},
+	{"f8", sdl.K_F8},
+	{"f9", sdl.K_F9},
+	{"f10", sdl.K_F10},
+	{"f11", sdl.K_F11},
+	{"f12", sdl.K_F12},
+	{"f13", sdl.K_F13},
+	{"f14", sdl.K_F14},
+	{"f15", sdl.K_F15},
+	{"f16", sdl.K_F16},
+	{"f17", sdl.K_F17},
+	{"f18", sdl.K_F18},
 
 	// Locks
-	{"capslock",   sdl.K_CAPSLOCK},
-	{"numlock",    sdl.K_NUMLOCKCLEAR},
+	{"capslock", sdl.K_CAPSLOCK},
+	{"numlock", sdl.K_NUMLOCKCLEAR},
 	{"scrolllock", sdl.K_SCROLLLOCK},
 
 	// Modifiers
 	{"lshift", sdl.K_LSHIFT},
 	{"rshift", sdl.K_RSHIFT},
-	{"lctrl",  sdl.K_LCTRL},
-	{"rctrl",  sdl.K_RCTRL},
-	{"lalt",   sdl.K_LALT},
-	{"ralt",   sdl.K_RALT},
+	{"lctrl", sdl.K_LCTRL},
+	{"rctrl", sdl.K_RCTRL},
+	{"lalt", sdl.K_LALT},
+	{"ralt", sdl.K_RALT},
 	{"lsuper", sdl.K_LGUI},
 	{"rsuper", sdl.K_RGUI},
-	{"mode",   sdl.K_MODE},
+	{"mode", sdl.K_MODE},
 
 	// Misc/system
-	{"escape",       sdl.K_ESCAPE},
-	{"pause",        sdl.K_PAUSE},
-	{"help",         sdl.K_HELP},
-	{"printscreen",  sdl.K_PRINTSCREEN},
-	{"sysreq",       sdl.K_SYSREQ},
-	{"menu",         sdl.K_MENU},
-	{"application",  sdl.K_APPLICATION},
-	{"power",        sdl.K_POWER},
+	{"escape", sdl.K_ESCAPE},
+	{"pause", sdl.K_PAUSE},
+	{"help", sdl.K_HELP},
+	{"printscreen", sdl.K_PRINTSCREEN},
+	{"sysreq", sdl.K_SYSREQ},
+	{"menu", sdl.K_MENU},
+	{"application", sdl.K_APPLICATION},
+	{"power", sdl.K_POWER},
 	{"currencyunit", sdl.K_CURRENCYUNIT},
-	{"undo",         sdl.K_UNDO},
+	{"undo", sdl.K_UNDO},
 
 	// App control
-	{"appsearch",    sdl.K_AC_SEARCH},
-	{"apphome",      sdl.K_AC_HOME},
-	{"appback",      sdl.K_AC_BACK},
-	{"appforward",   sdl.K_AC_FORWARD},
-	{"apprefresh",   sdl.K_AC_REFRESH},
+	{"appsearch", sdl.K_AC_SEARCH},
+	{"apphome", sdl.K_AC_HOME},
+	{"appback", sdl.K_AC_BACK},
+	{"appforward", sdl.K_AC_FORWARD},
+	{"apprefresh", sdl.K_AC_REFRESH},
 	{"appbookmarks", sdl.K_AC_BOOKMARKS},
 
 	// Punctuation / symbols
@@ -143,8 +182,16 @@ KEYS := [?]Key_Def{
 	{"`", sdl.K_GRAVE},
 
 	// Keypad (kp*)
-	{"kp0", sdl.K_KP_0}, {"kp1", sdl.K_KP_1}, {"kp2", sdl.K_KP_2}, {"kp3", sdl.K_KP_3}, {"kp4", sdl.K_KP_4},
-	{"kp5", sdl.K_KP_5}, {"kp6", sdl.K_KP_6}, {"kp7", sdl.K_KP_7}, {"kp8", sdl.K_KP_8}, {"kp9", sdl.K_KP_9},
+	{"kp0", sdl.K_KP_0},
+	{"kp1", sdl.K_KP_1},
+	{"kp2", sdl.K_KP_2},
+	{"kp3", sdl.K_KP_3},
+	{"kp4", sdl.K_KP_4},
+	{"kp5", sdl.K_KP_5},
+	{"kp6", sdl.K_KP_6},
+	{"kp7", sdl.K_KP_7},
+	{"kp8", sdl.K_KP_8},
+	{"kp9", sdl.K_KP_9},
 	{"kp.", sdl.K_KP_PERIOD},
 	{"kp,", sdl.K_KP_COMMA},
 	{"kp/", sdl.K_KP_DIVIDE},
@@ -152,7 +199,7 @@ KEYS := [?]Key_Def{
 	{"kp-", sdl.K_KP_MINUS},
 	{"kp+", sdl.K_KP_PLUS},
 	{"kpenter", sdl.K_KP_ENTER},
-	{"kp=",     sdl.K_KP_EQUALS},
+	{"kp=", sdl.K_KP_EQUALS},
 }
 
 //========================================================================================================================================
@@ -162,25 +209,25 @@ KEYS := [?]Key_Def{
 Keyboard_State: [^]bool = nil
 Keyboard_State_Count: int = 0
 
-Key_Pressed:     [dynamic]bool
-Key_Repeat:      [dynamic]bool
-Key_Released:    [dynamic]bool
+Key_Pressed: [dynamic]bool
+Key_Repeat: [dynamic]bool
+Key_Released: [dynamic]bool
 Key_State_Index: [dynamic]int
 
-Token_To_Index:   map[string]int
+Token_To_Index: map[string]int
 Keycode_To_Index: map[sdl.Keycode]int
 
 Curr_MouseButtons: sdl.MouseButtonFlags = {}
-Mouse_Pressed:   [3]bool
-Mouse_Released:  [3]bool
-Mouse_X:         f32
-Mouse_Y:         f32
-Wheel_X:         f32
-Wheel_Y:         f32
+Mouse_Pressed: [3]bool
+Mouse_Released: [3]bool
+Mouse_X: f32
+Mouse_Y: f32
+Wheel_X: f32
+Wheel_Y: f32
 
 TEXT_BUF_CAP :: 4096
 Text_Active: bool
-Text_Len:    int
+Text_Len: int
 Text_Buffer: [TEXT_BUF_CAP]u8
 
 Input_Initialized: bool = false
@@ -188,9 +235,12 @@ Input_Initialized: bool = false
 // mouse_token_to_index maps "mouse1/2/3" to 0..2.
 mouse_token_to_index :: proc(token: string) -> (idx: int, ok: bool) {
 	switch token {
-	case "mouse1": return 0, true
-	case "mouse2": return 1, true
-	case "mouse3": return 2, true
+	case "mouse1":
+		return 0, true
+	case "mouse2":
+		return 1, true
+	case "mouse3":
+		return 2, true
 	}
 	return 0, false
 }
@@ -198,9 +248,12 @@ mouse_token_to_index :: proc(token: string) -> (idx: int, ok: bool) {
 // mouse_down returns whether the given mouse button index is currently held.
 mouse_down :: proc(idx: int) -> bool {
 	switch idx {
-	case 0: return .LEFT   in Curr_MouseButtons
-	case 1: return .RIGHT  in Curr_MouseButtons
-	case 2: return .MIDDLE in Curr_MouseButtons
+	case 0:
+		return .LEFT in Curr_MouseButtons
+	case 1:
+		return .RIGHT in Curr_MouseButtons
+	case 2:
+		return .MIDDLE in Curr_MouseButtons
 	}
 	return false
 }
@@ -224,15 +277,15 @@ input_init :: proc() {
 
 	n := len(KEYS)
 
-	Key_Pressed     = make([dynamic]bool, n)
-	Key_Repeat      = make([dynamic]bool, n)
-	Key_Released    = make([dynamic]bool, n)
-	Key_State_Index = make([dynamic]int,  n)
+	Key_Pressed = make([dynamic]bool, n)
+	Key_Repeat = make([dynamic]bool, n)
+	Key_Released = make([dynamic]bool, n)
+	Key_State_Index = make([dynamic]int, n)
 
-	Token_To_Index   = make(map[string]int)
+	Token_To_Index = make(map[string]int)
 	Keycode_To_Index = make(map[sdl.Keycode]int)
 
-	for idx in 0..<n {
+	for idx in 0 ..< n {
 		def := KEYS[idx]
 
 		Token_To_Index[def.token] = idx
@@ -271,11 +324,11 @@ input_begin_frame :: proc() {
 
 	sdl.PumpEvents()
 
-	for i in 0..<len(Key_Pressed)  { Key_Pressed[i]  = false }
-	for i in 0..<len(Key_Repeat)   { Key_Repeat[i]   = false }
-	for i in 0..<len(Key_Released) { Key_Released[i] = false }
+	for i in 0 ..< len(Key_Pressed) {Key_Pressed[i] = false}
+	for i in 0 ..< len(Key_Repeat) {Key_Repeat[i] = false}
+	for i in 0 ..< len(Key_Released) {Key_Released[i] = false}
 
-	Mouse_Pressed  = {}
+	Mouse_Pressed = {}
 	Mouse_Released = {}
 
 	Wheel_X = 0
@@ -307,16 +360,22 @@ input_handle_event :: proc(event: ^sdl.Event) {
 
 	case .MOUSE_BUTTON_DOWN:
 		switch event.button.button {
-		case sdl.BUTTON_LEFT:   Mouse_Pressed[0] = true
-		case sdl.BUTTON_RIGHT:  Mouse_Pressed[1] = true
-		case sdl.BUTTON_MIDDLE: Mouse_Pressed[2] = true
+		case sdl.BUTTON_LEFT:
+			Mouse_Pressed[0] = true
+		case sdl.BUTTON_RIGHT:
+			Mouse_Pressed[1] = true
+		case sdl.BUTTON_MIDDLE:
+			Mouse_Pressed[2] = true
 		}
 
 	case .MOUSE_BUTTON_UP:
 		switch event.button.button {
-		case sdl.BUTTON_LEFT:   Mouse_Released[0] = true
-		case sdl.BUTTON_RIGHT:  Mouse_Released[1] = true
-		case sdl.BUTTON_MIDDLE: Mouse_Released[2] = true
+		case sdl.BUTTON_LEFT:
+			Mouse_Released[0] = true
+		case sdl.BUTTON_RIGHT:
+			Mouse_Released[1] = true
+		case sdl.BUTTON_MIDDLE:
+			Mouse_Released[2] = true
 		}
 
 	case .MOUSE_WHEEL:
@@ -329,7 +388,7 @@ input_handle_event :: proc(event: ^sdl.Event) {
 			if n > 0 {
 				space := TEXT_BUF_CAP - Text_Len
 				if space > 0 {
-					if n > space { n = space }
+					if n > space {n = space}
 					runtime.mem_copy(rawptr(&Text_Buffer[Text_Len]), rawptr(event.text.text), n)
 					Text_Len += n
 				}
@@ -361,9 +420,9 @@ input_shutdown :: proc() {
 	}
 
 	// dynamic arrays
-	delete(Key_Pressed);     Key_Pressed     = nil
-	delete(Key_Repeat);      Key_Repeat      = nil
-	delete(Key_Released);    Key_Released    = nil
+	delete(Key_Pressed); Key_Pressed = nil
+	delete(Key_Repeat); Key_Repeat = nil
+	delete(Key_Released); Key_Released = nil
 	delete(Key_State_Index); Key_State_Index = nil
 
 	// maps
@@ -381,7 +440,7 @@ input_shutdown :: proc() {
 	Keyboard_State_Count = 0
 
 	Curr_MouseButtons = {}
-	Mouse_Pressed  = {}
+	Mouse_Pressed = {}
 	Mouse_Released = {}
 
 	Mouse_X = 0
@@ -638,7 +697,7 @@ lua_input_get_text :: proc "c" (L: ^lua.State) -> c.int {
 	}
 
 	if Text_Len <= 0 {
-		lua.pushlstring(L, cstring(""), 0)
+		lua.pushlstring(L, "", 0)
 		return 1
 	}
 
@@ -651,33 +710,32 @@ register_input_api :: proc(Lua: ^lua.State) {
 	lua.newtable(Lua)
 
 	lua.pushcfunction(Lua, lua_input_down)
-	lua.setfield(Lua, -2, cstring("down"))
+	lua.setfield(Lua, -2, "down")
 
 	lua.pushcfunction(Lua, lua_input_pressed)
-	lua.setfield(Lua, -2, cstring("pressed"))
+	lua.setfield(Lua, -2, "pressed")
 
 	lua.pushcfunction(Lua, lua_input_repeated)
-	lua.setfield(Lua, -2, cstring("repeated"))
+	lua.setfield(Lua, -2, "repeated")
 
 	lua.pushcfunction(Lua, lua_input_released)
-	lua.setfield(Lua, -2, cstring("released"))
+	lua.setfield(Lua, -2, "released")
 
 	lua.pushcfunction(Lua, lua_input_get_mouse_position)
-	lua.setfield(Lua, -2, cstring("get_mouse_position"))
+	lua.setfield(Lua, -2, "get_mouse_position")
 
 	lua.pushcfunction(Lua, lua_input_get_mouse_wheel)
-	lua.setfield(Lua, -2, cstring("get_mouse_wheel"))
+	lua.setfield(Lua, -2, "get_mouse_wheel")
 
 	lua.pushcfunction(Lua, lua_input_start_text)
-	lua.setfield(Lua, -2, cstring("start_text"))
+	lua.setfield(Lua, -2, "start_text")
 
 	lua.pushcfunction(Lua, lua_input_stop_text)
-	lua.setfield(Lua, -2, cstring("stop_text"))
+	lua.setfield(Lua, -2, "stop_text")
 
 	lua.pushcfunction(Lua, lua_input_get_text)
-	lua.setfield(Lua, -2, cstring("get_text"))
-	
-	// Set the table as a global named "input"
-	lua.setglobal(Lua, cstring("input"))
-}
+	lua.setfield(Lua, -2, "get_text")
 
+	// Set the table as a global named "input"
+	lua.setglobal(Lua, "input")
+}

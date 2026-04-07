@@ -54,13 +54,13 @@ end
 
 The complete API documentation, including detailed overviews of all core modules, is available in the [Luagame API Reference](docs/api_ref.md).
 
-* `runtime` - Core lifecycle hooks.
-* `window` - Context and OS interaction.
-* `graphics` - 2D rendering and textures.
-* `audio` - Sound playback and mixing.
-* `input` - Keyboard and mouse state.
-* `filesystem` - I/O operations.
-* `core` - Global primitives and memory management.
+* `runtime` - Application lifecycle hooks (`init`, `update`, `draw`).
+* `window` - Window management, cursor control, and clipboard access.
+* `graphics` - 2D hardware rendering and sprite management.
+* `audio` - Real-time 8-bus mixing and 3D spatialization.
+* `input` - Keyboard and mouse state polling.
+* `filesystem` - File I/O and directory management.
+* `core` - Global primitives and manual memory management.
 
 ---
 
