@@ -382,7 +382,7 @@ main :: proc() {
 
     // Fail early with a clear engine-level boot error if main.lua is missing.
     if !os.exists(main_path) {
-        enter_error_window("Engine Boot: failed to find lua/main.lua. main.lua must exist in the lua directory next to the executable.",)
+        enter_error_window("Engine Boot: failed to find lua/main.lua. main.lua must exist in the lua directory next to the executable.")
         return
     }
     // Execute main.lua
