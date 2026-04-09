@@ -190,7 +190,7 @@ lua_bind_function :: proc(fn: Lua_Binding, fn_name: cstring) {
 }
 
 // Registers all Lua-facing engine modules.
-register_lua_api :: proc(L: ^lua.State) {
+register_lua_api :: proc() {
     register_engine_global_api()
 
     register_filesystem_api()
@@ -199,8 +199,8 @@ register_lua_api :: proc(L: ^lua.State) {
     register_input_api()
     register_audio_api()
 
-    lua.newtable(L)
-    lua.setglobal(L, "runtime")
+    lua.newtable(Lua)
+    lua.setglobal(Lua, "runtime")
 }
 
 // lua_traceback is the error handler for lua.pcall; it converts an error into a traceback string.
@@ -330,7 +330,7 @@ main :: proc() {
     defer lua.close(Lua)
 
     lua.L_openlibs(Lua)
-    register_lua_api(Lua)
+    register_lua_api()
     init_graphics_state()
 
     exe_dir, err := os.get_executable_directory(context.temp_allocator)

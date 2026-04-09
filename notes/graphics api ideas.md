@@ -70,17 +70,6 @@ When the user calls `draw_sprite` while a shader is active, the engine executes 
 // GRAPHICS TODO
 //---------------------------------------------
 
-// -- GPU Primitives
-// .draw_line(x1, y1, x2, y2, [color])
-// .draw_rect_lines(x, y, w, h, [color])
-// .draw_poly(points_table, [color])
-// .draw_poly_lines(points_table, [color])
-// .set_scissor(x, y, w, h) // GPU Clipping [cite: 1]
-
-// -- Render Targets (Canvases) 
-// .set_canvas(img | nil) 
-// .new_canvas(w, h) -> img
-
 // -- Shaders (Fragment Intercepts)
 // .set_draw_shader(shader, [uniforms])
 // .set_screen_shader(shader, [uniforms])
@@ -89,7 +78,5 @@ When the user calls `draw_sprite` while a shader is active, the engine executes 
 // .load_font(path, size) -> font
 // .draw_text(font, text, x, y, [color])
 
-// -- Animation System [cite: 5]
-// .draw_animation(anim, x, y, [color]) // Odin-side cell math helper
 
 
