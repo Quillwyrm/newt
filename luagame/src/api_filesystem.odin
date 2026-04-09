@@ -338,44 +338,27 @@ lua_filesystem_remove :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// - Lua Registration
+register_filesystem_api :: proc() {
+    lua.newtable(Lua) // [filesystem]
 
-register_filesystem_api :: proc(L: ^lua.State) {
-    lua.newtable(L) // [filesystem]
+    // Paths And Process State
+    lua_bind_function(lua_filesystem_get_resource_dir, "get_resource_dir")
+    lua_bind_function(lua_filesystem_get_working_dir, "get_working_dir")
+    lua_bind_function(lua_filesystem_set_working_dir, "set_working_dir")
+    lua_bind_function(lua_filesystem_get_args, "get_args")
 
-    lua.pushcfunction(L, lua_filesystem_get_resource_dir)
-    lua.setfield(L, -2, "get_resource_dir")
+    // Directory Queries
+    lua_bind_function(lua_filesystem_list_dir, "list_dir")
+    lua_bind_function(lua_filesystem_info, "info")
 
-    lua.pushcfunction(L, lua_filesystem_get_working_dir)
-    lua.setfield(L, -2, "get_working_dir")
+    // File I/O
+    lua_bind_function(lua_filesystem_read_file, "read_file")
+    lua_bind_function(lua_filesystem_write_file, "write_file")
 
-    lua.pushcfunction(L, lua_filesystem_set_working_dir)
-    lua.setfield(L, -2, "set_working_dir")
+    // Mutations
+    lua_bind_function(lua_filesystem_mkdir, "mkdir")
+    lua_bind_function(lua_filesystem_rename, "rename")
+    lua_bind_function(lua_filesystem_remove, "remove")
 
-    lua.pushcfunction(L, lua_filesystem_get_args)
-    lua.setfield(L, -2, "get_args")
-
-    lua.pushcfunction(L, lua_filesystem_list_dir)
-    lua.setfield(L, -2, "list_dir")
-
-    lua.pushcfunction(L, lua_filesystem_info)
-    lua.setfield(L, -2, "info")
-
-    lua.pushcfunction(L, lua_filesystem_read_file)
-    lua.setfield(L, -2, "read_file")
-
-    lua.pushcfunction(L, lua_filesystem_write_file)
-    lua.setfield(L, -2, "write_file")
-
-    lua.pushcfunction(L, lua_filesystem_mkdir)
-    lua.setfield(L, -2, "mkdir")
-
-    lua.pushcfunction(L, lua_filesystem_rename)
-    lua.setfield(L, -2, "rename")
-
-    lua.pushcfunction(L, lua_filesystem_remove)
-    lua.setfield(L, -2, "remove")
-    
-    lua.setglobal(L, "filesystem")
+    lua.setglobal(Lua, "filesystem")
 }
-

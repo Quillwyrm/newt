@@ -1291,115 +1291,76 @@ lua_sound_gc :: proc "c" (L: ^lua.State) -> c.int {
 }
 
 // setup_audio_metatables initializes the hidden registry tables for audio userdata.
-setup_audio_metatables :: proc(L: ^lua.State) {
-    lua.L_newmetatable(L, "Sound")
-    lua.pushcfunction(L, lua_sound_gc)
-    lua.setfield(L, -2, "__gc")
-    lua.pop(L, 1)
+setup_audio_metatables :: proc() {
+    lua.L_newmetatable(Lua, "Sound")
+    lua.pushcfunction(Lua, lua_sound_gc)
+    lua.setfield(Lua, -2, "__gc")
+    lua.pop(Lua, 1)
 }
 
 // - Lua Registration
 
-register_audio_api :: proc(L: ^lua.State) {
-    setup_audio_metatables(L)
+register_audio_api :: proc() {
+    setup_audio_metatables()
 
-    lua.newtable(L)
+    lua.newtable(Lua)
 
-    // --- Engine Configuration (Call BEFORE Engine Init) ---
-    lua.pushcfunction(L, lua_audio_config_bus_delay_times)
-    lua.setfield(L, -2, "config_bus_delay_times")
+    // Engine Configuration
+    lua_bind_function(lua_audio_config_bus_delay_times, "config_bus_delay_times")
 
-    // --- Global Listener & Defaults ---
-    lua.pushcfunction(L, lua_audio_set_listener_position)
-    lua.setfield(L, -2, "set_listener_position")
-    lua.pushcfunction(L, lua_audio_set_listener_rotation)
-    lua.setfield(L, -2, "set_listener_rotation")
-    lua.pushcfunction(L, lua_audio_set_listener_velocity)
-    lua.setfield(L, -2, "set_listener_velocity")
-    lua.pushcfunction(L, lua_audio_set_default_falloff)
-    lua.setfield(L, -2, "set_default_falloff")
-    lua.pushcfunction(L, lua_audio_set_default_falloff_mode)
-    lua.setfield(L, -2, "set_default_falloff_mode")
+    // Global Listener And Defaults
+    lua_bind_function(lua_audio_set_listener_position, "set_listener_position")
+    lua_bind_function(lua_audio_set_listener_rotation, "set_listener_rotation")
+    lua_bind_function(lua_audio_set_listener_velocity, "set_listener_velocity")
+    lua_bind_function(lua_audio_set_default_falloff, "set_default_falloff")
+    lua_bind_function(lua_audio_set_default_falloff_mode, "set_default_falloff_mode")
 
-    // --- Asset Management ---
-    lua.pushcfunction(L, lua_audio_load_sound)
-    lua.setfield(L, -2, "load_sound")
-    lua.pushcfunction(L, lua_audio_get_sound_info)
-    lua.setfield(L, -2, "get_sound_info")
+    // Asset Management
+    lua_bind_function(lua_audio_load_sound, "load_sound")
+    lua_bind_function(lua_audio_get_sound_info, "get_sound_info")
 
-    // --- Playback Entry Points ---
-    lua.pushcfunction(L, lua_audio_play)
-    lua.setfield(L, -2, "play")
-    lua.pushcfunction(L, lua_audio_play_at)
-    lua.setfield(L, -2, "play_at")
+    // Playback
+    lua_bind_function(lua_audio_play, "play")
+    lua_bind_function(lua_audio_play_at, "play_at")
 
-    // --- Instance Control (Common) ---
-    lua.pushcfunction(L, lua_audio_set_voice_volume)
-    lua.setfield(L, -2, "set_voice_volume")
-    lua.pushcfunction(L, lua_audio_set_voice_pitch)
-    lua.setfield(L, -2, "set_voice_pitch")
-    lua.pushcfunction(L, lua_audio_set_voice_pan)
-    lua.setfield(L, -2, "set_voice_pan")
-    lua.pushcfunction(L, lua_audio_set_voice_looping)
-    lua.setfield(L, -2, "set_voice_looping")
-    lua.pushcfunction(L, lua_audio_seek_voice)
-    lua.setfield(L, -2, "seek_voice")
-    lua.pushcfunction(L, lua_audio_fade_voice)
-    lua.setfield(L, -2, "fade_voice")
-    lua.pushcfunction(L, lua_audio_get_voice_info)
-    lua.setfield(L, -2, "get_voice_info")
-    lua.pushcfunction(L, lua_audio_is_voice_playing)
-    lua.setfield(L, -2, "is_voice_playing")
+    // Voice Control
+    lua_bind_function(lua_audio_set_voice_volume, "set_voice_volume")
+    lua_bind_function(lua_audio_set_voice_pitch, "set_voice_pitch")
+    lua_bind_function(lua_audio_set_voice_pan, "set_voice_pan")
+    lua_bind_function(lua_audio_set_voice_looping, "set_voice_looping")
+    lua_bind_function(lua_audio_seek_voice, "seek_voice")
+    lua_bind_function(lua_audio_fade_voice, "fade_voice")
+    lua_bind_function(lua_audio_get_voice_info, "get_voice_info")
+    lua_bind_function(lua_audio_is_voice_playing, "is_voice_playing")
 
-    // --- Instance Control (Spatial) ---
-    lua.pushcfunction(L, lua_audio_set_voice_position)
-    lua.setfield(L, -2, "set_voice_position")
-    lua.pushcfunction(L, lua_audio_set_voice_velocity)
-    lua.setfield(L, -2, "set_voice_velocity")
-    lua.pushcfunction(L, lua_audio_set_voice_falloff)
-    lua.setfield(L, -2, "set_voice_falloff")
-    lua.pushcfunction(L, lua_audio_set_voice_rolloff)
-    lua.setfield(L, -2, "set_voice_rolloff")
-    lua.pushcfunction(L, lua_audio_set_voice_falloff_mode)
-    lua.setfield(L, -2, "set_voice_falloff_mode")
-    lua.pushcfunction(L, lua_audio_set_voice_pan_mode)
-    lua.setfield(L, -2, "set_voice_pan_mode")
+    // Spatial Voice Control
+    lua_bind_function(lua_audio_set_voice_position, "set_voice_position")
+    lua_bind_function(lua_audio_set_voice_velocity, "set_voice_velocity")
+    lua_bind_function(lua_audio_set_voice_falloff, "set_voice_falloff")
+    lua_bind_function(lua_audio_set_voice_rolloff, "set_voice_rolloff")
+    lua_bind_function(lua_audio_set_voice_falloff_mode, "set_voice_falloff_mode")
+    lua_bind_function(lua_audio_set_voice_pan_mode, "set_voice_pan_mode")
 
-    // --- Instance Lifecycle ---
-    lua.pushcfunction(L, lua_audio_pause_voice)
-    lua.setfield(L, -2, "pause_voice")
-    lua.pushcfunction(L, lua_audio_resume_voice)
-    lua.setfield(L, -2, "resume_voice")
-    lua.pushcfunction(L, lua_audio_stop_voice)
-    lua.setfield(L, -2, "stop_voice")
+    // Voice Lifecycle
+    lua_bind_function(lua_audio_pause_voice, "pause_voice")
+    lua_bind_function(lua_audio_resume_voice, "resume_voice")
+    lua_bind_function(lua_audio_stop_voice, "stop_voice")
 
-    // --- Bus Mixing & DSP ---
-    lua.pushcfunction(L, lua_audio_set_bus_volume)
-    lua.setfield(L, -2, "set_bus_volume")
-    lua.pushcfunction(L, lua_audio_set_bus_pitch)
-    lua.setfield(L, -2, "set_bus_pitch")
-    lua.pushcfunction(L, lua_audio_set_bus_pan)
-    lua.setfield(L, -2, "set_bus_pan")
-    lua.pushcfunction(L, lua_audio_fade_bus)
-    lua.setfield(L, -2, "fade_bus")
-    lua.pushcfunction(L, lua_audio_set_bus_lpf)
-    lua.setfield(L, -2, "set_bus_lpf")
-    lua.pushcfunction(L, lua_audio_set_bus_hpf)
-    lua.setfield(L, -2, "set_bus_hpf")
-    lua.pushcfunction(L, lua_audio_set_bus_delay_mix)
-    lua.setfield(L, -2, "set_bus_delay_mix")
-    lua.pushcfunction(L, lua_audio_set_bus_delay_feedback)
-    lua.setfield(L, -2, "set_bus_delay_feedback")
-    lua.pushcfunction(L, lua_audio_pause_bus)
-    lua.setfield(L, -2, "pause_bus")
-    lua.pushcfunction(L, lua_audio_resume_bus)
-    lua.setfield(L, -2, "resume_bus")
-    lua.pushcfunction(L, lua_audio_stop_bus)
-    lua.setfield(L, -2, "stop_bus")
+    // Bus Control
+    lua_bind_function(lua_audio_set_bus_volume, "set_bus_volume")
+    lua_bind_function(lua_audio_set_bus_pitch, "set_bus_pitch")
+    lua_bind_function(lua_audio_set_bus_pan, "set_bus_pan")
+    lua_bind_function(lua_audio_fade_bus, "fade_bus")
+    lua_bind_function(lua_audio_set_bus_lpf, "set_bus_lpf")
+    lua_bind_function(lua_audio_set_bus_hpf, "set_bus_hpf")
+    lua_bind_function(lua_audio_set_bus_delay_mix, "set_bus_delay_mix")
+    lua_bind_function(lua_audio_set_bus_delay_feedback, "set_bus_delay_feedback")
+    lua_bind_function(lua_audio_pause_bus, "pause_bus")
+    lua_bind_function(lua_audio_resume_bus, "resume_bus")
+    lua_bind_function(lua_audio_stop_bus, "stop_bus")
 
-    lua.pushcfunction(L, lua_audio_stop_all_voices)
-    lua.setfield(L, -2, "stop_all_voices")
+    // Global Audio Control
+    lua_bind_function(lua_audio_stop_all_voices, "stop_all_voices")
 
-    lua.setglobal(L, "audio")
+    lua.setglobal(Lua, "audio")
 }
-

@@ -60,13 +60,13 @@ end
 `
 
 // Registers top-level engine globals.
-register_engine_global_api :: proc(L: ^lua.State) {
-    lua.pushcfunction(L, lua_engine_global_free)
-    lua.setglobal(L, "free")
+register_engine_global_api :: proc() {
+    lua.pushcfunction(Lua, lua_engine_global_free)
+    lua.setglobal(Lua, "free")
 
     // Inject core lua-side primitives
-    if lua.L_dostring(L, cstring(CORE_LUA_HELPERS)) != lua.OK {
-        fatal_engine_error(fmt.caprintf("engine.boot: failed to load core Lua helpers:\n%s", lua.tostring(L, -1)))
+    if lua.L_dostring(Lua, cstring(CORE_LUA_HELPERS)) != lua.OK {
+        fatal_engine_error(fmt.caprintf("engine.boot: failed to load core Lua helpers:\n%s", lua.tostring(Lua, -1)))
     }
 }
 
@@ -182,15 +182,22 @@ fatal_engine_error :: proc(error_text: cstring) {
 // Lua Embedding Helpers
 // ============================================================================
 
+Lua_Binding :: proc "c" (L: ^lua.State) -> c.int
+
+lua_bind_function :: proc(fn: Lua_Binding, fn_name: cstring) {
+    lua.pushcfunction(Lua, fn)
+    lua.setfield(Lua, -2, fn_name)
+}
+
 // Registers all Lua-facing engine modules.
 register_lua_api :: proc(L: ^lua.State) {
-    register_engine_global_api(L)
+    register_engine_global_api()
 
-    register_filesystem_api(L)
-    register_graphics_api(L)
-    register_window_api(L)
-    register_input_api(L)
-    register_audio_api(L)
+    register_filesystem_api()
+    register_graphics_api()
+    register_window_api()
+    register_input_api()
+    register_audio_api()
 
     lua.newtable(L)
     lua.setglobal(L, "runtime")
@@ -260,7 +267,7 @@ call_lua_number :: proc(func_name: cstring, arg: f64) {
     lua.pop(Lua, 2)
 }
 
-prepend_package_path :: proc(L: ^lua.State, exe_dir: string) {
+prepend_package_path :: proc(exe_dir: string) {
     // Build:
     //   <exe_dir>/lua/?.lua;<exe_dir>/lua/?/init.lua;<old package.path>
     p1, err1 := os.join_path({exe_dir, "lua", "?.lua"}, context.temp_allocator)
@@ -277,24 +284,24 @@ prepend_package_path :: proc(L: ^lua.State, exe_dir: string) {
     p2_c := strings.clone_to_cstring(p2, context.temp_allocator)
 
     // package.path = p1..";"..p2..";"..package.path
-    lua.getglobal(L, "package") // [package]
-    lua.getfield(L, -1, "path") // [package, old_path]
+    lua.getglobal(Lua, "package") // [package]
+    lua.getfield(Lua, -1, "path") // [package, old_path]
 
     old_len: c.size_t
-    old_c := lua.tolstring(L, -1, &old_len)
+    old_c := lua.tolstring(Lua, -1, &old_len)
 
-    lua.remove(L, -1) // [package]
+    lua.remove(Lua, -1) // [package]
 
-    lua.pushstring(L, p1_c) // [package, p1]
-    lua.pushstring(L, ";") // [package, p1, ";"]
-    lua.pushstring(L, p2_c) // [package, p1, ";", p2]
-    lua.pushstring(L, ";") // [package, p1, ";", p2, ";"]
-    lua.pushlstring(L, old_c, old_len) // [package, p1, ";", p2, ";", old]
+    lua.pushstring(Lua, p1_c) // [package, p1]
+    lua.pushstring(Lua, ";") // [package, p1, ";"]
+    lua.pushstring(Lua, p2_c) // [package, p1, ";", p2]
+    lua.pushstring(Lua, ";") // [package, p1, ";", p2, ";"]
+    lua.pushlstring(Lua, old_c, old_len) // [package, p1, ";", p2, ";", old]
 
-    lua.concat(L, 5) // [package, new_path]
-    lua.setfield(L, -2, "path") // package.path = new_path; pops value
+    lua.concat(Lua, 5) // [package, new_path]
+    lua.setfield(Lua, -2, "path") // package.path = new_path; pops value
 
-    lua.settop(L, 0) // []
+    lua.settop(Lua, 0) // []
 }
 
 // ============================================================================
@@ -331,7 +338,7 @@ main :: proc() {
         fatal_engine_error(fmt.caprintf("engine.boot: failed to get executable directory: %v", err))
     }
 
-    prepend_package_path(Lua, exe_dir)
+    prepend_package_path(exe_dir)
 
     // - script Boot
     main_path, err2 := os.join_path({exe_dir, "lua", "main.lua"}, context.temp_allocator)

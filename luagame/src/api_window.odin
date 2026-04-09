@@ -358,64 +358,34 @@ lua_window_set_clipboard :: proc "c" (L: ^lua.State) -> c.int {
 
 // - Lua Registration
 
-register_window_api :: proc(L: ^lua.State) {
-    lua.newtable(L) // [window]
+register_window_api :: proc() {
+    lua.newtable(Lua) // [window]
 
-    // flag controls
-    lua.pushcfunction(L, lua_window_set_flags)
-    lua.setfield(L, -2, "set_flags")
+    // Window control
+    lua_bind_function(lua_window_set_flags, "set_flags")
+    lua_bind_function(lua_window_close, "close")
+    lua_bind_function(lua_window_should_close, "should_close")
 
-    lua.pushcfunction(L, lua_window_close)
-    lua.setfield(L, -2, "close")
+    // Getters
+    lua_bind_function(lua_window_get_size, "get_size")
+    lua_bind_function(lua_window_get_position, "get_position")
 
-    lua.pushcfunction(L, lua_window_should_close)
-    lua.setfield(L, -2, "should_close")
+    // Setters
+    lua_bind_function(lua_window_set_title, "set_title")
+    lua_bind_function(lua_window_set_size, "set_size")
+    lua_bind_function(lua_window_set_position, "set_position")
+    lua_bind_function(lua_window_maximize, "maximize")
+    lua_bind_function(lua_window_minimize, "minimize")
 
-    // getters (multi-return)
-    lua.pushcfunction(L, lua_window_get_size)
-    lua.setfield(L, -2, "get_size")
+    // Cursor
+    lua_bind_function(lua_window_set_cursor, "set_cursor")
+    lua_bind_function(lua_window_cursor_show, "cursor_show")
+    lua_bind_function(lua_window_cursor_hide, "cursor_hide")
+    lua_bind_function(lua_window_is_cursor_visible, "is_cursor_visible")
 
-    lua.pushcfunction(L, lua_window_get_position)
-    lua.setfield(L, -2, "get_position")
+    // Clipboard
+    lua_bind_function(lua_window_get_clipboard, "get_clipboard")
+    lua_bind_function(lua_window_set_clipboard, "set_clipboard")
 
-    // setters / controls
-    lua.pushcfunction(L, lua_window_set_title)
-    lua.setfield(L, -2, "set_title")
-
-    lua.pushcfunction(L, lua_window_set_size)
-    lua.setfield(L, -2, "set_size")
-
-    lua.pushcfunction(L, lua_window_set_position)
-    lua.setfield(L, -2, "set_position")
-
-    lua.pushcfunction(L, lua_window_maximize)
-    lua.setfield(L, -2, "maximize")
-
-    lua.pushcfunction(L, lua_window_minimize)
-    lua.setfield(L, -2, "minimize")
-    
-    // cursor visuals
-    lua.pushcfunction(L, lua_window_set_cursor)
-    lua.setfield(L, -2, "set_cursor")
-
-    lua.pushcfunction(L, lua_window_cursor_show)
-    lua.setfield(L, -2, "cursor_show")
-
-    lua.pushcfunction(L, lua_window_cursor_hide)
-    lua.setfield(L, -2, "cursor_hide")
-
-    lua.pushcfunction(L, lua_window_is_cursor_visible)
-    lua.setfield(L, -2, "is_cursor_visible")
-    
-    // clipboard
-    lua.pushcfunction(L, lua_window_get_clipboard)
-    lua.setfield(L, -2, "get_clipboard")
-
-    lua.pushcfunction(L, lua_window_set_clipboard)
-    lua.setfield(L, -2, "set_clipboard")
-    
-    // Set the table as a global named "window"
-    lua.setglobal(L, "window")
+    lua.setglobal(Lua, "window")
 }
-
-

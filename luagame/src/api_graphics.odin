@@ -1756,183 +1756,97 @@ lua_pixelmap_gc :: proc "c" (L: ^lua.State) -> c.int {
 
 // setup_graphics_metatables: Initializes the hidden registry tables for all graphics userdata,
 // linking Odin GC procedures to Lua objects to prevent memory leaks.
-setup_graphics_metatables :: proc(L: ^lua.State) {
+setup_graphics_metatables :: proc() {
     // 1. IMAGE METATABLE
-    lua.L_newmetatable(L, "Image")
-    lua.pushcfunction(L, lua_image_gc)
-    lua.setfield(L, -2, "__gc")
-    lua.pop(L, 1)
+    lua.L_newmetatable(Lua, "Image")
+    lua.pushcfunction(Lua, lua_image_gc)
+    lua.setfield(Lua, -2, "__gc")
+    lua.pop(Lua, 1)
 
     // 3. PIXELMAP METATABLE
-    lua.L_newmetatable(L, "Pixelmap")
-    lua.pushcfunction(L, lua_pixelmap_gc)
-    lua.setfield(L, -2, "__gc")
-    lua.pop(L, 1)
+    lua.L_newmetatable(Lua, "Pixelmap")
+    lua.pushcfunction(Lua, lua_pixelmap_gc)
+    lua.setfield(Lua, -2, "__gc")
+    lua.pop(Lua, 1)
 }
 
 // - Lua Registration
 
-register_graphics_api :: proc(L: ^lua.State) {
-    setup_graphics_metatables(L)
+register_graphics_api :: proc() {
+    setup_graphics_metatables()
 
-    lua.newtable(L) // [graphics]
+    lua.newtable(Lua) // [graphics]
 
-    // --- HIGH-LEVEL DRAWING (VRAM) ---
-    lua.pushcfunction(L, lua_graphics_draw_image)
-    lua.setfield(L, -2, "draw_image")
+    // High-Level Drawing
+    lua_bind_function(lua_graphics_draw_image, "draw_image")
+    lua_bind_function(lua_graphics_draw_image_region, "draw_image_region")
+    lua_bind_function(lua_graphics_draw_rect, "draw_rect")
 
-    lua.pushcfunction(L, lua_graphics_draw_image_region)
-    lua.setfield(L, -2, "draw_image_region")
+    // VRAM Resource Management
+    lua_bind_function(lua_graphics_load_image, "load_image")
+    lua_bind_function(lua_graphics_get_image_size, "get_image_size")
+    lua_bind_function(lua_graphics_set_default_filter, "set_default_filter")
 
-    lua.pushcfunction(L, lua_graphics_draw_rect)
-    lua.setfield(L, -2, "draw_rect")
+    // Render Targets
+    lua_bind_function(lua_graphics_new_canvas, "new_canvas")
+    lua_bind_function(lua_graphics_set_canvas, "set_canvas")
 
-    // --- VRAM RESOURCE MANAGEMENT ---
-    lua.pushcfunction(L, lua_graphics_load_image)
-    lua.setfield(L, -2, "load_image")
+    // Frame And Pipeline State
+    lua_bind_function(lua_graphics_clear, "clear")
+    lua_bind_function(lua_graphics_set_blend_mode, "set_blend_mode")
+    lua_bind_function(lua_graphics_set_clip_rect, "set_clip_rect")
+    lua_bind_function(lua_graphics_get_clip_rect, "get_clip_rect")
 
-    lua.pushcfunction(L, lua_graphics_get_image_size)
-    lua.setfield(L, -2, "get_image_size")
+    // Transformations And Coordinate Spaces
+    lua_bind_function(lua_graphics_begin_transform, "begin_transform")
+    lua_bind_function(lua_graphics_end_transform, "end_transform")
+    lua_bind_function(lua_graphics_set_translation, "set_translation")
+    lua_bind_function(lua_graphics_set_rotation, "set_rotation")
+    lua_bind_function(lua_graphics_set_scale, "set_scale")
+    lua_bind_function(lua_graphics_set_origin, "set_origin")
+    lua_bind_function(lua_graphics_use_screen_space, "use_screen_space")
+    lua_bind_function(lua_graphics_screen_to_local, "screen_to_local")
+    lua_bind_function(lua_graphics_local_to_screen, "local_to_screen")
 
-    lua.pushcfunction(L, lua_graphics_set_default_filter)
-    lua.setfield(L, -2, "set_default_filter")
+    // Debug Drawing
+    lua_bind_function(lua_graphics_debug_text, "debug_text")
+    lua_bind_function(lua_graphics_debug_line, "debug_line")
+    lua_bind_function(lua_graphics_debug_rect, "debug_rect")
 
-    // RENDER TARGETS
-    lua.pushcfunction(L, lua_graphics_new_canvas)
-    lua.setfield(L, -2, "new_canvas")
+    // Pixelmap Lifecycle And I/O
+    lua_bind_function(lua_graphics_new_pixelmap, "new_pixelmap")
+    lua_bind_function(lua_graphics_load_pixelmap, "load_pixelmap")
+    lua_bind_function(lua_graphics_save_pixelmap, "save_pixelmap")
+    lua_bind_function(lua_graphics_get_pixelmap_size, "get_pixelmap_size")
 
-    lua.pushcfunction(L, lua_graphics_set_canvas)
-    lua.setfield(L, -2, "set_canvas")
+    // Pixelmap Software Rasterization
+    lua_bind_function(lua_graphics_blit, "blit")
+    lua_bind_function(lua_graphics_blit_region, "blit_region")
+    lua_bind_function(lua_graphics_blit_rect, "blit_rect")
+    lua_bind_function(lua_graphics_blit_line, "blit_line")
+    lua_bind_function(lua_graphics_blit_triangle, "blit_triangle")
+    lua_bind_function(lua_graphics_blit_circle, "blit_circle")
+    lua_bind_function(lua_graphics_blit_circle_outline, "blit_circle_outline")
+    lua_bind_function(lua_graphics_blit_circle_pixel_outline, "blit_circle_pixel_outline")
+    lua_bind_function(lua_graphics_blit_capsule, "blit_capsule")
 
-    // --- FRAME & PIPELINE STATE ---
-    lua.pushcfunction(L, lua_graphics_clear)
-    lua.setfield(L, -2, "clear")
+    // Pixelmap Atomic Ops And Analysis
+    lua_bind_function(lua_graphics_pixelmap_set_pixel, "pixelmap_set_pixel")
+    lua_bind_function(lua_graphics_pixelmap_get_pixel, "pixelmap_get_pixel")
+    lua_bind_function(lua_graphics_pixelmap_flood_fill, "pixelmap_flood_fill")
+    lua_bind_function(lua_graphics_pixelmap_raycast, "pixelmap_raycast")
 
-    lua.pushcfunction(L, lua_graphics_set_blend_mode)
-    lua.setfield(L, -2, "set_blend_mode")
+    // Pixelmap VRAM Sync
+    lua_bind_function(lua_graphics_new_image_from_pixelmap, "new_image_from_pixelmap")
+    lua_bind_function(lua_graphics_update_image_from_pixelmap, "update_image_from_pixelmap")
+    lua_bind_function(lua_graphics_update_image_region_from_pixelmap, "update_image_region_from_pixelmap")
 
-    lua.pushcfunction(L, lua_graphics_set_clip_rect)
-    lua.setfield(L, -2, "set_clip_rect")
+    // Pixelmap FFI And Memory
+    lua_bind_function(lua_graphics_pixelmap_clone, "pixelmap_clone")
+    lua_bind_function(lua_graphics_pixelmap_get_cptr, "pixelmap_get_cptr")
 
-    lua.pushcfunction(L, lua_graphics_get_clip_rect)
-    lua.setfield(L, -2, "get_clip_rect")
-
-
-    // --- TRANSFORMATIONS & COORDINATE SPACES ---
-    lua.pushcfunction(L, lua_graphics_begin_transform)
-    lua.setfield(L, -2, "begin_transform")
-
-    lua.pushcfunction(L, lua_graphics_end_transform)
-    lua.setfield(L, -2, "end_transform")
-
-    lua.pushcfunction(L, lua_graphics_set_translation)
-    lua.setfield(L, -2, "set_translation")
-
-    lua.pushcfunction(L, lua_graphics_set_rotation)
-    lua.setfield(L, -2, "set_rotation")
-
-    lua.pushcfunction(L, lua_graphics_set_scale)
-    lua.setfield(L, -2, "set_scale")
-
-    lua.pushcfunction(L, lua_graphics_set_origin)
-    lua.setfield(L, -2, "set_origin")
-
-    lua.pushcfunction(L, lua_graphics_use_screen_space)
-    lua.setfield(L, -2, "use_screen_space")
-
-    lua.pushcfunction(L, lua_graphics_screen_to_local)
-    lua.setfield(L, -2, "screen_to_local")
-
-    lua.pushcfunction(L, lua_graphics_local_to_screen)
-    lua.setfield(L, -2, "local_to_screen")
-
-    // --- DEBUG DRAWING ---
-    lua.pushcfunction(L, lua_graphics_debug_text)
-    lua.setfield(L, -2, "debug_text")
-
-    lua.pushcfunction(L, lua_graphics_debug_line)
-    lua.setfield(L, -2, "debug_line")
-
-    lua.pushcfunction(L, lua_graphics_debug_rect)
-    lua.setfield(L, -2, "debug_rect")
-
-    //TODO: RENAME PIXELMAP API
-
-    // --- PIXELMAP: LIFECYCLE & I/O ---
-    lua.pushcfunction(L, lua_graphics_new_pixelmap)
-    lua.setfield(L, -2, "new_pixelmap")
-
-    lua.pushcfunction(L, lua_graphics_load_pixelmap)
-    lua.setfield(L, -2, "load_pixelmap")
-
-    lua.pushcfunction(L, lua_graphics_save_pixelmap)
-    lua.setfield(L, -2, "save_pixelmap")
-
-    lua.pushcfunction(L, lua_graphics_get_pixelmap_size)
-    lua.setfield(L, -2, "get_pixelmap_size")
-
-    // --- PIXELMAP: SOFTWARE RASTERIZATION ---
-    lua.pushcfunction(L, lua_graphics_blit)
-    lua.setfield(L, -2, "blit")
-
-    lua.pushcfunction(L, lua_graphics_blit_region)
-    lua.setfield(L, -2, "blit_region")
-
-    lua.pushcfunction(L, lua_graphics_blit_rect)
-    lua.setfield(L, -2, "blit_rect")
-
-    lua.pushcfunction(L, lua_graphics_blit_line)
-    lua.setfield(L, -2, "blit_line")
-
-    lua.pushcfunction(L, lua_graphics_blit_triangle)
-    lua.setfield(L, -2, "blit_triangle")
-
-    lua.pushcfunction(L, lua_graphics_blit_circle)
-    lua.setfield(L, -2, "blit_circle")
-
-    lua.pushcfunction(L, lua_graphics_blit_circle_outline)
-    lua.setfield(L, -2, "blit_circle_outline")
-
-    lua.pushcfunction(L, lua_graphics_blit_circle_pixel_outline)
-    lua.setfield(L, -2, "blit_circle_pixel_outline")
-
-    lua.pushcfunction(L, lua_graphics_blit_capsule)
-    lua.setfield(L, -2, "blit_capsule")
-
-    // --- PIXELMAP: ATOMIC OPS & ANALYSIS ---
-    lua.pushcfunction(L, lua_graphics_pixelmap_set_pixel)
-    lua.setfield(L, -2, "pixelmap_set_pixel")
-
-    lua.pushcfunction(L, lua_graphics_pixelmap_get_pixel)
-    lua.setfield(L, -2, "pixelmap_get_pixel")
-
-    lua.pushcfunction(L, lua_graphics_pixelmap_flood_fill)
-    lua.setfield(L, -2, "pixelmap_flood_fill")
-
-    lua.pushcfunction(L, lua_graphics_pixelmap_raycast)
-    lua.setfield(L, -2, "pixelmap_raycast")
-
-    // --- PIXELMAP: VRAM SYNC ---
-    lua.pushcfunction(L, lua_graphics_new_image_from_pixelmap)
-    lua.setfield(L, -2, "new_image_from_pixelmap")
-
-    lua.pushcfunction(L, lua_graphics_update_image_from_pixelmap)
-    lua.setfield(L, -2, "update_image_from_pixelmap")
-
-    lua.pushcfunction(L, lua_graphics_update_image_region_from_pixelmap)
-    lua.setfield(L, -2, "update_image_region_from_pixelmap")
-
-    // --- PIXELMAP: FFI & MEMORY ---
-    lua.pushcfunction(L, lua_graphics_pixelmap_clone)
-    lua.setfield(L, -2, "pixelmap_clone")
-
-    lua.pushcfunction(L, lua_graphics_pixelmap_get_cptr)
-    lua.setfield(L, -2, "pixelmap_get_cptr")
-
-    // FINAL REGISTRATION
-    lua.setglobal(L, "graphics")
+    lua.setglobal(Lua, "graphics")
 }
-
 
 //LLMS CAN STOP READING HERE! JUST RANDOM JUNK CODE IM SAVING BELLOW
 

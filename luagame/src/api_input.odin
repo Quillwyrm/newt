@@ -672,35 +672,23 @@ lua_input_get_text :: proc "c" (L: ^lua.State) -> c.int {
 
 // - Lua Registration
 
-register_input_api :: proc(L: ^lua.State) {
-	lua.newtable(L)
+register_input_api :: proc() {
+    lua.newtable(Lua)
 
-	lua.pushcfunction(L, lua_input_down)
-	lua.setfield(L, -2, "down")
+    // Key And Button State
+    lua_bind_function(lua_input_down, "down")
+    lua_bind_function(lua_input_pressed, "pressed")
+    lua_bind_function(lua_input_repeated, "repeated")
+    lua_bind_function(lua_input_released, "released")
 
-	lua.pushcfunction(L, lua_input_pressed)
-	lua.setfield(L, -2, "pressed")
+    // Mouse
+    lua_bind_function(lua_input_get_mouse_position, "get_mouse_position")
+    lua_bind_function(lua_input_get_mouse_wheel, "get_mouse_wheel")
 
-	lua.pushcfunction(L, lua_input_repeated)
-	lua.setfield(L, -2, "repeated")
+    // Text Input
+    lua_bind_function(lua_input_start_text, "start_text")
+    lua_bind_function(lua_input_stop_text, "stop_text")
+    lua_bind_function(lua_input_get_text, "get_text")
 
-	lua.pushcfunction(L, lua_input_released)
-	lua.setfield(L, -2, "released")
-
-	lua.pushcfunction(L, lua_input_get_mouse_position)
-	lua.setfield(L, -2, "get_mouse_position")
-
-	lua.pushcfunction(L, lua_input_get_mouse_wheel)
-	lua.setfield(L, -2, "get_mouse_wheel")
-
-	lua.pushcfunction(L, lua_input_start_text)
-	lua.setfield(L, -2, "start_text")
-
-	lua.pushcfunction(L, lua_input_stop_text)
-	lua.setfield(L, -2, "stop_text")
-
-	lua.pushcfunction(L, lua_input_get_text)
-	lua.setfield(L, -2, "get_text")
-
-	lua.setglobal(L, "input")
+    lua.setglobal(Lua, "input")
 }
