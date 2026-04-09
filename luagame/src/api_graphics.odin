@@ -901,6 +901,12 @@ lua_graphics_new_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
     w := cast(c.int)lua.L_checkinteger(L, 1)
     h := cast(c.int)lua.L_checkinteger(L, 2)
 
+    if w <= 0 || h <= 0 {
+        lua.pushnil(L)
+        lua.pushstring(L, "graphics.new_pixelmap: width and height must be positive")
+        return 2
+    }
+
     surface := sdl.CreateSurface(w, h, sdl.PixelFormat.RGBA32)
     if surface == nil {
         lua.pushnil(L)
