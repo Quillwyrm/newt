@@ -1,150 +1,100 @@
 -- =============================================================================
--- CONSTANTS & CONFIGURATION
+-- CONFIGURATION & COLORS
 -- =============================================================================
 
 local SCREEN_WIDTH = 1280
 local SCREEN_HEIGHT = 720
-local FLOOR_Y = 650
+local TILE_SIZE = 40
 
 local GRAVITY = 2200
 local RUN_ACCELERATION = 3200
 local RUN_FRICTION = 2800
 local MAX_RUN_SPEED = 420
-local JUMP_VELOCITY = -860
-local COYOTE_TIME_LIMIT = 0.15 -- How long after leaving an edge you can still jump
-
--- =============================================================================
--- COLORS
--- =============================================================================
+local JUMP_VELOCITY = -875
+local COYOTE_TIME_LIMIT = 0.15 
 
 local COLOR_BACKGROUND = rgba(16, 14, 28, 255)
-local COLOR_FLOOR      = rgba(40, 40, 50, 255)
-local COLOR_PLATFORM   = rgba(70, 70, 85, 255)
+local COLOR_TILE       = rgba(70, 70, 85, 255)
 local COLOR_PLAYER     = rgba(90, 235, 255, 255)
 local COLOR_TEXT       = rgba(255, 255, 255, 180)
 
 -- =============================================================================
--- GAME STATE
+-- MATH & COLLISION HELPERS
+-- =============================================================================
+
+-- Standard Axis-Aligned Bounding Box (AABB) intersection test
+local function is_overlapping(x1, y1, w1, h1, x2, y2, w2, h2)
+    return x1 < x2 + w2 and x1 + w1 > x2 and y1 < y2 + h2 and y1 + h1 > y2
+end
+
+-- =============================================================================
+-- LEVEL DATA (TILEMAP)
+-- =============================================================================
+-- 1 = Solid Wall/Floor, 0 = Empty Space
+-- 32 columns x 18 rows (1280x720 at 40px tiles)
+
+local ASCII_MAP = {
+    "11111111111111111111111111111111",
+    "11111000000000000001111000000111",
+    "11000000000000000000000000000011",
+    "11000000000111110000000000000001",
+    "10000000000000000000111100000001",
+    "10000000000000000000000110000001",
+    "10000000000000000000000000111001",
+    "10011100000000000000000000000001",
+    "10000000001111111100000000000001",
+    "10000000000000000000000000000001",
+    "10000000000000000000000111110001",
+    "10000111100000000000000100000001",
+    "10000000000000000000000100000001",
+    "10000000000000011110000100000011",
+    "11000001110000000000001100000001",
+    "11100000000000000000001100000001",
+    "11111111111110000111111111111111",
+    "11111111111111111111111111111111"
+}
+
+local solid_tiles = {}
+
+-- =============================================================================
+-- PLAYER STATE & LOGIC
 -- =============================================================================
 
 local player = {
-    x = 120,
-    y = 240,
-    width = 42,
-    height = 56,
+    x = 100, y = 500,
+    width = 32, height = 32, -- slightly smaller than tiles to fit through gaps
     velocity_x = 0,
     velocity_y = 0,
     is_grounded = false,
     coyote_timer = 0
 }
 
-local platforms = {
-    { x = 180, y = 560, width = 220, height = 20 },
-    { x = 470, y = 470, width = 190, height = 20 },
-    { x = 760, y = 390, width = 170, height = 20 },
-    { x = 980, y = 520, width = 180, height = 20 },
-}
-
-local function reset_player(e)
-    e.x = 120
-    e.y = 240
-    e.velocity_x = 0
-    e.velocity_y = 0
-    e.is_grounded = false
-    e.coyote_timer = 0
+local function reset_player()
+    player.x = 100
+    player.y = 500
+    player.velocity_x = 0
+    player.velocity_y = 0
+    player.is_grounded = false
+    player.coyote_timer = 0
 end
 
--- =============================================================================
--- PHYSICS SYSTEM
--- =============================================================================
-
--- A reusable physics step. Applies gravity and resolves one-way platform/floor 
--- collisions for any entity table containing x, y, width, height, and velocities.
-local function apply_physics_and_collision(e, dt)
-    local previous_bottom = e.y + e.height
-
-    -- Apply gravity and update position based on velocity
-    e.velocity_y = e.velocity_y + GRAVITY * dt
-    e.x = e.x + e.velocity_x * dt
-    e.y = e.y + e.velocity_y * dt
-
-    -- Constrain horizontally to screen boundaries
-    if e.x < 0 then
-        e.x = 0
-        e.velocity_x = 0
-    end
-    if e.x + e.width > SCREEN_WIDTH then
-        e.x = SCREEN_WIDTH - e.width
-        e.velocity_x = 0
-    end
-
-    -- Reset grounding state before checking for collisions
-    e.is_grounded = false
-    local new_bottom = e.y + e.height
-    local landing_y = FLOOR_Y
-    local found_landing = false
-
-    -- Check collision with the main floor
-    if previous_bottom <= FLOOR_Y and new_bottom >= FLOOR_Y and e.velocity_y >= 0 then
-        found_landing = true
-    end
-
-    -- Check collision with the floating platforms (one-way dropping)
-    for i = 1, #platforms do
-        local platform = platforms[i]
-        local is_overlapping_x = e.x + e.width > platform.x and e.x < platform.x + platform.width
-        
-        -- Only land if falling downward and crossing the platform's top edge
-        if is_overlapping_x and previous_bottom <= platform.y and new_bottom >= platform.y and e.velocity_y >= 0 then
-            if not found_landing or platform.y < landing_y then
-                found_landing = true
-                landing_y = platform.y
-            end
-        end
-    end
-
-    -- Resolve the vertical collision if we hit something
-    if found_landing then
-        e.y = landing_y - e.height
-        e.velocity_y = 0
-        e.is_grounded = true
-    end
-end
-
--- =============================================================================
--- ENGINE HOOKS
--- =============================================================================
-
-runtime.init = function()
-    window.init(SCREEN_WIDTH, SCREEN_HEIGHT, "Luagame - Clean Platformer Template")
-    reset_player(player)
-end
-
-runtime.update = function(dt)
-    if input.pressed("r") then
-        reset_player(player)
-    end
-
-    -- 1. Gather Input
+local function update_player_input(dt)
+    -- 1. Gather Intent
     local move_direction = 0
     if input.down("a") or input.down("left") then move_direction = move_direction - 1 end
     if input.down("d") or input.down("right") then move_direction = move_direction + 1 end
-
     local jump_pressed = input.pressed("space") or input.pressed("w") or input.pressed("up")
 
-    -- 2. Process Horizontal Movement
+    -- 2. Process Horizontal Acceleration & Friction
     if move_direction ~= 0 then
         player.velocity_x = player.velocity_x + move_direction * RUN_ACCELERATION * dt
     else
-        -- Apply friction to slide to a halt
         if player.velocity_x > 0 then
             player.velocity_x = math.max(player.velocity_x - RUN_FRICTION * dt, 0)
         elseif player.velocity_x < 0 then
             player.velocity_x = math.min(player.velocity_x + RUN_FRICTION * dt, 0)
         end
     end
-    
-    -- Clamp to maximum run speed
     player.velocity_x = math.max(-MAX_RUN_SPEED, math.min(MAX_RUN_SPEED, player.velocity_x))
 
     -- 3. Manage Coyote Time
@@ -160,25 +110,94 @@ runtime.update = function(dt)
         player.is_grounded = false
         player.coyote_timer = 0
     end
-
-    -- 5. Apply Systems
-    apply_physics_and_collision(player, dt)
 end
 
-runtime.draw = function()
-    -- Background
-    graphics.clear(COLOR_BACKGROUND)
+local function update_player_physics(dt)
+    -- =========================================================================
+    -- X-AXIS COLLISION
+    -- Move horizontally, check for overlaps, push out if hitting a wall.
+    -- =========================================================================
+    player.x = player.x + player.velocity_x * dt
 
-    -- Floor
-    graphics.draw_rect(0, FLOOR_Y, SCREEN_WIDTH, SCREEN_HEIGHT - FLOOR_Y, COLOR_FLOOR)
-
-    -- Platforms
-    for i = 1, #platforms do
-        local platform = platforms[i]
-        graphics.draw_rect(platform.x, platform.y, platform.width, platform.height, COLOR_PLATFORM)
+    for i = 1, #solid_tiles do
+        local tile = solid_tiles[i]
+        if is_overlapping(player.x, player.y, player.width, player.height, tile.x, tile.y, TILE_SIZE, TILE_SIZE) then
+            if player.velocity_x > 0 then     -- Moving Right, hit left wall of tile
+                player.x = tile.x - player.width
+            elseif player.velocity_x < 0 then -- Moving Left, hit right wall of tile
+                player.x = tile.x + TILE_SIZE
+            end
+            player.velocity_x = 0
+        end
     end
 
-    -- Player
+    -- =========================================================================
+    -- Y-AXIS COLLISION
+    -- Move vertically, check overlaps, push out if hitting floor or ceiling.
+    -- =========================================================================
+    player.velocity_y = player.velocity_y + GRAVITY * dt
+    player.y = player.y + player.velocity_y * dt
+    player.is_grounded = false
+
+    for i = 1, #solid_tiles do
+        local tile = solid_tiles[i]
+        if is_overlapping(player.x, player.y, player.width, player.height, tile.x, tile.y, TILE_SIZE, TILE_SIZE) then
+            if player.velocity_y > 0 then     -- Falling down, hit floor of tile
+                player.y = tile.y - player.height
+                player.is_grounded = true
+            elseif player.velocity_y < 0 then -- Jumping up, hit ceiling of tile
+                player.y = tile.y + TILE_SIZE
+            end
+            player.velocity_y = 0
+        end
+    end
+end
+
+-- =============================================================================
+-- ENGINE HOOKS
+-- =============================================================================
+
+function runtime.init()
+    window.set_size(SCREEN_WIDTH, SCREEN_HEIGHT)
+    
+    -- Parse the ASCII map into physical rectangles
+    for row_idx = 1, #ASCII_MAP do
+        local row_string = ASCII_MAP[row_idx]
+        for col_idx = 1, #row_string do
+            local char = string.sub(row_string, col_idx, col_idx)
+            if char == "1" then
+                table.insert(solid_tiles, {
+                    x = (col_idx - 1) * TILE_SIZE,
+                    y = (row_idx - 1) * TILE_SIZE
+                })
+            end
+        end
+    end
+
+    reset_player()
+end
+
+function runtime.update(dt)
+    dt = math.min(dt, 0.05) -- Prevent physics tunneling on huge lag spikes
+
+    if input.pressed("r") then
+        reset_player()
+    end
+
+    update_player_input(dt)
+    update_player_physics(dt)
+end
+
+function runtime.draw()
+    graphics.clear(COLOR_BACKGROUND)
+
+    -- Draw Map
+    for i = 1, #solid_tiles do
+        local tile = solid_tiles[i]
+        graphics.draw_rect(tile.x, tile.y, TILE_SIZE, TILE_SIZE, COLOR_TILE)
+    end
+
+    -- Draw Player
     graphics.draw_rect(player.x, player.y, player.width, player.height, COLOR_PLAYER)
 
     -- UI Instructions

@@ -9,10 +9,6 @@ import lua "luajit"
 import ma "vendor:miniaudio"
 import sdl "vendor:sdl3"
 
-//TODO: look into reverb/distortion. figure out if 'stop' is a bad word.
-
-//
-
 // # Audio API - audio.function()
 //
 // ### Engine Configuration (Call BEFORE Engine Init)
@@ -84,9 +80,9 @@ import sdl "vendor:sdl3"
 // - Bus `0` is invalid for LPF/HPF/delay controls.
 // - DSP buses are `1..MAX_AUDIO_BUSES-1`.
 
-// =============================================================================
+// ============================================================================
 // Audio Data Structures
-// =============================================================================
+// ============================================================================
 
 MAX_AUDIO_BUSES :: 8
 MAX_VOICES :: 64
@@ -123,9 +119,9 @@ Voice :: struct {
     source_sound: ^Sound,
 }
 
-// =============================================================================
+// ============================================================================
 // Global Audio Context
-// =============================================================================
+// ============================================================================
 
 // Global Audio Context
 audio_ctx: struct {
@@ -146,54 +142,30 @@ audio_ctx: struct {
     next_generation:           u64,
 }
 
-// =============================================================================
-// Audio Core Procedures
-// =============================================================================
+// ============================================================================
+// Audio Core
+// ============================================================================
 
-check_audio_safety :: #force_inline proc(L: ^lua.State, fn_name: cstring) {
+check_audio_safety :: #force_inline proc "contextless"(L: ^lua.State, fn_name: cstring) {
     if !audio_ctx.initialized {
         lua.L_error(L, "%s: audio system not initialized", fn_name)
     }
 }
 
-
-// audio_init initializes the miniaudio engine, master bus, sub-bus DSP chains, and voice pool.
-// Returns true on full success. On any failure, partially initialized state is rolled back.
-audio_init :: proc() -> bool {
-    if audio_ctx.initialized do return true
+// audio_init initializes the miniaudio engine, mixer graph, and voice pool.
+// Any failure here is fatal host boot. This proc returns only on success.
+audio_init :: proc() {
+    if audio_ctx.initialized do return
 
     if MAX_VOICES != (1 << VOICE_INDEX_BITS) {
-        fmt.eprintf("audio_init: MAX_VOICES (%d) does not match packed handle index capacity from VOICE_INDEX_BITS (%d)\n", MAX_VOICES, 1 << VOICE_INDEX_BITS)
-        return false
+        panic(string(fmt.caprintf("audio.init: MAX_VOICES (%d) does not match packed handle index capacity from VOICE_INDEX_BITS (%d)", MAX_VOICES, 1 << VOICE_INDEX_BITS)))
     }
 
     config := ma.engine_config_init()
 
     result := ma.engine_init(&config, &audio_ctx.engine)
     if result != .SUCCESS {
-        fmt.eprintf("Failed to initialize audio engine: %v\n", result)
-        return false
-    }
-
-    master_ok := false
-    buses_built := 0
-    init_ok := false
-
-    defer {
-        if !init_ok {
-            for j := buses_built; j >= 1; j -= 1 {
-                ma.lpf_node_uninit(&audio_ctx.mixer[j].lpf, nil)
-                ma.hpf_node_uninit(&audio_ctx.mixer[j].hpf, nil)
-                ma.delay_node_uninit(&audio_ctx.mixer[j].delay, nil)
-                ma.sound_group_uninit(&audio_ctx.mixer[j].group)
-            }
-
-            if master_ok {
-                ma.sound_group_uninit(&audio_ctx.mixer[0].group)
-            }
-
-            ma.engine_uninit(&audio_ctx.engine)
-        }
+        fatal_engine_error(fmt.caprintf("audio.init: failed to initialize audio engine: %v", result))
     }
 
     // Initialize master bus and shared graph info.
@@ -203,17 +175,16 @@ audio_init :: proc() -> bool {
 
     result = ma.sound_group_init(&audio_ctx.engine, {}, nil, &audio_ctx.mixer[0].group)
     if result != .SUCCESS {
-        fmt.eprintf("Failed to initialize Master Bus: %v\n", result)
-        return false
+        fatal_engine_error(fmt.caprintf("audio.init: failed to initialize master bus: %v", result))
     }
-    master_ok = true
+
 
     // Buses 1..N-1 each get: Group -> Delay -> HPF -> LPF -> Master
     for i in 1 ..< MAX_AUDIO_BUSES {
+        
         result = ma.sound_group_init(&audio_ctx.engine, {}, nil, &audio_ctx.mixer[i].group)
         if result != .SUCCESS {
-            fmt.eprintf("Failed to initialize Bus %d Group: %v\n", i, result)
-            return false
+            fatal_engine_error(fmt.caprintf("audio.init: failed to initialize bus %d group: %v", i, result))
         }
 
         delay_sec := audio_ctx.bus_delay_times[i]
@@ -223,28 +194,19 @@ audio_init :: proc() -> bool {
         delay_cfg := ma.delay_node_config_init(channels, sample_rate, delay_frames, 0.0)
         result = ma.delay_node_init(graph, &delay_cfg, nil, &audio_ctx.mixer[i].delay)
         if result != .SUCCESS {
-            fmt.eprintf("Failed to initialize Bus %d Delay: %v\n", i, result)
-            ma.sound_group_uninit(&audio_ctx.mixer[i].group)
-            return false
+            fatal_engine_error(fmt.caprintf("audio.init: failed to initialize bus %d delay: %v", i, result))
         }
 
         hpf_cfg := ma.hpf_node_config_init(channels, sample_rate, 10.0, 2)
         result = ma.hpf_node_init(graph, &hpf_cfg, nil, &audio_ctx.mixer[i].hpf)
         if result != .SUCCESS {
-            fmt.eprintf("Failed to initialize Bus %d HPF: %v\n", i, result)
-            ma.delay_node_uninit(&audio_ctx.mixer[i].delay, nil)
-            ma.sound_group_uninit(&audio_ctx.mixer[i].group)
-            return false
+            fatal_engine_error(fmt.caprintf("audio.init: failed to initialize bus %d hpf: %v", i, result))
         }
 
         lpf_cfg := ma.lpf_node_config_init(channels, sample_rate, 20000.0, 2)
         result = ma.lpf_node_init(graph, &lpf_cfg, nil, &audio_ctx.mixer[i].lpf)
         if result != .SUCCESS {
-            fmt.eprintf("Failed to initialize Bus %d LPF: %v\n", i, result)
-            ma.hpf_node_uninit(&audio_ctx.mixer[i].hpf, nil)
-            ma.delay_node_uninit(&audio_ctx.mixer[i].delay, nil)
-            ma.sound_group_uninit(&audio_ctx.mixer[i].group)
-            return false
+            fatal_engine_error(fmt.caprintf("audio.init: failed to initialize bus %d lpf: %v", i, result))
         }
 
         base_group := cast(^ma.node)&audio_ctx.mixer[i].group
@@ -257,8 +219,6 @@ audio_init :: proc() -> bool {
         ma.node_attach_output_bus(base_delay, 0, base_hpf, 0)
         ma.node_attach_output_bus(base_hpf, 0, base_lpf, 0)
         ma.node_attach_output_bus(base_lpf, 0, base_master, 0)
-
-        buses_built = i
     }
 
     // Reset voice pool state.
@@ -275,10 +235,7 @@ audio_init :: proc() -> bool {
     audio_ctx.default_max_dist = 10000.0 * AUDIO_SCALE
     audio_ctx.default_attenuation_model = .inverse
     audio_ctx.next_generation = 0
-
-    init_ok = true
     audio_ctx.initialized = true
-    return true
 }
 
 // audio_shutdown uninitializes all active voices, buses, and the miniaudio engine.
@@ -429,9 +386,11 @@ claim_and_init_voice :: proc(sound: ^Sound, bus_idx: int) -> (^Voice, u32, cstri
     return voice, handle, nil, true
 }
 
-// =============================================================================
-// Audio API Procedures
-// =============================================================================
+// ============================================================================
+// Lua Audio Bindings
+// ============================================================================
+
+// - Asset Management
 
 // lua_audio_load_sound: audio.load_sound(filepath: string, mode?: string) -> Sound | nil, err
 lua_audio_load_sound :: proc "c" (L: ^lua.State) -> c.int {
@@ -467,7 +426,7 @@ lua_audio_load_sound :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-//LISTNER
+// - Listeners
 
 // lua_audio_set_listener_position: audio.set_listener_position(x: number, y: number)
 lua_audio_set_listener_position :: proc "c" (L: ^lua.State) -> c.int {
@@ -508,7 +467,7 @@ lua_audio_set_listener_velocity :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-//PLAYBACK
+// - Playback
 
 // lua_audio_play: audio.play(sound: Sound, bus: int, vol?: num, pitch?: num, pan?: num) -> handle | nil, err
 lua_audio_play :: proc "c" (L: ^lua.State) -> c.int {
@@ -623,7 +582,7 @@ lua_audio_play_at :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-//VOICE
+// - Voice Control
 
 // lua_audio_set_voice_volume: audio.set_voice_volume(handle: int, volume: number)
 lua_audio_set_voice_volume :: proc "c" (L: ^lua.State) -> c.int {
@@ -791,7 +750,7 @@ lua_audio_stop_voice :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-//Voice Distance & Physics
+// - Voice Distance & Physics
 
 // lua_audio_set_default_falloff: audio.set_default_falloff(min_px: number, max_px?: number)
 // Sets the global default radius for all FUTURE play_at calls.
@@ -940,7 +899,7 @@ lua_audio_set_voice_pan_mode :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-//bus/mixer
+// - Mixer & Bus Control
 
 // lua_audio_set_bus_volume: audio.set_bus_volume(bus: int, volume: number)
 lua_audio_set_bus_volume :: proc "c" (L: ^lua.State) -> c.int {
@@ -1209,7 +1168,6 @@ lua_audio_stop_bus :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-/////////////////
 
 // lua_audio_get_voice_info: audio.get_voice_info(handle) -> time, duration
 // Returns nil, nil for a dead or stale voice handle.
@@ -1297,11 +1255,11 @@ lua_audio_get_sound_info :: proc "c" (L: ^lua.State) -> c.int {
     return 3
 }
 
-// =============================================================================
-// Memory Management & Metatables
-// =============================================================================
+// ============================================================================
+// Memory Management And Metatables
+// ============================================================================
 
-// lua_sound_gc is triggered by Lua's GC or manual release().
+// lua_sound_gc is triggered by Lua GC or manual free(userdata).
 lua_sound_gc :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
     sound := cast(^Sound)lua.L_checkudata(L, 1, "Sound")
@@ -1340,11 +1298,8 @@ setup_audio_metatables :: proc(L: ^lua.State) {
     lua.pop(L, 1)
 }
 
-// =============================================================================
-// Engine Registration
-// =============================================================================
+// - Lua Registration
 
-// register_audio_api exposes the full audio module to the Lua environment.
 register_audio_api :: proc(L: ^lua.State) {
     setup_audio_metatables(L)
 
@@ -1447,3 +1402,4 @@ register_audio_api :: proc(L: ^lua.State) {
 
     lua.setglobal(L, "audio")
 }
+

@@ -3,30 +3,28 @@ package main
 import "base:runtime"
 import "core:mem"
 import "core:c"
-import "core:strings"
 import lua "luajit"
 import sdl "vendor:sdl3"
 
-//========================================================================================================================================
-// HOST HELPERS & STATE
-//========================================================================================================================================
+// ============================================================================
+// Window State And Helpers
+// ============================================================================
 
-//Quit queue state for lua quitting sdl
+// App quit state requested by Lua or window events.
 Quit_Requested : bool
 
 // Cursor tokens, cached as SDL system cursors.
 // Fixed-size (bounded) cache: no growth, no maps.
 Cursor_Cache : [12]^sdl.Cursor
 
-@(private)
-check_window_safety :: #force_inline proc(L: ^lua.State, fn_name: cstring) {
-    if Window == nil || Renderer == nil {
-        lua.L_error(L, "%s: window system not initialized. Did you forget to call window.init() in runtime.init()?", fn_name)
+check_window_safety :: #force_inline proc "contextless"(L: ^lua.State, fn_name: cstring) {
+    if Window == nil {
+        lua.L_error(L, "%s: window system not initialized yet", fn_name)
     }
 }
 
-// read_window_flags parses {"fullscreen","borderless","resizable"} into three booleans.
-read_window_flags :: proc(L: ^lua.State, idx: lua.Index) -> (fullscreen, borderless, resizable: bool) {
+// Parses a Lua flag list like {"fullscreen","borderless","resizable"}.
+read_window_flags :: proc "contextless" (L: ^lua.State, idx: lua.Index) -> (fullscreen, borderless, resizable: bool) {
     lua.L_checktype(L, cast(c.int)(idx), lua.Type.TABLE)
 
     i: lua.Integer = 1
@@ -38,10 +36,10 @@ read_window_flags :: proc(L: ^lua.State, idx: lua.Index) -> (fullscreen, borderl
             lua.pop(L, 1)
             break
         }
-
+        
         len: c.size_t
         p := lua.L_checklstring(L, -1, &len)
-        s := strings.string_from_ptr(cast(^byte)(p), int(len))
+        s := transmute(string)mem.Raw_String{data = cast([^]byte)(p), len = int(len)}
 
         if s == "fullscreen" {
             fullscreen = true
@@ -50,33 +48,15 @@ read_window_flags :: proc(L: ^lua.State, idx: lua.Index) -> (fullscreen, borderl
         } else if s == "resizable" {
             resizable = true
         } else {
-            lua.L_error(L, "window.init: unknown flag '%s'", p)
+            lua.L_error(L, "window.set_flags: unknown flag '%s'", p)
         }
 
         lua.pop(L, 1)
         i += 1
     }
-
     return
 }
 
-// apply_window_flags applies fullscreen/borderless/resizable via SDL setters.
-apply_window_flags :: proc "contextless" (fullscreen, borderless, resizable: bool) {
-    if Window == nil {
-        return
-    }
-
-    // Fullscreen on/off.
-    sdl.SetWindowFullscreen(Window, fullscreen)
-
-    // Borderless toggle (borderless == true → bordered = false).
-    sdl.SetWindowBordered(Window, !borderless)
-
-    // Resizable toggle.
-    sdl.SetWindowResizable(Window, resizable)
-}
-
-// window_shutdown cleans up SDL resources.
 window_shutdown :: proc() {
     if Renderer != nil {
         sdl.DestroyRenderer(Renderer)
@@ -87,78 +67,43 @@ window_shutdown :: proc() {
         sdl.DestroyWindow(Window)
         Window = nil
     }
+
+    for i in 0..<len(Cursor_Cache) {
+        if Cursor_Cache[i] != nil {
+            sdl.DestroyCursor(Cursor_Cache[i])
+            Cursor_Cache[i] = nil
+        }
+    }
 }
 
+// ============================================================================
+// Lua Window Bindings
+// ============================================================================
 
-//========================================================================================================================================
-// WINDOW API 
-// Lua exposed API for handling sdl windowing (monotome.window.*)
-//========================================================================================================================================
+// - Window Control
 
-// ---------------------------------
-// LIFECYCLE
-// ---------------------------------
-
-// window.init(width, height, title, flags?)
-lua_window_init :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
-
-    if Window != nil || Renderer != nil {
-        lua.L_error(L, "window.init: already initialized")
-        return 0
-    }
+// window.set_flags(flags?)
+lua_window_set_flags :: proc "c" (L: ^lua.State) -> c.int {
+    check_window_safety(L, "window.set_flags")
 
     nargs := lua.gettop(L)
-    if nargs < 3 {
-        lua.L_error(L, "window.init: expected width, height, title, [flags]")
+    if nargs > 1 {
+        lua.L_error(L, "window.set_flags: expected 0 or 1 arguments")
         return 0
     }
 
-    w := int(lua.L_checkinteger(L, 1))
-    h := int(lua.L_checkinteger(L, 2))
-
-    title_len: c.size_t
-    title_c := lua.L_checklstring(L, 3, &title_len)
-
-    fs, borderless, resizable := false, false, false
-    if nargs >= 4 && !lua.isnil(L, 4) {
-        fs, borderless, resizable = read_window_flags(L, 4)
+    fullscreen, borderless, resizable := false, false, false
+    if nargs == 1 && !lua.isnil(L, 1) {
+        fullscreen, borderless, resizable = read_window_flags(L, 1)
     }
 
-    flags: sdl.WindowFlags = {}
-    if fs do flags |= {.FULLSCREEN}
-    if borderless do flags |= {.BORDERLESS}
-    if resizable do flags |= {.RESIZABLE}
-
-    // Step 1: create the SDL window.
-    Window = sdl.CreateWindow(title_c, c.int(w), c.int(h), flags)
-    if Window == nil {
-        lua.L_error(L, "window.init: SDL_CreateWindow failed: %s", sdl.GetError())
+    if !sdl.SetWindowFullscreen(Window, fullscreen) {
+        lua.L_error(L, "window.set_flags: SDL_SetWindowFullscreen failed: %s", sdl.GetError())
         return 0
     }
 
-    // Step 2: create the renderer. If this fails, roll back the window.
-    Renderer = sdl.CreateRenderer(Window, nil)
-    if Renderer == nil {
-        sdl.DestroyWindow(Window)
-        Window = nil
-
-        lua.L_error(L, "window.init: SDL_CreateRenderer failed: %s", sdl.GetError())
-        return 0
-    }
-
-    // Step 3: VSync is currently mandatory for Luagame.
-    // If this fails, init is considered unsuccessful and we fully roll back.
-    if !sdl.SetRenderVSync(Renderer, 1) {
-        sdl.DestroyRenderer(Renderer)
-        Renderer = nil
-
-        sdl.DestroyWindow(Window)
-        Window = nil
-
-        lua.L_error(L, "window.init: SDL_SetRenderVSync failed: %s", sdl.GetError())
-        return 0
-    }
+    sdl.SetWindowBordered(Window, !borderless)
+    sdl.SetWindowResizable(Window, resizable)
 
     return 0
 }
@@ -176,14 +121,10 @@ lua_window_should_close :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-
-// ---------------------------------
-// GETTERS
-// ---------------------------------
+// - Getters
 
 // window.get_size() -> (w, h) pixels
 lua_window_get_size :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L, "window.get_size")
 
     w, h: c.int
@@ -199,7 +140,6 @@ lua_window_get_size :: proc "c" (L: ^lua.State) -> c.int {
 
 // window.get_position() -> (x, y) pixels
 lua_window_get_position :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L, "window.get_position")
 
     x, y: c.int
@@ -213,51 +153,10 @@ lua_window_get_position :: proc "c" (L: ^lua.State) -> c.int {
     return 2
 }
 
-// window.metrics() -> (cols, rows, cell_w, cell_h, w, h, x, y)
-// lua_window_metrics :: proc "c" (L: ^lua.State) -> c.int {
-// 	if Window == nil {
-// 		lua.L_error(L, "window.metrics: window not created")
-// 		return 0
-// 	}
-// 	if Cell_W <= 0 || Cell_H <= 0 {
-// 		lua.L_error(L, "window.metrics: Cell_W/Cell_H not initialized")
-// 		return 0
-// 	}
-
-// 	w, h: c.int
-// 	if !sdl.GetWindowSize(Window, &w, &h) {
-// 		lua.L_error(L, "window.metrics: GetWindowSize failed")
-// 		return 0
-// 	}
-
-// 	x, y: c.int
-// 	if !sdl.GetWindowPosition(Window, &x, &y) {
-// 		lua.L_error(L, "window.metrics: GetWindowPosition failed")
-// 		return 0
-// 	}
-
-// 	cols := int(f32(w) / Cell_W)
-// 	rows := int(f32(h) / Cell_H)
-
-// 	lua.pushinteger(L, cast(lua.Integer)(cols))
-// 	lua.pushinteger(L, cast(lua.Integer)(rows))
-// 	lua.pushinteger(L, cast(lua.Integer)(int(Cell_W)))
-// 	lua.pushinteger(L, cast(lua.Integer)(int(Cell_H)))
-// 	lua.pushinteger(L, cast(lua.Integer)(w))
-// 	lua.pushinteger(L, cast(lua.Integer)(h))
-// 	lua.pushinteger(L, cast(lua.Integer)(x))
-// 	lua.pushinteger(L, cast(lua.Integer)(y))
-// 	return 8
-// }
-
-
-// ---------------------------------
-// SETTERS
-// ---------------------------------
+// - Setters
 
 // lua_window_set_title implements window.set_title(title).
 lua_window_set_title :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L,"window.set_title")
 
     title_c := lua.L_checkstring(L, 1)
@@ -268,7 +167,6 @@ lua_window_set_title :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_window_set_size implements window.set_size(width, height) in pixels.
 lua_window_set_size :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L,"window.set_size")
 
     w := lua.L_checkinteger(L, 1)
@@ -284,7 +182,6 @@ lua_window_set_size :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_window_set_position implements window.set_position(x, y) in pixels.
 lua_window_set_position :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L,"window.set_position")
 
     x := lua.L_checkinteger(L, 1)
@@ -300,7 +197,6 @@ lua_window_set_position :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_window_maximize implements window.maximize().
 lua_window_maximize :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L,"window.maximize")
 
     if !sdl.MaximizeWindow(Window) {
@@ -313,7 +209,6 @@ lua_window_maximize :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_window_minimize implements window.minimize().
 lua_window_minimize :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L,"window.minimize")
 
     if !sdl.MinimizeWindow(Window) {
@@ -324,14 +219,10 @@ lua_window_minimize :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-
-// ---------------------------------
-// CURSOR
-// ---------------------------------
+// - Cursor
 
 // window.set_cursor(name)
 lua_window_set_cursor :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L,"window.set_cursor")
 
     len: c.size_t
@@ -391,7 +282,6 @@ lua_window_set_cursor :: proc "c" (L: ^lua.State) -> c.int {
 
 // window.cursor_show()
 lua_window_cursor_show :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L,"window.cursor_show")
 
     if !sdl.ShowCursor() {
@@ -403,7 +293,6 @@ lua_window_cursor_show :: proc "c" (L: ^lua.State) -> c.int {
 
 // window.cursor_hide()
 lua_window_cursor_hide :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L,"window.cursor_hide")
 
     if !sdl.HideCursor() {
@@ -415,21 +304,17 @@ lua_window_cursor_hide :: proc "c" (L: ^lua.State) -> c.int {
 
 // window.is_cursor_visible() -> bool
 lua_window_is_cursor_visible :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L,"window.is_cursor_visible")
 
     lua.pushboolean(L, cast(b32)sdl.CursorVisible())
     return 1
 }
 
-// ---------------------------------
-// CLIPBOARD
-// ---------------------------------
+// - Clipboard
 
 // window.get_clipboard() -> string
 // Must free the SDL buffer via sdl.free (SDL_free).
 lua_window_get_clipboard :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L,"window.get_clipboard")
 
     p := sdl.GetClipboardText()
@@ -449,7 +334,6 @@ lua_window_get_clipboard :: proc "c" (L: ^lua.State) -> c.int {
 
 // window.set_clipboard(text)
 lua_window_set_clipboard :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_window_safety(L,"window.set_clipboard")
 
     len: c.size_t
@@ -472,19 +356,14 @@ lua_window_set_clipboard :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
+// - Lua Registration
 
-// ---------------------------------
-// REGISTRATION PROC
-// ---------------------------------
-
-
-// register_window_api creates the monotome.window table and registers all window procs.
 register_window_api :: proc(L: ^lua.State) {
     lua.newtable(L) // [window]
 
-    // lifecycle / init
-    lua.pushcfunction(L, lua_window_init)
-    lua.setfield(L, -2, "init")
+    // flag controls
+    lua.pushcfunction(L, lua_window_set_flags)
+    lua.setfield(L, -2, "set_flags")
 
     lua.pushcfunction(L, lua_window_close)
     lua.setfield(L, -2, "close")
@@ -498,9 +377,6 @@ register_window_api :: proc(L: ^lua.State) {
 
     lua.pushcfunction(L, lua_window_get_position)
     lua.setfield(L, -2, "get_position")
-
-    // lua.pushcfunction(L, lua_window_metrics)
-    // lua.setfield(L, -2, "metrics"))
 
     // setters / controls
     lua.pushcfunction(L, lua_window_set_title)
@@ -531,7 +407,7 @@ register_window_api :: proc(L: ^lua.State) {
     lua.pushcfunction(L, lua_window_is_cursor_visible)
     lua.setfield(L, -2, "is_cursor_visible")
     
-        // clipboard
+    // clipboard
     lua.pushcfunction(L, lua_window_get_clipboard)
     lua.setfield(L, -2, "get_clipboard")
 
@@ -539,7 +415,7 @@ register_window_api :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "set_clipboard")
     
     // Set the table as a global named "window"
-    lua.setglobal(Lua, "window")
+    lua.setglobal(L, "window")
 }
 
 

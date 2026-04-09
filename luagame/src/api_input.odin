@@ -6,30 +6,9 @@ import "core:strings"
 import lua "luajit"
 import sdl "vendor:sdl3"
 
-//========================================================================================================================================
-// INPUT API
-// Keys + mouse buttons + mouse position + mouse wheel + text input + key repeat
-//========================================================================================================================================
-//
-// Lua surface (input):
-//   down(name: string)        -> bool
-//   pressed(name: string)     -> bool   // initial edge only (non-repeat)
-//   repeated(name: string)      -> bool   // OS typematic repeat edge only
-//   released(name: string)    -> bool
-//   get_mouse_position()          -> (col:int, row:int)       // cell coords, may be OOB
-//   get_mouse_wheel()             -> (dx:number, dy:number)   // per-frame accumulated, cleared each new frame
-//   start_text()              -> nil
-//   stop_text()               -> nil
-//   get_text()                    -> string // UTF-8 received this frame, cleared each new frame
-//
-// Contract:
-// - ONLY the curated token set below is valid.
-// - Unknown tokens error loudly (and include the bad token).
-
-//========================================================================================================================================
-// CURATED KEY TOKEN LIST
-// token -> SDL keycode
-//========================================================================================================================================
+// ============================================================================
+// Curated Key Tokens
+// ============================================================================
 
 Key_Def :: struct {
 	token: string,
@@ -64,7 +43,6 @@ KEYS := [?]Key_Def {
 	{"x", sdl.K_X},
 	{"y", sdl.K_Y},
 	{"z", sdl.K_Z},
-
 	// Digits
 	{"0", sdl.K_0},
 	{"1", sdl.K_1},
@@ -76,7 +54,6 @@ KEYS := [?]Key_Def {
 	{"7", sdl.K_7},
 	{"8", sdl.K_8},
 	{"9", sdl.K_9},
-
 	// Whitespace / editing
 	{"space", sdl.K_SPACE},
 	{"tab", sdl.K_TAB},
@@ -85,7 +62,6 @@ KEYS := [?]Key_Def {
 	{"insert", sdl.K_INSERT},
 	{"delete", sdl.K_DELETE},
 	{"clear", sdl.K_CLEAR},
-
 	// Navigation
 	{"up", sdl.K_UP},
 	{"down", sdl.K_DOWN},
@@ -95,7 +71,6 @@ KEYS := [?]Key_Def {
 	{"end", sdl.K_END},
 	{"pageup", sdl.K_PAGEUP},
 	{"pagedown", sdl.K_PAGEDOWN},
-
 	// Function keys
 	{"f1", sdl.K_F1},
 	{"f2", sdl.K_F2},
@@ -115,12 +90,10 @@ KEYS := [?]Key_Def {
 	{"f16", sdl.K_F16},
 	{"f17", sdl.K_F17},
 	{"f18", sdl.K_F18},
-
 	// Locks
 	{"capslock", sdl.K_CAPSLOCK},
 	{"numlock", sdl.K_NUMLOCKCLEAR},
 	{"scrolllock", sdl.K_SCROLLLOCK},
-
 	// Modifiers
 	{"lshift", sdl.K_LSHIFT},
 	{"rshift", sdl.K_RSHIFT},
@@ -131,7 +104,6 @@ KEYS := [?]Key_Def {
 	{"lsuper", sdl.K_LGUI},
 	{"rsuper", sdl.K_RGUI},
 	{"mode", sdl.K_MODE},
-
 	// Misc/system
 	{"escape", sdl.K_ESCAPE},
 	{"pause", sdl.K_PAUSE},
@@ -143,7 +115,6 @@ KEYS := [?]Key_Def {
 	{"power", sdl.K_POWER},
 	{"currencyunit", sdl.K_CURRENCYUNIT},
 	{"undo", sdl.K_UNDO},
-
 	// App control
 	{"appsearch", sdl.K_AC_SEARCH},
 	{"apphome", sdl.K_AC_HOME},
@@ -151,7 +122,6 @@ KEYS := [?]Key_Def {
 	{"appforward", sdl.K_AC_FORWARD},
 	{"apprefresh", sdl.K_AC_REFRESH},
 	{"appbookmarks", sdl.K_AC_BOOKMARKS},
-
 	// Punctuation / symbols
 	{"!", sdl.K_EXCLAIM},
 	{"\"", sdl.K_DBLAPOSTROPHE},
@@ -180,7 +150,6 @@ KEYS := [?]Key_Def {
 	{"^", sdl.K_CARET},
 	{"_", sdl.K_UNDERSCORE},
 	{"`", sdl.K_GRAVE},
-
 	// Keypad (kp*)
 	{"kp0", sdl.K_KP_0},
 	{"kp1", sdl.K_KP_1},
@@ -202,9 +171,9 @@ KEYS := [?]Key_Def {
 	{"kp=", sdl.K_KP_EQUALS},
 }
 
-//========================================================================================================================================
-// HOST INPUT STATE
-//========================================================================================================================================
+// ============================================================================
+// Input State
+// ============================================================================
 
 Keyboard_State: [^]bool = nil
 Keyboard_State_Count: int = 0
@@ -233,7 +202,7 @@ Text_Buffer: [TEXT_BUF_CAP]u8
 Input_Initialized: bool = false
 
 // mouse_token_to_index maps "mouse1/2/3" to 0..2.
-mouse_token_to_index :: proc(token: string) -> (idx: int, ok: bool) {
+mouse_token_to_index :: proc "contextless"(token: string) -> (idx: int, ok: bool) {
 	switch token {
 	case "mouse1":
 		return 0, true
@@ -246,7 +215,7 @@ mouse_token_to_index :: proc(token: string) -> (idx: int, ok: bool) {
 }
 
 // mouse_down returns whether the given mouse button index is currently held.
-mouse_down :: proc(idx: int) -> bool {
+mouse_down :: proc "contextless"(idx: int) -> bool {
 	switch idx {
 	case 0:
 		return .LEFT in Curr_MouseButtons
@@ -258,9 +227,9 @@ mouse_down :: proc(idx: int) -> bool {
 	return false
 }
 
-//========================================================================================================================================
-// FRAME LIFECYCLE HOOKS
-//========================================================================================================================================
+// ============================================================================
+// Frame Lifecycle
+// ============================================================================
 
 // input_init builds token/keycode maps and precomputes indices for SDL live keyboard state.
 input_init :: proc() {
@@ -272,7 +241,7 @@ input_init :: proc() {
 	Keyboard_State = sdl.GetKeyboardState(&num_keys)
 	Keyboard_State_Count = cast(int)(num_keys)
 	if Keyboard_State == nil || Keyboard_State_Count <= 0 {
-		panic("SDL_GetKeyboardState failed")
+		fatal_engine_error("input.init: SDL_GetKeyboardState failed")
 	}
 
 	n := len(KEYS)
@@ -454,9 +423,10 @@ input_shutdown :: proc() {
 	Input_Initialized = false
 }
 
-//========================================================================================================================================
-// LUA SURFACE (C CALLS)
-//========================================================================================================================================
+
+// ============================================================================
+// Lua Input Bindings
+// ============================================================================
 
 // down(name) -> bool
 lua_input_down :: proc "c" (L: ^lua.State) -> c.int {
@@ -594,7 +564,6 @@ lua_input_released :: proc "c" (L: ^lua.State) -> c.int {
 
 // get_mouse_position() -> (x:number, y:number)
 lua_input_get_mouse_position :: proc "c" (L: ^lua.State) -> c.int {
-	context = runtime.default_context()
 
 	if !Input_Initialized {
 		lua.L_error(L, "input.get_mouse_position: input system not initialized")
@@ -615,7 +584,6 @@ lua_input_get_mouse_position :: proc "c" (L: ^lua.State) -> c.int {
 
 // get_mouse_wheel() -> (dx:number, dy:number)
 lua_input_get_mouse_wheel :: proc "c" (L: ^lua.State) -> c.int {
-	context = runtime.default_context()
 
 	if !Input_Initialized {
 		lua.L_error(L, "input.get_mouse_wheel: input system not initialized")
@@ -633,7 +601,6 @@ lua_input_get_mouse_wheel :: proc "c" (L: ^lua.State) -> c.int {
 
 // start_text() -> nil
 lua_input_start_text :: proc "c" (L: ^lua.State) -> c.int {
-	context = runtime.default_context()
 
 	if !Input_Initialized {
 		lua.L_error(L, "input.start_text: input system not initialized")
@@ -644,7 +611,7 @@ lua_input_start_text :: proc "c" (L: ^lua.State) -> c.int {
 		return 0
 	}
 	if Window == nil {
-		lua.L_error(L, "input.start_text: window system not initialized. Did you forget to call window.init() in runtime.init()?")
+		lua.L_error(L, "input.start_text: window system not initialized yet")
 		return 0
 	}
 
@@ -659,7 +626,6 @@ lua_input_start_text :: proc "c" (L: ^lua.State) -> c.int {
 
 // stop_text() -> nil
 lua_input_stop_text :: proc "c" (L: ^lua.State) -> c.int {
-	context = runtime.default_context()
 
 	if !Input_Initialized {
 		lua.L_error(L, "input.stop_text: input system not initialized")
@@ -670,7 +636,7 @@ lua_input_stop_text :: proc "c" (L: ^lua.State) -> c.int {
 		return 0
 	}
 	if Window == nil {
-		lua.L_error(L, "input.stop_text: window system not initialized. Did you forget to call window.init() in runtime.init()?")
+		lua.L_error(L, "input.stop_text: window system not initialized yet")
 		return 0
 	}
 
@@ -685,7 +651,6 @@ lua_input_stop_text :: proc "c" (L: ^lua.State) -> c.int {
 
 // text() -> string
 lua_input_get_text :: proc "c" (L: ^lua.State) -> c.int {
-	context = runtime.default_context()
 
 	if !Input_Initialized {
 		lua.L_error(L, "input.get_text: input system not initialized")
@@ -705,37 +670,37 @@ lua_input_get_text :: proc "c" (L: ^lua.State) -> c.int {
 	return 1
 }
 
-// register_input_api creates the input table and leaves it on the Lua stack.
-register_input_api :: proc(Lua: ^lua.State) {
-	lua.newtable(Lua)
+// - Lua Registration
 
-	lua.pushcfunction(Lua, lua_input_down)
-	lua.setfield(Lua, -2, "down")
+register_input_api :: proc(L: ^lua.State) {
+	lua.newtable(L)
 
-	lua.pushcfunction(Lua, lua_input_pressed)
-	lua.setfield(Lua, -2, "pressed")
+	lua.pushcfunction(L, lua_input_down)
+	lua.setfield(L, -2, "down")
 
-	lua.pushcfunction(Lua, lua_input_repeated)
-	lua.setfield(Lua, -2, "repeated")
+	lua.pushcfunction(L, lua_input_pressed)
+	lua.setfield(L, -2, "pressed")
 
-	lua.pushcfunction(Lua, lua_input_released)
-	lua.setfield(Lua, -2, "released")
+	lua.pushcfunction(L, lua_input_repeated)
+	lua.setfield(L, -2, "repeated")
 
-	lua.pushcfunction(Lua, lua_input_get_mouse_position)
-	lua.setfield(Lua, -2, "get_mouse_position")
+	lua.pushcfunction(L, lua_input_released)
+	lua.setfield(L, -2, "released")
 
-	lua.pushcfunction(Lua, lua_input_get_mouse_wheel)
-	lua.setfield(Lua, -2, "get_mouse_wheel")
+	lua.pushcfunction(L, lua_input_get_mouse_position)
+	lua.setfield(L, -2, "get_mouse_position")
 
-	lua.pushcfunction(Lua, lua_input_start_text)
-	lua.setfield(Lua, -2, "start_text")
+	lua.pushcfunction(L, lua_input_get_mouse_wheel)
+	lua.setfield(L, -2, "get_mouse_wheel")
 
-	lua.pushcfunction(Lua, lua_input_stop_text)
-	lua.setfield(Lua, -2, "stop_text")
+	lua.pushcfunction(L, lua_input_start_text)
+	lua.setfield(L, -2, "start_text")
 
-	lua.pushcfunction(Lua, lua_input_get_text)
-	lua.setfield(Lua, -2, "get_text")
+	lua.pushcfunction(L, lua_input_stop_text)
+	lua.setfield(L, -2, "stop_text")
 
-	// Set the table as a global named "input"
-	lua.setglobal(Lua, "input")
+	lua.pushcfunction(L, lua_input_get_text)
+	lua.setfield(L, -2, "get_text")
+
+	lua.setglobal(L, "input")
 }

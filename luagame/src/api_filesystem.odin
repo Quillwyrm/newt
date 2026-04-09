@@ -1,4 +1,3 @@
-// api_filesystem.odin
 package main
 
 import "base:runtime"
@@ -8,8 +7,11 @@ import "core:c"
 import os  "core:os"
 import lua "luajit"
 
+// ============================================================================
+// Filesystem Helpers
+// ============================================================================
 
-file_type_to_kind :: proc(ft: os.File_Type) -> string {
+file_type_to_kind :: proc "contextless"(ft: os.File_Type) -> string {
     switch ft {
     case .Regular:   return "file"
     case .Directory: return "dir"
@@ -25,8 +27,7 @@ file_type_to_kind :: proc(ft: os.File_Type) -> string {
     return "other"
 }
 
-
-push_lua_string :: proc(L: ^lua.State, s: string) {
+push_lua_string :: proc "contextless"(L: ^lua.State, s: string) {
     lua.pushlstring(L, cstring(raw_data(s)), c.size_t(len(s)))
 }
 
@@ -34,6 +35,10 @@ push_lua_error :: proc(L: ^lua.State, err: os.Error) {
     msg := os.error_string(err)
     push_lua_string(L, msg)
 }
+
+// ============================================================================
+// Lua Filesystem Bindings
+// ============================================================================
 
 // get_resource_dir() -> string | (nil, err)
 lua_filesystem_get_resource_dir :: proc "c" (L: ^lua.State) -> c.int {
@@ -101,7 +106,6 @@ lua_filesystem_set_working_dir :: proc "c" (L: ^lua.State) -> c.int {
 
 // get_args() -> {string...}
 lua_filesystem_get_args :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
 
     if lua.gettop(L) != 0 {
         lua.L_error(L, "filesystem.get_args: expected 0 arguments")
@@ -334,7 +338,8 @@ lua_filesystem_remove :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// register_filesystem_api creates the filesystem table and registers filesystem.* procs.
+// - Lua Registration
+
 register_filesystem_api :: proc(L: ^lua.State) {
     lua.newtable(L) // [filesystem]
 
@@ -371,7 +376,6 @@ register_filesystem_api :: proc(L: ^lua.State) {
     lua.pushcfunction(L, lua_filesystem_remove)
     lua.setfield(L, -2, "remove")
     
-    // Set the table as a global named "filesystem"
-    lua.setglobal(Lua, "filesystem")
+    lua.setglobal(L, "filesystem")
 }
 

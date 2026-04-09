@@ -28,13 +28,11 @@ import stbi "vendor:stb/image"
 //Image/region/rect drawing (GPU)
 //Pixelmap API (CPU Read/Write)
 
-//=========================================================================================
-// GRAPHICS API: STATE, TYPES & HELPERS
-//=========================================================================================
+// ============================================================================
+// Graphics State And Helpers
+// ============================================================================
 
-// ---------------------------------------------------------
-// TYPES AND GLOBAL CONTEXT
-// ---------------------------------------------------------
+// - Types And Global Context
 
 // Image represents a hardware texture allocated in GPU VRAM.
 Image :: struct {
@@ -59,13 +57,11 @@ Gfx_Ctx: struct {
     },
 }
 
-// ---------------------------------------------------------
-// GRAPHICS SYSTEM HELPERS
-// ---------------------------------------------------------
-@(private)
-check_render_safety :: #force_inline proc(L: ^lua.State, fn_name: cstring) {
+// - Graphics System Helpers
+
+check_render_safety :: #force_inline proc "contextless"(L: ^lua.State, fn_name: cstring) {
     if Renderer == nil { 
-        lua.L_error(L, "%s: graphics system not initialized. Did you forget to call window.init() in runtime.init()?", fn_name) 
+        lua.L_error(L, "%s: graphics system not initialized yet", fn_name) 
     }
 }
 
@@ -126,9 +122,7 @@ unpack_fcolor :: #force_inline proc(c: u32rgba) -> sdl.FColor {
     }
 }
 
-// ---------------------------------------------------------
-// RENDER GEOMETRY PIPELINE HELPERS
-// ---------------------------------------------------------
+// - Render Geometry Helpers
 
 // draw_geometry submits a textured quad with explicit UV coordinates.
 draw_geometry :: proc(
@@ -161,9 +155,7 @@ draw_geometry :: proc(
     sdl.RenderGeometry(Renderer, tex, raw_data(verts[:]), 4, raw_data(indices[:]), 6)
 }
 
-// ---------------------------------------------------------
-// PIXELMAP HELPERS
-// ---------------------------------------------------------
+// - Pixelmap Helpers
 
 // Helper to flip Lua's 0xRRGGBBAA to the physical 0xAABBGGRR memory layout.
 // This compiles down to a single CPU bswap instruction.
@@ -171,13 +163,140 @@ u32_rgba_to_abgr :: #force_inline proc(c: u32) -> u32 {
     return (c >> 24) | ((c >> 8) & 0xFF00) | ((c << 8) & 0x00FF0000) | (c << 24)
 }
 
-//=========================================================================================
-// GRAPHICS API: LUA BINDINGS
-//=========================================================================================
+PixelmapBlendMode :: enum {
+    Replace,
+    Blend,
+    Add,
+    Multiply,
+    Erase,
+    Mask,
+}
 
-// ---------------------------------------------------------
-// IMAGE I/O
-// ---------------------------------------------------------
+parse_blend_mode_checked :: #force_inline proc(
+    L: ^lua.State,
+    mode_str: cstring,
+    fn_name: cstring,
+) -> PixelmapBlendMode {
+    if mode_str == nil do return .Blend
+
+    switch string(mode_str) {
+    case "replace":
+        return .Replace
+    case "blend":
+        return .Blend
+    case "add":
+        return .Add
+    case "multiply":
+        return .Multiply
+    case "erase":
+        return .Erase
+    case "mask":
+        return .Mask
+    case:
+        lua.L_error(L, "%s: unknown blend mode '%s'", fn_name, mode_str)
+        return .Blend
+    }
+}
+
+blend_memory_colors :: #force_inline proc(dst, src: u32, mode: PixelmapBlendMode) -> u32 {
+    sa := (src >> 24) & 0xFF
+    if sa == 0 && mode != .Replace do return dst // Fast path
+
+    sr := src & 0xFF
+    sg := (src >> 8) & 0xFF
+    sb := (src >> 16) & 0xFF
+
+    dr := dst & 0xFF
+    dg := (dst >> 8) & 0xFF
+    db := (dst >> 16) & 0xFF
+    da := (dst >> 24) & 0xFF
+
+    nr, ng, nb, na: u32
+
+    switch mode {
+    case .Replace:
+        return src
+    case .Blend:
+        inv_alpha := 255 - sa
+        nr = (sr * sa + dr * inv_alpha) / 255
+        ng = (sg * sa + dg * inv_alpha) / 255
+        nb = (sb * sa + db * inv_alpha) / 255
+        na = sa + da - (sa * da) / 255
+    case .Add:
+        nr = min(255, dr + sr)
+        ng = min(255, dg + sg)
+        nb = min(255, db + sb)
+        na = min(255, da + sa)
+    case .Multiply:
+        nr = (dr * sr) / 255
+        ng = (dg * sg) / 255
+        nb = (db * sb) / 255
+        na = da // Standard multiply ignores dest alpha
+    case .Erase:
+        nr, ng, nb = dr, dg, db
+        na = (da * (255 - sa)) / 255
+    case .Mask:
+        nr, ng, nb = dr, dg, db
+        na = (da * sa) / 255
+    }
+
+    return nr | (ng << 8) | (nb << 16) | (na << 24)
+}
+
+// Inline helper for plotting a single bounds-checked pixel.
+blit_pixel :: #force_inline proc(
+    surf: ^sdl.Surface,
+    x, y: int,
+    color: u32,
+    mode: PixelmapBlendMode,
+) {
+    if x >= 0 && x < int(surf.w) && y >= 0 && y < int(surf.h) {
+        pixels := cast([^]u32)surf.pixels
+        idx := y * (int(surf.pitch) / 4) + x
+        pixels[idx] = blend_memory_colors(pixels[idx], color, mode)
+    }
+}
+
+// Internal helper to calculate safe iteration bounds for floating-point shapes
+get_clipped_bounds :: #force_inline proc(
+    surf: ^sdl.Surface,
+    min_x, min_y, max_x, max_y: f32,
+) -> (
+    start_x, start_y, end_x, end_y: int,
+    valid: bool,
+) {
+    start_x = max(0, cast(int)math.floor(min_x))
+    start_y = max(0, cast(int)math.floor(min_y))
+    end_x = min(int(surf.w), cast(int)math.ceil(max_x) + 1)
+    end_y = min(int(surf.h), cast(int)math.ceil(max_y) + 1)
+
+    valid = start_x < end_x && start_y < end_y
+    return
+}
+
+// Internal math: Shortest distance squared from point P to segment AB
+dist_sq_to_segment :: #force_inline proc(p, a, b: [2]f32) -> f32 {
+    dx := b.x - a.x
+    dy := b.y - a.y
+    l2 := dx * dx + dy * dy
+
+    if l2 == 0 do return (p.x - a.x) * (p.x - a.x) + (p.y - a.y) * (p.y - a.y)
+
+    t := ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2
+    t = math.clamp(t, 0.0, 1.0)
+
+    proj := [2]f32{a.x + t * dx, a.y + t * dy}
+
+    px := p.x - proj.x
+    py := p.y - proj.y
+    return px * px + py * py
+}
+
+// ============================================================================
+// Lua Graphics Bindings
+// ============================================================================
+
+// - Image I/O
 
 // lua_graphics_load_image implements: graphics.load_image(path) -> Image | nil, err
 lua_graphics_load_image :: proc "c" (L: ^lua.State) -> c.int {
@@ -211,9 +330,7 @@ lua_graphics_load_image :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// ---------------------------------------------------------
-// GPU DRAWING
-// ---------------------------------------------------------
+// - GPU Drawing
 
 // lua_graphics_draw_image implements: graphics.draw_image(img, x, y, [color])
 lua_graphics_draw_image :: proc "c" (L: ^lua.State) -> c.int {
@@ -317,9 +434,7 @@ lua_graphics_clear :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// ---------------------------------------------------------
-// DEBUG DRAWS (DONT RESPECT TRANSFORMS)
-// ---------------------------------------------------------
+// - Debug Draws (no transform)
 
 // lua_graphics_debug_line implements: graphics.debug_line(x1, y1, x2, y2, [color])
 // Draws a 1px thick line directly to the screen, ignoring the transform stack.
@@ -384,9 +499,8 @@ lua_graphics_debug_text :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// ---------------------------------------------------------
-// TRANSFORM PIPELINE
-// ---------------------------------------------------------
+// - Transform Pipeline
+
 
 // lua_graphics_begin_transform implements: graphics.begin_transform()
 lua_graphics_begin_transform :: proc "c" (L: ^lua.State) -> c.int {
@@ -537,9 +651,7 @@ lua_graphics_local_to_screen :: proc "c" (L: ^lua.State) -> c.int {
     return 2
 }
 
-//---------------------------------------------
-// DRAW UTILITIES
-//---------------------------------------------
+// - Draw Utilities
 
 // lua_graphics_set_default_filter implements: graphics.set_default_filter("nearest" | "linear")
 lua_graphics_set_default_filter :: proc "c" (L: ^lua.State) -> c.int {
@@ -576,9 +688,7 @@ lua_graphics_get_image_size :: proc "c" (L: ^lua.State) -> c.int {
     return 2
 }
 
-// ---------------------------------------------------------
-// RENDER STATE
-// ---------------------------------------------------------
+// - Render State
 
 parse_gpu_blend_mode_checked :: #force_inline proc(
     L: ^lua.State,
@@ -728,9 +838,8 @@ lua_graphics_set_canvas :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-//---------------------------------------------
-// PIXELMAP API
-//---------------------------------------------
+// - Pixelmap API
+
 // Valid Blend Modes: "replace", "blend", "add", "multiply", "erase", "mask"
 // Optional colors default to 0xFFFFFFFF (White).
 
@@ -768,9 +877,7 @@ lua_graphics_set_canvas :: proc "c" (L: ^lua.State) -> c.int {
 // .get_pixelmap_cptr(pmap) -> lightuserdata (raw pixels pointer)
 // .pixelmap_clone(pmap) -> new_pmap
 
-//---------------------------------------------
-// - PIXELMAP IO
-//---------------------------------------------
+// - Pixelmap I/O
 
 // lua_graphics_new_pixelmap implements: graphics.new_pixelmap(w, h) -> pmap | nil, err
 lua_graphics_new_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
@@ -899,9 +1006,7 @@ lua_graphics_save_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-//---------------------------------------------
-// - PIXELMAP ATOMIC OPS
-//---------------------------------------------
+// - Pixelmap Atomic Ops
 
 // lua_graphics_pixelmap_set_pixel implements: graphics.pixelmap_set_pixel(pmap, x, y, color)
 lua_graphics_pixelmap_set_pixel :: proc "c" (L: ^lua.State) -> c.int {
@@ -1088,141 +1193,7 @@ lua_graphics_pixelmap_raycast :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// ---------------------------------------------------------
-// PIXELMAP ARRAY-TO-ARRAY HELPERS & MATH
-// ---------------------------------------------------------
-PixelmapBlendMode :: enum {
-    Replace,
-    Blend,
-    Add,
-    Multiply,
-    Erase,
-    Mask,
-}
-
-parse_blend_mode_checked :: #force_inline proc(
-    L: ^lua.State,
-    mode_str: cstring,
-    fn_name: cstring,
-) -> PixelmapBlendMode {
-    if mode_str == nil do return .Blend
-
-    switch string(mode_str) {
-    case "replace":
-        return .Replace
-    case "blend":
-        return .Blend
-    case "add":
-        return .Add
-    case "multiply":
-        return .Multiply
-    case "erase":
-        return .Erase
-    case "mask":
-        return .Mask
-    case:
-        lua.L_error(L, "%s: unknown blend mode '%s'", fn_name, mode_str)
-        return .Blend
-    }
-}
-
-blend_memory_colors :: #force_inline proc(dst, src: u32, mode: PixelmapBlendMode) -> u32 {
-    sa := (src >> 24) & 0xFF
-    if sa == 0 && mode != .Replace do return dst // Fast path
-
-    sr := src & 0xFF
-    sg := (src >> 8) & 0xFF
-    sb := (src >> 16) & 0xFF
-
-    dr := dst & 0xFF
-    dg := (dst >> 8) & 0xFF
-    db := (dst >> 16) & 0xFF
-    da := (dst >> 24) & 0xFF
-
-    nr, ng, nb, na: u32
-
-    switch mode {
-    case .Replace:
-        return src
-    case .Blend:
-        inv_alpha := 255 - sa
-        nr = (sr * sa + dr * inv_alpha) / 255
-        ng = (sg * sa + dg * inv_alpha) / 255
-        nb = (sb * sa + db * inv_alpha) / 255
-        na = sa + da - (sa * da) / 255
-    case .Add:
-        nr = min(255, dr + sr)
-        ng = min(255, dg + sg)
-        nb = min(255, db + sb)
-        na = min(255, da + sa)
-    case .Multiply:
-        nr = (dr * sr) / 255
-        ng = (dg * sg) / 255
-        nb = (db * sb) / 255
-        na = da // Standard multiply ignores dest alpha
-    case .Erase:
-        nr, ng, nb = dr, dg, db
-        na = (da * (255 - sa)) / 255
-    case .Mask:
-        nr, ng, nb = dr, dg, db
-        na = (da * sa) / 255
-    }
-
-    return nr | (ng << 8) | (nb << 16) | (na << 24)
-}
-
-// Inline helper for plotting a single bounds-checked pixel.
-blit_pixel :: #force_inline proc(
-    surf: ^sdl.Surface,
-    x, y: int,
-    color: u32,
-    mode: PixelmapBlendMode,
-) {
-    if x >= 0 && x < int(surf.w) && y >= 0 && y < int(surf.h) {
-        pixels := cast([^]u32)surf.pixels
-        idx := y * (int(surf.pitch) / 4) + x
-        pixels[idx] = blend_memory_colors(pixels[idx], color, mode)
-    }
-}
-
-// Internal helper to calculate safe iteration bounds for floating-point shapes
-get_clipped_bounds :: #force_inline proc(
-    surf: ^sdl.Surface,
-    min_x, min_y, max_x, max_y: f32,
-) -> (
-    start_x, start_y, end_x, end_y: int,
-    valid: bool,
-) {
-    start_x = max(0, cast(int)math.floor(min_x))
-    start_y = max(0, cast(int)math.floor(min_y))
-    end_x = min(int(surf.w), cast(int)math.ceil(max_x) + 1)
-    end_y = min(int(surf.h), cast(int)math.ceil(max_y) + 1)
-
-    valid = start_x < end_x && start_y < end_y
-    return
-}
-
-// Internal math: Shortest distance squared from point P to segment AB
-dist_sq_to_segment :: #force_inline proc(p, a, b: [2]f32) -> f32 {
-    dx := b.x - a.x
-    dy := b.y - a.y
-    l2 := dx * dx + dy * dy
-
-    if l2 == 0 do return (p.x - a.x) * (p.x - a.x) + (p.y - a.y) * (p.y - a.y)
-
-    t := ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2
-    t = math.clamp(t, 0.0, 1.0)
-
-    proj := [2]f32{a.x + t * dx, a.y + t * dy}
-
-    px := p.x - proj.x
-    py := p.y - proj.y
-    return px * px + py * py
-}
-
-//---------------------------------------------
-// - PIXELMAP GEOMETRY
-//---------------------------------------------
+// - Pixelmap Geometry
 
 // lua_graphics_blit_rect implements: graphics.blit_rect(pmap, x, y, w, h, [color], [mode])
 lua_graphics_blit_rect :: proc "c" (L: ^lua.State) -> c.int {
@@ -1517,10 +1488,7 @@ lua_graphics_blit_capsule :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-
-//---------------------------------------------
-// - PIXELMAP MAP-TO-MAP/BLIT
-//---------------------------------------------
+// - Pixelmap Blit
 
 // lua_graphics_blit implements: graphics.blit(dst_map, src_map, dx, dy, [mode])
 lua_graphics_blit :: proc "c" (L: ^lua.State) -> c.int {
@@ -1600,9 +1568,7 @@ lua_graphics_blit_region :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-//---------------------------------------------
-// - VRAM SYNC/ IMAGE MUTATION
-//---------------------------------------------
+// - Image Mutation And VRAM Sync
 
 // lua_graphics_new_image_from_pixelmap implements: graphics.new_image_from_pixelmap(pmap) -> img | nil, err
 lua_graphics_new_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
@@ -1705,9 +1671,7 @@ lua_graphics_update_image_region_from_pixelmap :: proc "c" (L: ^lua.State) -> c.
     return 0
 }
 
-//---------------------------------------------
-// - FFI UTILS
-//---------------------------------------------
+// - FFI Utils
 
 // lua_graphics_pixelmap_get_cptr implements: graphics.pixelmap_get_cptr(pmap) -> lightuserdata
 lua_graphics_pixelmap_get_cptr :: proc "c" (L: ^lua.State) -> c.int {
@@ -1757,13 +1721,14 @@ lua_graphics_pixelmap_clone :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-//=========================================================================================
-// MEMORY MANAGEMENT & METATABLES
-//=========================================================================================
+
+// ============================================================================
+// Memory Management And Metatables
+// ============================================================================
 // This section bridges Lua's Garbage Collector with Odin's manual memory management.
 // Each userdata type has a specific `__gc` metamethod to safely free C-allocated RAM/VRAM
 // when the Lua object falls out of scope. Null-checking the inner pointers (texture/surface)
-// prevents double-free segfaults if a user manually calls `release()` before the GC sweeps.
+// prevents double-free segfaults if a user manually calls free(userdata) before GC sweeps.
 
 // lua_image_gc: Destroys the VRAM texture.
 lua_image_gc :: proc "c" (L: ^lua.State) -> c.int {
@@ -1805,12 +1770,8 @@ setup_graphics_metatables :: proc(L: ^lua.State) {
     lua.pop(L, 1)
 }
 
-//=========================================================================================
-// API REGISTRATION
-//=========================================================================================
+// - Lua Registration
 
-// register_graphics_api initializes the internal graphics state and binds
-// the 'graphics' table to the Lua global environment.
 register_graphics_api :: proc(L: ^lua.State) {
     setup_graphics_metatables(L)
 
@@ -1825,7 +1786,6 @@ register_graphics_api :: proc(L: ^lua.State) {
 
     lua.pushcfunction(L, lua_graphics_draw_rect)
     lua.setfield(L, -2, "draw_rect")
-
 
     // --- VRAM RESOURCE MANAGEMENT ---
     lua.pushcfunction(L, lua_graphics_load_image)
@@ -1843,7 +1803,6 @@ register_graphics_api :: proc(L: ^lua.State) {
 
     lua.pushcfunction(L, lua_graphics_set_canvas)
     lua.setfield(L, -2, "set_canvas")
-
 
     // --- FRAME & PIPELINE STATE ---
     lua.pushcfunction(L, lua_graphics_clear)
@@ -1886,7 +1845,6 @@ register_graphics_api :: proc(L: ^lua.State) {
 
     lua.pushcfunction(L, lua_graphics_local_to_screen)
     lua.setfield(L, -2, "local_to_screen")
-
 
     // --- DEBUG DRAWING ---
     lua.pushcfunction(L, lua_graphics_debug_text)
@@ -1970,7 +1928,6 @@ register_graphics_api :: proc(L: ^lua.State) {
 
     lua.pushcfunction(L, lua_graphics_pixelmap_get_cptr)
     lua.setfield(L, -2, "pixelmap_get_cptr")
-
 
     // FINAL REGISTRATION
     lua.setglobal(L, "graphics")
