@@ -36,26 +36,51 @@ lua_engine_global_free :: proc "c" (L: ^lua.State) -> c.int {
 }
 
 CORE_LUA_HELPERS :: `
-local bit = require("bit")
-local type = type
-local tonumber = tonumber
+do
+    local floor = math.floor
 
-function rgba(a, b, c, d)
-    local t = type(a)
-    if t == "number" then
-        if not b then
-            if a <= 0xFFFFFF then
-                return bit.bor(bit.lshift(a, 8), 255)
-            end
-            return a
-        end
-        return bit.bor(bit.lshift(a, 24), bit.lshift(b, 16), bit.lshift(c, 8), d or 255)
-    elseif t == "string" then
-        local hex = string.byte(a, 1) == 35 and string.sub(a, 2) or a
-        if #hex == 6 then hex = hex .. "FF" end
-        return tonumber(hex, 16) or 0xFFFFFFFF
+    local function u8(x)
+        x = floor(tonumber(x) or 0)
+        if x < 0 then return 0 end
+        if x > 255 then return 255 end
+        return x
     end
-    return 0xFFFFFFFF
+
+    function rgba(...)
+        local n = select("#", ...)
+
+        if n == 1 then
+            local v = ...
+            local t = type(v)
+
+            if t == "number" then
+                v = floor(v)
+                if v < 0 then return 0xFFFFFFFF end
+                if v <= 0xFFFFFF then return v * 256 + 0xFF end
+                if v <= 0xFFFFFFFF then return v end
+                return 0xFFFFFFFF
+            end
+
+            if t == "string" then
+                local s = v:sub(1, 1) == "#" and v:sub(2) or v
+                if #s == 6 and s:match("^[%da-fA-F]+$") then
+                    return tonumber(s, 16) * 256 + 0xFF
+                end
+                if #s == 8 and s:match("^[%da-fA-F]+$") then
+                    return tonumber(s, 16)
+                end
+            end
+
+            return 0xFFFFFFFF
+        end
+
+        if n == 3 or n == 4 then
+            local r, g, b, a = ...
+            return u8(r) * 16777216 + u8(g) * 65536 + u8(b) * 256 + u8(a or 255)
+        end
+
+        return 0xFFFFFFFF
+    end
 end
 `
 
@@ -309,14 +334,16 @@ prepend_package_path :: proc(exe_dir: string) {
 // ============================================================================
 main :: proc() {
 
-    // - SDL
+// == SDL ==
+
     if !sdl.Init({.VIDEO}) {
         fmt.eprintln("SDL_Init failed:", sdl.GetError())
         return
     }
     defer sdl.Quit()
 
-    // - Lua
+// == Lua ==
+
     Lua = lua.L_newstate()
     if Lua == nil {
         fatal_engine_error("engine.boot: Lua L_newstate failed")
@@ -340,7 +367,8 @@ main :: proc() {
 
     prepend_package_path(exe_dir)
 
-    // - script Boot
+// == script Boot ==
+
     main_path, err2 := os.join_path({exe_dir, "lua", "main.lua"}, context.temp_allocator)
     if err2 != os.ERROR_NONE {
         fatal_engine_error(fmt.caprintf("engine.boot: failed to build path to lua/main.lua: %v", err2))
@@ -385,14 +413,16 @@ main :: proc() {
         fatal_engine_error(fmt.caprintf("engine.boot: SDL_SetRenderVSync failed: %s", sdl.GetError()))
     }
 
-    // - User Init
+// == User Init ==
+
     call_lua_noargs("init")
 
     if !sdl.ShowWindow(Window) {
         fatal_engine_error(fmt.caprintf("engine.boot: SDL_ShowWindow failed: %s", sdl.GetError()))
     }
 
-    // - Main Loop
+// == Main Loop ==
+
     perf_freq := f64(sdl.GetPerformanceFrequency())
     last_counter := sdl.GetPerformanceCounter()
 

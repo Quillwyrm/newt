@@ -80,7 +80,7 @@ window_shutdown :: proc() {
 // Lua Window Bindings
 // ============================================================================
 
-// - Window Control
+// == Window Control ==
 
 // window.set_flags(flags?)
 lua_window_set_flags :: proc "c" (L: ^lua.State) -> c.int {
@@ -121,7 +121,7 @@ lua_window_should_close :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// - Getters
+// == Getters ==
 
 // window.get_size() -> (w, h) pixels
 lua_window_get_size :: proc "c" (L: ^lua.State) -> c.int {
@@ -153,7 +153,7 @@ lua_window_get_position :: proc "c" (L: ^lua.State) -> c.int {
     return 2
 }
 
-// - Setters
+// == Setters ==
 
 // lua_window_set_title implements window.set_title(title).
 lua_window_set_title :: proc "c" (L: ^lua.State) -> c.int {
@@ -219,7 +219,7 @@ lua_window_minimize :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// - Cursor
+// == Cursor ==
 
 // window.set_cursor(name)
 lua_window_set_cursor :: proc "c" (L: ^lua.State) -> c.int {
@@ -310,7 +310,7 @@ lua_window_is_cursor_visible :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// - Clipboard
+// == Clipboard ==
 
 // window.get_clipboard() -> string
 // Must free the SDL buffer via sdl.free (SDL_free).
@@ -356,7 +356,7 @@ lua_window_set_clipboard :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// - Lua Registration
+// == Lua Registration ==
 
 register_window_api :: proc() {
     lua.newtable(Lua) // [window]

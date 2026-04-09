@@ -123,7 +123,6 @@ Voice :: struct {
 // Global Audio Context
 // ============================================================================
 
-// Global Audio Context
 audio_ctx: struct {
     engine:                    ma.engine,
     mixer:                     [MAX_AUDIO_BUSES]AudioBus,
@@ -390,7 +389,7 @@ claim_and_init_voice :: proc(sound: ^Sound, bus_idx: int) -> (^Voice, u32, cstri
 // Lua Audio Bindings
 // ============================================================================
 
-// - Asset Management
+// == Asset Management ==
 
 // lua_audio_load_sound: audio.load_sound(filepath: string, mode?: string) -> Sound | nil, err
 lua_audio_load_sound :: proc "c" (L: ^lua.State) -> c.int {
@@ -426,7 +425,7 @@ lua_audio_load_sound :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// - Listeners
+// == Listeners ==
 
 // lua_audio_set_listener_position: audio.set_listener_position(x: number, y: number)
 lua_audio_set_listener_position :: proc "c" (L: ^lua.State) -> c.int {
@@ -467,7 +466,7 @@ lua_audio_set_listener_velocity :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// - Playback
+// == Playback ==
 
 // lua_audio_play: audio.play(sound: Sound, bus: int, vol?: num, pitch?: num, pan?: num) -> handle | nil, err
 lua_audio_play :: proc "c" (L: ^lua.State) -> c.int {
@@ -582,7 +581,7 @@ lua_audio_play_at :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// - Voice Control
+// == Voice Control ==
 
 // lua_audio_set_voice_volume: audio.set_voice_volume(handle: int, volume: number)
 lua_audio_set_voice_volume :: proc "c" (L: ^lua.State) -> c.int {
@@ -750,7 +749,7 @@ lua_audio_stop_voice :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// - Voice Distance & Physics
+// == Voice Distance & Physics ==
 
 // lua_audio_set_default_falloff: audio.set_default_falloff(min_px: number, max_px?: number)
 // Sets the global default radius for all FUTURE play_at calls.
@@ -899,7 +898,7 @@ lua_audio_set_voice_pan_mode :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// - Mixer & Bus Control
+// == Mixer & Bus Control ==
 
 // lua_audio_set_bus_volume: audio.set_bus_volume(bus: int, volume: number)
 lua_audio_set_bus_volume :: proc "c" (L: ^lua.State) -> c.int {
@@ -1298,7 +1297,7 @@ setup_audio_metatables :: proc() {
     lua.pop(Lua, 1)
 }
 
-// - Lua Registration
+// == Lua Registration ==
 
 register_audio_api :: proc() {
     setup_audio_metatables()

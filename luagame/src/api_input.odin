@@ -670,7 +670,7 @@ lua_input_get_text :: proc "c" (L: ^lua.State) -> c.int {
 	return 1
 }
 
-// - Lua Registration
+// == Lua Registration ==
 
 register_input_api :: proc() {
     lua.newtable(Lua)

@@ -32,7 +32,7 @@ import stbi "vendor:stb/image"
 // Graphics State And Helpers
 // ============================================================================
 
-// - Types And Global Context
+// == Types And Global Context ==
 
 // Image represents a hardware texture allocated in GPU VRAM.
 Image :: struct {
@@ -57,7 +57,7 @@ Gfx_Ctx: struct {
     },
 }
 
-// - Graphics System Helpers
+// == Graphics System Helpers ==
 
 check_render_safety :: #force_inline proc "contextless"(L: ^lua.State, fn_name: cstring) {
     if Renderer == nil { 
@@ -122,7 +122,7 @@ unpack_fcolor :: #force_inline proc(c: u32rgba) -> sdl.FColor {
     }
 }
 
-// - Render Geometry Helpers
+// == Render Geometry Helpers ==
 
 // draw_geometry submits a textured quad with explicit UV coordinates.
 draw_geometry :: proc(
@@ -155,7 +155,7 @@ draw_geometry :: proc(
     sdl.RenderGeometry(Renderer, tex, raw_data(verts[:]), 4, raw_data(indices[:]), 6)
 }
 
-// - Pixelmap Helpers
+// == Pixelmap Helpers ==
 
 // Helper to flip Lua's 0xRRGGBBAA to the physical 0xAABBGGRR memory layout.
 // This compiles down to a single CPU bswap instruction.
@@ -296,7 +296,7 @@ dist_sq_to_segment :: #force_inline proc(p, a, b: [2]f32) -> f32 {
 // Lua Graphics Bindings
 // ============================================================================
 
-// - Image I/O
+// == Image I/O ==
 
 // lua_graphics_load_image implements: graphics.load_image(path) -> Image | nil, err
 lua_graphics_load_image :: proc "c" (L: ^lua.State) -> c.int {
@@ -330,7 +330,7 @@ lua_graphics_load_image :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// - GPU Drawing
+// == GPU Drawing ==
 
 // lua_graphics_draw_image implements: graphics.draw_image(img, x, y, [color])
 lua_graphics_draw_image :: proc "c" (L: ^lua.State) -> c.int {
@@ -434,7 +434,7 @@ lua_graphics_clear :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// - Debug Draws (no transform)
+// == Debug Draws (no transform)
 
 // lua_graphics_debug_line implements: graphics.debug_line(x1, y1, x2, y2, [color])
 // Draws a 1px thick line directly to the screen, ignoring the transform stack.
@@ -499,7 +499,7 @@ lua_graphics_debug_text :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// - Transform Pipeline
+// == Transform Pipeline ==
 
 
 // lua_graphics_begin_transform implements: graphics.begin_transform()
@@ -651,7 +651,7 @@ lua_graphics_local_to_screen :: proc "c" (L: ^lua.State) -> c.int {
     return 2
 }
 
-// - Draw Utilities
+// == Draw Utilities ==
 
 // lua_graphics_set_default_filter implements: graphics.set_default_filter("nearest" | "linear")
 lua_graphics_set_default_filter :: proc "c" (L: ^lua.State) -> c.int {
@@ -688,7 +688,7 @@ lua_graphics_get_image_size :: proc "c" (L: ^lua.State) -> c.int {
     return 2
 }
 
-// - Render State
+// == Render State ==
 
 parse_gpu_blend_mode_checked :: #force_inline proc(
     L: ^lua.State,
@@ -756,9 +756,10 @@ lua_graphics_set_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
+
 // lua_graphics_get_clip_rect implements: x, y, w, h = graphics.get_clip_rect()
 // Returns the current hardware clip rectangle.
-// Returns nothing if clipping is disabled.
+// Returns 0, 0, 0, 0 if clipping is disabled.
 lua_graphics_get_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
     check_render_safety(L, "graphics.get_clip_rect")
@@ -766,13 +767,18 @@ lua_graphics_get_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
     rect: sdl.Rect
     enabled := sdl.GetRenderClipRect(Renderer, &rect)
 
-    if !enabled do return 0
+    if !enabled {
+        lua.pushinteger(L, 0)
+        lua.pushinteger(L, 0)
+        lua.pushinteger(L, 0)
+        lua.pushinteger(L, 0)
+        return 4
+    }
 
     lua.pushinteger(L, cast(lua.Integer)rect.x)
     lua.pushinteger(L, cast(lua.Integer)rect.y)
     lua.pushinteger(L, cast(lua.Integer)rect.w)
     lua.pushinteger(L, cast(lua.Integer)rect.h)
-
     return 4
 }
 
@@ -781,10 +787,15 @@ lua_graphics_new_canvas :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
     check_render_safety(L, "graphics.new_canvas")
 
-    w := f32(lua.L_checknumber(L, 1))
-    h := f32(lua.L_checknumber(L, 2))
+    w_i := int(lua.L_checkinteger(L, 1))
+    h_i := int(lua.L_checkinteger(L, 2))
 
-    texture := sdl.CreateTexture(Renderer, .RGBA32, .TARGET, cast(c.int)w, cast(c.int)h)
+    if w_i <= 0 || h_i <= 0 {
+        lua.L_error(L, "graphics.new_canvas: width and height must be positive integers")
+        return 0
+    }
+
+    texture := sdl.CreateTexture(Renderer, .RGBA32, .TARGET, cast(c.int)w_i, cast(c.int)h_i)
     if texture == nil {
         lua.pushnil(L)
 
@@ -801,7 +812,11 @@ lua_graphics_new_canvas :: proc "c" (L: ^lua.State) -> c.int {
     sdl.SetTextureScaleMode(texture, Gfx_Ctx.default_scale_mode)
 
     data := cast(^Image)lua.newuserdata(L, size_of(Image))
-    data^ = Image { texture = texture, width = w, height = h }
+    data^ = Image {
+        texture = texture,
+        width   = f32(w_i),
+        height  = f32(h_i),
+    }
 
     lua.L_getmetatable(L, "Image")
     lua.setmetatable(L, -2)
@@ -838,7 +853,7 @@ lua_graphics_set_canvas :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// - Pixelmap API
+// == Pixelmap API ==
 
 // Valid Blend Modes: "replace", "blend", "add", "multiply", "erase", "mask"
 // Optional colors default to 0xFFFFFFFF (White).
@@ -877,7 +892,7 @@ lua_graphics_set_canvas :: proc "c" (L: ^lua.State) -> c.int {
 // .get_pixelmap_cptr(pmap) -> lightuserdata (raw pixels pointer)
 // .pixelmap_clone(pmap) -> new_pmap
 
-// - Pixelmap I/O
+// == Pixelmap I/O ==
 
 // lua_graphics_new_pixelmap implements: graphics.new_pixelmap(w, h) -> pmap | nil, err
 lua_graphics_new_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
@@ -1006,7 +1021,7 @@ lua_graphics_save_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// - Pixelmap Atomic Ops
+// == Pixelmap Atomic Ops ==
 
 // lua_graphics_pixelmap_set_pixel implements: graphics.pixelmap_set_pixel(pmap, x, y, color)
 lua_graphics_pixelmap_set_pixel :: proc "c" (L: ^lua.State) -> c.int {
@@ -1193,7 +1208,7 @@ lua_graphics_pixelmap_raycast :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// - Pixelmap Geometry
+// == Pixelmap Geometry ==
 
 // lua_graphics_blit_rect implements: graphics.blit_rect(pmap, x, y, w, h, [color], [mode])
 lua_graphics_blit_rect :: proc "c" (L: ^lua.State) -> c.int {
@@ -1488,7 +1503,7 @@ lua_graphics_blit_capsule :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// - Pixelmap Blit
+// == Pixelmap Blit ==
 
 // lua_graphics_blit implements: graphics.blit(dst_map, src_map, dx, dy, [mode])
 lua_graphics_blit :: proc "c" (L: ^lua.State) -> c.int {
@@ -1568,7 +1583,7 @@ lua_graphics_blit_region :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// - Image Mutation And VRAM Sync
+// == Image Mutation And VRAM Sync ==
 
 // lua_graphics_new_image_from_pixelmap implements: graphics.new_image_from_pixelmap(pmap) -> img | nil, err
 lua_graphics_new_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
@@ -1671,7 +1686,7 @@ lua_graphics_update_image_region_from_pixelmap :: proc "c" (L: ^lua.State) -> c.
     return 0
 }
 
-// - FFI Utils
+// == FFI Utils ==
 
 // lua_graphics_pixelmap_get_cptr implements: graphics.pixelmap_get_cptr(pmap) -> lightuserdata
 lua_graphics_pixelmap_get_cptr :: proc "c" (L: ^lua.State) -> c.int {
@@ -1770,7 +1785,7 @@ setup_graphics_metatables :: proc() {
     lua.pop(Lua, 1)
 }
 
-// - Lua Registration
+// == Lua Registration  ==
 
 register_graphics_api :: proc() {
     setup_graphics_metatables()

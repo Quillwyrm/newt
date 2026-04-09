@@ -338,6 +338,8 @@ lua_filesystem_remove :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
+// == Lua Registration ==
+
 register_filesystem_api :: proc() {
     lua.newtable(Lua) // [filesystem]
 
