@@ -1,0 +1,12 @@
+{
+    "Lua.diagnostics.globals": [
+        "graphics",
+        "audio",
+        "rgba",
+        "runtime",
+        "input",
+        "filesystem",
+        "free",
+        "window"
+    ]
+}

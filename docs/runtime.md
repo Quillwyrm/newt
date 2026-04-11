@@ -2,7 +2,7 @@
 
 The lifecycle hooks for the application. The Lua script must assign functions to these slots to handle initialization, logic updates, and rendering. All hooks are expected under the global `runtime` module.
 
-## Callback Functions
+## Callback Function
 * [`init`](#runtimeinit)
 * [`update`](#runtimeupdate)
 * [`draw`](#runtimedraw)
