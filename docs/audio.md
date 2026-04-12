@@ -1,10 +1,7 @@
 # audio
 
-The Luagame audio API is a real-time mixing engine built on an 8-bus architecture. It supports 3D spatialization, audio streaming for long-form assets, and per-bus DSP effects.
-
-## System Overview
-- **Mixing Buses**: The engine provides 8 buses (0-7). Bus 0 is the **Master Bus** and outputs directly to the hardware. Buses 1-7 are sub-buses that route into Bus 0 and feature a persistent signal chain: Group -> Delay -> HPF -> LPF.
-- **Handle Safety**: Playback functions return an integer handle. These handles are unique identifiers; if a sound finishes or its slot is reclaimed by the engine, the handle becomes invalid, ensuring that commands sent to "dead" voices fail safely without affecting new sounds.
+The `audio` module provides sound loading, playback, spatialization, and bus mixing across 8 buses.  
+Bus `0` is the master bus. Playback functions return integer voice handles. Query behavior for freed sounds and dead voice handles is documented below.
 
 ## Functions
 
@@ -18,7 +15,7 @@ The Luagame audio API is a real-time mixing engine built on an 8-bus architectur
 * [`set_default_falloff`](#set_default_falloff)
 * [`set_default_falloff_mode`](#set_default_falloff_mode)
 
-**Asset Management**
+**Sounds**
 * [`load_sound`](#load_sound)
 * [`get_sound_info`](#get_sound_info)
 
@@ -35,6 +32,8 @@ The Luagame audio API is a real-time mixing engine built on an 8-bus architectur
 * [`fade_voice`](#fade_voice)
 * [`get_voice_info`](#get_voice_info)
 * [`is_voice_playing`](#is_voice_playing)
+
+**Voice Spatialization**
 * [`set_voice_position`](#set_voice_position)
 * [`set_voice_velocity`](#set_voice_velocity)
 * [`set_voice_falloff`](#set_voice_falloff)
@@ -48,712 +47,531 @@ The Luagame audio API is a real-time mixing engine built on an 8-bus architectur
 * [`stop_voice`](#stop_voice)
 * [`stop_all_voices`](#stop_all_voices)
 
-**Bus Mixing**
+**Bus Control**
 * [`set_bus_volume`](#set_bus_volume)
 * [`set_bus_pitch`](#set_bus_pitch)
 * [`set_bus_pan`](#set_bus_pan)
 * [`fade_bus`](#fade_bus)
+* [`pause_bus`](#pause_bus)
+* [`resume_bus`](#resume_bus)
+* [`stop_bus`](#stop_bus)
+
+**Bus Effects**
 * [`set_bus_lpf`](#set_bus_lpf)
 * [`set_bus_hpf`](#set_bus_hpf)
 * [`set_bus_delay_mix`](#set_bus_delay_mix)
 * [`set_bus_delay_feedback`](#set_bus_delay_feedback)
-* [`pause_bus`](#pause_bus)
-* [`resume_bus`](#resume_bus)
-* [`stop_bus`](#stop_bus)
 
 ## Engine Configuration
 
 ### config_bus_delay_times
 
-Configures the buffer length (echo time) for sub-bus delay nodes. This must be called **before** the engine initializes.
-
-#### Usage
+Configures delay buffer lengths for buses `1` through `7`. Call this before engine initialization. Only entries for buses `1` through `7` are read.
 
 ```lua
 audio.config_bus_delay_times(config)
 ```
 
-#### Arguments
+#### Error Cases
 
-* `table: config` - A table mapping bus indices (1-7) to delay times in seconds (e.g., `{ [1] = 0.5, [4] = 2.0 }`).
-
----
+- Must be called before engine initialization.
+- `config` must be a table.
+- Values for buses `1` through `7` must be numbers or `nil`.
 
 ## Listener & Defaults
 
 ### set_listener_position
 
-Sets the world-space position of the virtual listener.
-
-#### Usage
+Sets the world-space position of the listener.
 
 ```lua
 audio.set_listener_position(x, y)
 ```
 
-#### Arguments
-
-* `number: x` - X coordinate.
-* `number: y` - Y coordinate.
-
 ---
 
 ### set_listener_rotation
 
-Sets the orientation of the listener in degrees.
-
-#### Usage
+Sets the listener rotation in degrees.
 
 ```lua
 audio.set_listener_rotation(degrees)
 ```
 
-#### Arguments
-
-* `number: degrees` - Rotation angle.
-
 ---
 
 ### set_listener_velocity
 
-Sets the velocity of the listener for Doppler effect calculations.
-
-#### Usage
+Sets the listener velocity for Doppler calculations.
 
 ```lua
 audio.set_listener_velocity(vx, vy)
 ```
 
-#### Arguments
-
-* `number: vx` - Velocity on the X axis.
-* `number: vy` - Velocity on the Y axis.
-
 ---
 
 ### set_default_falloff
 
-Sets the global default inner and outer radii for all future 3D playback calls.
-
-#### Usage
+Sets the default falloff distances used by future `audio.play_at()` calls.
 
 ```lua
-audio.set_default_falloff(min_px, max_px?)
+audio.set_default_falloff(min_px)
+audio.set_default_falloff(min_px, max_px)
 ```
-
-#### Arguments
-
-* `number: min_px` - The distance at which volume begins to attenuate.
-* `number: max_px` (Optional) - The distance at which the sound becomes silent.
 
 ---
 
 ### set_default_falloff_mode
 
-Sets the default attenuation curve for future 3D playback calls.
-
-#### Usage
+Sets the default falloff mode used by future `audio.play_at()` calls.
 
 ```lua
 audio.set_default_falloff_mode(mode)
 ```
 
-#### Arguments
+#### Error Cases
 
-* `string: mode` - The curve type: `"none"`, `"inverse"`, `"linear"`, or `"exponential"`.
+- `mode` must be `"none"`, `"inverse"`, `"linear"`, or `"exponential"`.
 
----
-
-## Asset Management
+## Sounds
 
 ### load_sound
 
-Loads an audio file into memory as a reusable asset.
-
-#### Usage
+Loads a sound asset from a file. `mode` may be `"static"` or `"stream"`. Static sounds are decoded into memory. Streamed sounds are decoded on demand.
 
 ```lua
-sound = audio.load_sound(filepath, mode?)
+audio.load_sound(filepath) -> sound | nil, err
+audio.load_sound(filepath, mode) -> sound | nil, err
 ```
-
-#### Arguments
-
-* `string: filepath` - Path to the audio file.
-* `string: mode` (Optional) - `"static"` (fully decoded into RAM, default) or `"stream"` (decoded on the fly).
 
 #### Returns
 
-* `userdata: sound` - A handle to the sound asset.
+`sound` is a `Sound` userdata.
+
+#### Error Cases
+
+- `mode` must be `"static"` or `"stream"`.
 
 ---
 
 ### get_sound_info
 
-Returns metadata for a loaded sound asset.
-
-#### Usage
+Returns metadata for a sound asset.
 
 ```lua
-path, duration, is_stream = audio.get_sound_info(sound)
+audio.get_sound_info(sound) -> path, duration, is_stream
+audio.get_sound_info(sound) -> nil, nil, nil
 ```
-
-#### Arguments
-
-* `userdata: sound` - The sound asset to inspect.
 
 #### Returns
 
-* `string: path` - The source file path.
-* `number: duration` - Length in seconds (0.0 for streams).
-* `boolean: is_stream` - `true` if the asset is streaming.
+Returns `path`, `duration`, and `is_stream` for a live sound.  
+Returns `nil, nil, nil` if `sound` has been freed.
 
----
+`duration` is in seconds. Streamed sounds return `0.0` for duration.
 
 ## Playback
 
 ### play
 
-Starts 2D (non-spatialized) playback of a sound.
-
-#### Usage
+Starts 2D playback of a sound on a bus.
 
 ```lua
-handle = audio.play(sound, bus, vol?, pitch?, pan?)
+audio.play(sound, bus) -> handle | nil, err
+audio.play(sound, bus, volume) -> handle | nil, err
+audio.play(sound, bus, volume, pitch) -> handle | nil, err
+audio.play(sound, bus, volume, pitch, pan) -> handle | nil, err
 ```
-
-#### Arguments
-
-* `userdata: sound` - The sound asset to play.
-* `number: bus` - The target bus index (0-7).
-* `number: vol` (Optional) - Initial volume (default 1.0).
-* `number: pitch` (Optional) - Initial pitch (default 1.0).
-* `number: pan` (Optional) - Initial stereo pan (default 0.0).
 
 #### Returns
 
-* `number: handle` - A unique identifier for the playing voice.
+Returns a voice handle on success, or `nil, err` on failure.
+
+#### Error Cases
+
+- `bus` must be between `0` and `7`.
 
 ---
 
 ### play_at
 
-Starts 3D (spatialized) playback of a sound at a world position.
-
-#### Usage
+Starts spatialized playback of a sound at a world position on a bus. This uses the current default falloff settings.
 
 ```lua
-handle = audio.play_at(sound, bus, x, y, vol?, pitch?)
+audio.play_at(sound, bus, x, y) -> handle | nil, err
+audio.play_at(sound, bus, x, y, volume) -> handle | nil, err
+audio.play_at(sound, bus, x, y, volume, pitch) -> handle | nil, err
 ```
-
-#### Arguments
-
-* `userdata: sound` - The sound asset to play.
-* `number: bus` - The target bus index (0-7).
-* `number: x`, `number: y` - World coordinates.
-* `number: vol` (Optional) - Initial volume.
-* `number: pitch` (Optional) - Initial pitch.
 
 #### Returns
 
-* `number: handle` - A unique identifier for the playing voice.
+Returns a voice handle on success, or `nil, err` on failure.
 
----
+#### Error Cases
+
+- `bus` must be between `0` and `7`.
 
 ## Voice Control
 
+Unless noted otherwise, functions in this section ignore dead voice handles.
+
 ### set_voice_volume
 
-Sets the volume of an active voice.
-
-#### Usage
+Sets the volume of a voice.
 
 ```lua
 audio.set_voice_volume(handle, volume)
 ```
 
-#### Arguments
-
-* `number: handle` - The voice identifier.
-* `number: volume` - New volume level.
-
 ---
 
 ### set_voice_pitch
 
-Sets the playback speed of an active voice.
-
-#### Usage
+Sets the pitch of a voice.
 
 ```lua
 audio.set_voice_pitch(handle, pitch)
 ```
 
-#### Arguments
-
-* `number: handle` - The voice identifier.
-* `number: pitch` - New pitch multiplier.
-
 ---
 
 ### set_voice_pan
 
-Sets the stereo panning for an active voice. Calling this disables spatialization for the voice.
-
-#### Usage
+Sets the stereo pan of a voice. This disables spatialization for that voice.
 
 ```lua
 audio.set_voice_pan(handle, pan)
 ```
 
-#### Arguments
-
-* `number: handle` - The voice identifier.
-* `number: pan` - Panning value (-1.0 to 1.0).
-
 ---
 
 ### set_voice_looping
 
-Enables or disables looping for an active voice.
-
-#### Usage
+Enables or disables looping for a voice.
 
 ```lua
 audio.set_voice_looping(handle, is_looping)
 ```
 
-#### Arguments
-
-* `number: handle` - The voice identifier.
-* `boolean: is_looping` - `true` to loop.
-
 ---
 
 ### seek_voice
 
-Seeks to a specific position within a voice's audio data.
-
-#### Usage
+Seeks within a voice. Negative offsets are clamped to `0`.
 
 ```lua
-audio.seek_voice(handle, offset, unit?)
+audio.seek_voice(handle, offset)
+audio.seek_voice(handle, offset, unit)
 ```
 
-#### Arguments
+#### Error Cases
 
-* `number: handle` - The voice identifier.
-* `number: offset` - The target position.
-* `string: unit` (Optional) - `"seconds"` (default) or `"samples"`.
+- `unit` must be `"seconds"` or `"samples"`.
 
 ---
 
 ### fade_voice
 
-Smoothly transitions a voice's volume over a duration.
-
-#### Usage
+Fades a voice to a target volume over a duration in seconds.
 
 ```lua
 audio.fade_voice(handle, target_volume, duration)
 ```
 
-#### Arguments
-
-* `number: handle` - The voice identifier.
-* `number: target_volume` - Destination volume level.
-* `number: duration` - Time in seconds.
-
 ---
 
 ### get_voice_info
 
-Returns the current playback state of a voice.
-
-#### Usage
+Returns the current playback position and total duration of a voice.
 
 ```lua
-time, duration = audio.get_voice_info(handle)
+audio.get_voice_info(handle) -> time, duration
+audio.get_voice_info(handle) -> nil, nil
 ```
-
-#### Arguments
-
-* `number: handle` - The voice identifier.
 
 #### Returns
 
-* `number: time` - Current playback position in seconds.
-* `number: duration` - Total length of the sound in seconds.
-* On failure (dead voice): `nil, nil`
+Returns `time` and `duration` in seconds for a live voice.  
+Returns `nil, nil` for a dead voice handle.
 
 ---
 
 ### is_voice_playing
 
-Checks if a voice is currently active and not paused.
-
-#### Usage
+Returns whether a voice is currently playing. Paused, finished, or dead voices return `false`.
 
 ```lua
-playing = audio.is_voice_playing(handle)
+audio.is_voice_playing(handle) -> bool
 ```
 
-#### Arguments
+## Voice Spatialization
 
-* `number: handle` - The voice identifier.
-
-#### Returns
-
-* `boolean: playing` - `true` if active.
-
----
+Unless noted otherwise, functions in this section ignore dead voice handles.
 
 ### set_voice_position
 
-Sets the world-space position of an active voice and enables spatialization.
-
-#### Usage
+Sets the world-space position of a voice. This enables spatialization for that voice.
 
 ```lua
 audio.set_voice_position(handle, x, y)
 ```
 
-#### Arguments
-
-* `number: handle` - The voice identifier.
-* `number: x`, `number: y` - World coordinates.
-
 ---
 
 ### set_voice_velocity
 
-Sets the velocity of a voice for Doppler effect calculations.
-
-#### Usage
+Sets the velocity of a voice for Doppler calculations.
 
 ```lua
 audio.set_voice_velocity(handle, vx, vy)
 ```
 
-#### Arguments
-
-* `number: handle` - The voice identifier.
-* `number: vx`, `number: vy` - Velocity components.
-
 ---
 
 ### set_voice_falloff
 
-Sets the attenuation radii for a specific voice.
-
-#### Usage
+Sets the falloff distances for a voice.
 
 ```lua
-audio.set_voice_falloff(handle, min_px, max_px?)
+audio.set_voice_falloff(handle, min_px)
+audio.set_voice_falloff(handle, min_px, max_px)
 ```
-
-#### Arguments
-
-* `number: handle` - The voice identifier.
-* `number: min_px` - Inner radius.
-* `number: max_px` (Optional) - Outer radius.
 
 ---
 
 ### set_voice_rolloff
 
-Sets the rolloff factor (intensity of the falloff) for a specific voice.
-
-#### Usage
+Sets the rolloff factor for a voice.
 
 ```lua
 audio.set_voice_rolloff(handle, factor)
 ```
 
-#### Arguments
-
-* `number: handle` - The voice identifier.
-* `number: factor` - Rolloff multiplier.
-
 ---
 
 ### set_voice_falloff_mode
 
-Sets the attenuation curve for a specific voice.
-
-#### Usage
+Sets the falloff mode for a voice.
 
 ```lua
 audio.set_voice_falloff_mode(handle, mode)
 ```
 
-#### Arguments
+#### Error Cases
 
-* `number: handle` - The voice identifier.
-* `string: mode` - `"none"`, `"inverse"`, `"linear"`, or `"exponential"`.
+- `mode` must be `"none"`, `"inverse"`, `"linear"`, or `"exponential"`.
 
 ---
 
 ### set_voice_pan_mode
 
-Sets the panning calculation mode for a voice.
-
-#### Usage
+Sets the pan mode for a voice.
 
 ```lua
 audio.set_voice_pan_mode(handle, mode)
 ```
 
-#### Arguments
+#### Error Cases
 
-* `number: handle` - The voice identifier.
-* `string: mode` - `"balance"` (default) or `"pan"`.
-
----
+- `mode` must be `"balance"` or `"pan"`.
 
 ## Voice Lifecycle
 
+These functions ignore dead voice handles.
+
 ### pause_voice
 
-Pauses playback of a voice.
-
-#### Usage
+Pauses a voice.
 
 ```lua
 audio.pause_voice(handle)
 ```
 
-#### Arguments
-
-* `number: handle` - The voice identifier.
-
 ---
 
 ### resume_voice
 
-Resumes playback of a paused voice.
-
-#### Usage
+Resumes a paused voice.
 
 ```lua
 audio.resume_voice(handle)
 ```
 
-#### Arguments
-
-* `number: handle` - The voice identifier.
-
 ---
 
 ### stop_voice
 
-Immediately halts a voice and reclaims its slot.
-
-#### Usage
+Stops a voice and releases its slot.
 
 ```lua
 audio.stop_voice(handle)
 ```
 
-#### Arguments
-
-* `number: handle` - The voice identifier.
-
 ---
 
 ### stop_all_voices
 
-Immediately halts and destroys all active voices across the entire engine.
-
-#### Usage
+Stops all active voices and releases their slots.
 
 ```lua
 audio.stop_all_voices()
 ```
 
----
+## Bus Control
 
-## Bus Mixing
+These functions apply to buses `0` through `7`. Bus `0` is the master bus.
 
 ### set_bus_volume
 
-Sets the volume for an entire mixing bus.
-
-#### Usage
+Sets the volume of a bus.
 
 ```lua
 audio.set_bus_volume(bus, volume)
 ```
 
-#### Arguments
+#### Error Cases
 
-* `number: bus` - Bus index (0-7).
-* `number: volume` - New volume level.
+- `bus` must be between `0` and `7`.
 
 ---
 
 ### set_bus_pitch
 
-Sets the playback speed for an entire mixing bus.
-
-#### Usage
+Sets the pitch of a bus.
 
 ```lua
 audio.set_bus_pitch(bus, pitch)
 ```
 
-#### Arguments
+#### Error Cases
 
-* `number: bus` - Bus index (0-7).
-* `number: pitch` - New pitch multiplier.
+- `bus` must be between `0` and `7`.
 
 ---
 
 ### set_bus_pan
 
-Sets the stereo panning for an entire mixing bus.
-
-#### Usage
+Sets the stereo pan of a bus.
 
 ```lua
 audio.set_bus_pan(bus, pan)
 ```
 
-#### Arguments
+#### Error Cases
 
-* `number: bus` - Bus index (0-7).
-* `number: pan` - Panning value (-1.0 to 1.0).
+- `bus` must be between `0` and `7`.
 
 ---
 
 ### fade_bus
 
-Smoothly transitions a bus's volume over a duration.
-
-#### Usage
+Fades a bus to a target volume over a duration in seconds.
 
 ```lua
 audio.fade_bus(bus, target_volume, duration)
 ```
 
-#### Arguments
+#### Error Cases
 
-* `number: bus` - Bus index (0-7).
-* `number: target_volume` - Destination volume.
-* `number: duration` - Time in seconds.
-
----
-
-### set_bus_lpf
-
-Sets the Low-Pass Filter cutoff for a sub-bus (1-7).
-
-#### Usage
-
-```lua
-audio.set_bus_lpf(bus, hz)
-```
-
-#### Arguments
-
-* `number: bus` - Bus index (1-7).
-* `number: hz` - Frequency cutoff (Range: 10-22000).
-
----
-
-### set_bus_hpf
-
-Sets the High-Pass Filter cutoff for a sub-bus (1-7).
-
-#### Usage
-
-```lua
-audio.set_bus_hpf(bus, hz)
-```
-
-#### Arguments
-
-* `number: bus` - Bus index (1-7).
-* `number: hz` - Frequency cutoff (Range: 10-22000).
-
----
-
-### set_bus_delay_mix
-
-Sets the wet/dry balance for the delay effect on a sub-bus (1-7).
-
-#### Usage
-
-```lua
-audio.set_bus_delay_mix(bus, wet, dry?)
-```
-
-#### Arguments
-
-* `number: bus` - Bus index (1-7).
-* `number: wet` - Level of processed (echo) signal.
-* `number: dry` (Optional) - Level of original signal (default 1.0).
-
----
-
-### set_bus_delay_feedback
-
-Sets the feedback (echo tail intensity) for the delay effect on a sub-bus (1-7).
-
-#### Usage
-
-```lua
-audio.set_bus_delay_feedback(bus, amount)
-```
-
-#### Arguments
-
-* `number: bus` - Bus index (1-7).
-* `number: amount` - Feedback level (Range: 0.0 to 1.0).
+- `bus` must be between `0` and `7`.
 
 ---
 
 ### pause_bus
 
-Pauses all audio output from a bus.
-
-#### Usage
+Pauses a bus.
 
 ```lua
 audio.pause_bus(bus)
 ```
 
-#### Arguments
+#### Error Cases
 
-* `number: bus` - Bus index (0-7).
+- `bus` must be between `0` and `7`.
 
 ---
 
 ### resume_bus
 
-Resumes audio output for a paused bus.
-
-#### Usage
+Resumes a paused bus.
 
 ```lua
 audio.resume_bus(bus)
 ```
 
-#### Arguments
+#### Error Cases
 
-* `number: bus` - Bus index (0-7).
+- `bus` must be between `0` and `7`.
 
 ---
 
 ### stop_bus
 
-Halts a bus and immediately destroys all voices assigned to it.
-
-#### Usage
+Stops a bus and destroys all active voices assigned to it.
 
 ```lua
 audio.stop_bus(bus)
 ```
 
-#### Arguments
+#### Error Cases
 
-* `number: bus` - Bus index (0-7).
+- `bus` must be between `0` and `7`.
+
+## Bus Effects
+
+These functions apply only to buses `1` through `7`.
+
+### set_bus_lpf
+
+Sets the low-pass filter cutoff for a bus. Cutoff values are clamped to `10` through `22000`.
+
+```lua
+audio.set_bus_lpf(bus, hz)
+```
+
+#### Error Cases
+
+- `bus` must be between `1` and `7`.
+
+---
+
+### set_bus_hpf
+
+Sets the high-pass filter cutoff for a bus. Cutoff values are clamped to `10` through `22000`.
+
+```lua
+audio.set_bus_hpf(bus, hz)
+```
+
+#### Error Cases
+
+- `bus` must be between `1` and `7`.
+
+---
+
+### set_bus_delay_mix
+
+Sets the delay wet and dry mix for a bus. `wet` and `dry` are clamped to `0.0` through `1.0`.
+
+```lua
+audio.set_bus_delay_mix(bus, wet)
+audio.set_bus_delay_mix(bus, wet, dry)
+```
+
+#### Error Cases
+
+- `bus` must be between `1` and `7`.
+
+---
+
+### set_bus_delay_feedback
+
+Sets the delay feedback amount for a bus. Values are clamped to `0.0` through `1.0`.
+
+```lua
+audio.set_bus_delay_feedback(bus, amount)
+```
+
+#### Error Cases
+
+- `bus` must be between `1` and `7`.
