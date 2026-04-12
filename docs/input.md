@@ -1,152 +1,144 @@
 # input
 
-The Luagame input API handles keyboard and mouse events. It provides polling for live state, frame-accurate edge detection (pressed/released), and text input buffering. All functions are available under the global `input` module.
+The `input` module provides keyboard, mouse, and text input queries.  
+Unless noted otherwise, functions in this module throw on wrong arity or wrong argument types.
 
-#### Functions
-* [`down`](#inputdown)
-* [`pressed`](#inputpressed)
-* [`released`](#inputreleased)
-* [`repeated`](#inputrepeated)
-* [`get_mouse_position`](#inputget_mouse_position)
-* [`get_mouse_wheel`](#inputget_mouse_wheel)
-* [`start_text`](#inputstart_text)
-* [`stop_text`](#inputstop_text)
-* [`get_text`](#inputget_text)
+## Functions
 
-#### Valid Input Tokens
-All input functions expecting a `key` argument must use one of the following string tokens.
+**Button State**
+* [`down`](#down)
+* [`pressed`](#pressed)
+* [`released`](#released)
+* [`repeated`](#repeated)
+
+**Mouse**
+* [`get_mouse_position`](#get_mouse_position)
+* [`get_mouse_wheel`](#get_mouse_wheel)
+
+**Text Input**
+* [`start_text`](#start_text)
+* [`stop_text`](#stop_text)
+* [`get_text`](#get_text)
+
+## Input Tokens
+
+The button-state functions use string tokens for keyboard keys and mouse buttons.
+
 - **Mouse:** `"mouse1"` (left), `"mouse2"` (right), `"mouse3"` (middle)
 - **Letters:** `"a"` to `"z"`
 - **Numbers:** `"0"` to `"9"`
 - **Keypad:** `"kp0"` to `"kp9"`, `"kp."`, `"kp,"`, `"kp/"`, `"kp*"`, `"kp-"`, `"kp+"`, `"kpenter"`, `"kp="`
-- **F-Keys:** `"f1"` to `"f18"`
-- **Controls:** `"space"`, `"tab"`, `"return"`, `"backspace"`, `"escape"`, `"delete"`, `"insert"`, `"home"`, `"end"`, `"pageup"`, `"pagedown"`, `"up"`, `"down"`, `"left"`, `"right"`
+- **Function Keys:** `"f1"` to `"f18"`
+- **Controls:** `"space"`, `"tab"`, `"backspace"`, `"return"`, `"insert"`, `"delete"`, `"clear"`, `"escape"`
+- **Navigation:** `"up"`, `"down"`, `"left"`, `"right"`, `"home"`, `"end"`, `"pageup"`, `"pagedown"`
 - **Modifiers:** `"lshift"`, `"rshift"`, `"lctrl"`, `"rctrl"`, `"lalt"`, `"ralt"`, `"lsuper"`, `"rsuper"`, `"capslock"`, `"numlock"`, `"scrolllock"`, `"mode"`
-- **Symbols:** `"!"`, `"\""`, `"#"`, `"$"`, `"&"`, `"'"`, `"("`, `")"`, `*"`, `"+"`, `","`, `"-"`, `"."`, `"/"`, `":"`, `";"`, `"<"`, `"="`, `">"`, `"?"`, `"@"`, `"["`, `"\\"`, `"]"`, `"^"`, `"_"`, `"\`"`
-- **System:** `"pause"`, `"printscreen"`, `"menu"`, `"power"`, `"undo"`, `"help"`, `"sysreq"`, `"application"`, `"currencyunit"`
+- **System:** `"pause"`, `"help"`, `"printscreen"`, `"sysreq"`, `"menu"`, `"application"`, `"power"`, `"currencyunit"`, `"undo"`
 - **App Control:** `"appsearch"`, `"apphome"`, `"appback"`, `"appforward"`, `"apprefresh"`, `"appbookmarks"`
+- **Symbols:** `"!"`, `"\""`, `"#"`, `"$"`, `"&"`, `"'"`, `"("`, `")"`, `"*"`, `"+"`, `","`, `"-"`, `"."`, `"/"`, `":"`, `";"`, `"<"`, `"="`, `">"`, `"?"`, `"@"`, `"["`, `"\\"`, `"]"`, `"^"`, `"_"`, ``"`"``
 
----
+## Button State
 
-### input.down
-Checks if a key or mouse button is currently held down.
+### down
 
-#### Usage
+Returns whether a key or mouse button is currently held down.
+
 ```lua
-is_down = input.down(key)
+input.down(name) -> bool
 ```
 
-#### Arguments
-- `string: key` - A valid key name or mouse token (e.g., `"space"`, `"mouse1"`, `"a"`).
+#### Error Cases
 
-#### Returns
-- `boolean: is_down` - `true` if the key is held.
+Throws if `name` is not a valid input token.
 
 ---
 
-### input.pressed
-Checks if a key or mouse button was pressed **this frame**.
+### pressed
 
-#### Usage
+Returns whether a key or mouse button was pressed during the current frame.
+
 ```lua
-was_pressed = input.pressed(key)
+input.pressed(name) -> bool
 ```
 
-#### Arguments
-- `string: key` - A valid key name or mouse token.
+#### Error Cases
 
-#### Returns
-- `boolean: was_pressed` - `true` if the key was pressed since the last frame.
+Throws if `name` is not a valid input token.
 
 ---
 
-### input.released
-Checks if a key or mouse button was released **this frame**.
+### released
 
-#### Usage
+Returns whether a key or mouse button was released during the current frame.
+
 ```lua
-was_released = input.released(key)
+input.released(name) -> bool
 ```
 
-#### Arguments
-- `string: key` - A valid key name or mouse token.
+#### Error Cases
 
-#### Returns
-- `boolean: was_released` - `true` if the key was released since the last frame.
+Throws if `name` is not a valid input token.
 
 ---
 
-### input.repeated
-Checks if a key generated a repeat event **this frame** (OS typematic repeat). This returns true only on the "echo" events when a key is held down, **excluding** the initial press.
+### repeated
 
-#### Usage
+Returns whether a key generated a repeat event during the current frame. This does not include the initial press.
+
 ```lua
-is_repeat = input.repeated(key)
+input.repeated(name) -> bool
 ```
 
-#### Arguments
-- `string: key` - A valid key name. **Mouse tokens are not valid.**
+#### Error Cases
 
-#### Returns
-- `boolean: is_repeat` - `true` if the key triggered a repeat event this frame.
+Throws if `name` is not a valid input token.  
+Throws if `name` is a mouse token.
 
----
+## Mouse
 
-### input.get_mouse_position
-Gets the current mouse cursor position in window coordinates.
+### get_mouse_position
 
-#### Usage
+Returns the current mouse cursor position in window coordinates.
+
 ```lua
-x, y = input.get_mouse_position()
+input.get_mouse_position() -> x, y
 ```
 
-#### Returns
-- `number: x` - The horizontal position.
-- `number: y` - The vertical position.
-
 ---
 
-### input.get_mouse_wheel
-Gets the accumulated mouse wheel scroll delta for this frame.
+### get_mouse_wheel
 
-#### Usage
+Returns the mouse wheel delta accumulated during the current frame.
+
 ```lua
-dx, dy = input.get_mouse_wheel()
+input.get_mouse_wheel() -> dx, dy
 ```
 
-#### Returns
-- `number: dx` - Horizontal scroll amount.
-- `number: dy` - Vertical scroll amount.
+## Text Input
 
----
+### start_text
 
-### input.start_text
-Enables text input events. While enabled, typing will generate characters accessible via `input.get_text()`.
+Enables text input. While enabled, text received during the current frame is available through `input.get_text()`.
 
-#### Usage
 ```lua
 input.start_text()
 ```
 
 ---
 
-### input.stop_text
-Disables text input events.
+### stop_text
 
-#### Usage
+Disables text input.
+
 ```lua
 input.stop_text()
 ```
 
 ---
 
-### input.get_text
-Gets the UTF-8 text characters typed during this frame. Requires `start_text()` to be active.
+### get_text
 
-#### Usage
+Returns the UTF-8 text received during the current frame. Returns an empty string if no text was received.
+
 ```lua
-text = input.get_text()
+input.get_text() -> text
 ```
-
-#### Returns
-- `string: text` - The string of characters typed this frame (empty if none).

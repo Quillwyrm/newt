@@ -1,227 +1,233 @@
 # window
-The Luagame windowing API manages the display context, input state, and OS-level window controls. All functions are available under the global `window` module.
+
+The `window` module provides access to the main window and related OS window features.  
+Unless noted otherwise, functions in this module throw on wrong arity or wrong argument types.
 
 ## Functions
+
 **Lifecycle**
-* [`init`](#windowinit)
-* [`close`](#windowclose)
-* [`should_close`](#windowshould_close)
+* [`close`](#close)
+* [`cancel_close`](#cancel_close)
+* [`should_close`](#should_close)
 
 **Getters**
-* [`get_size`](#windowget_size)
-* [`get_position`](#windowget_position)
+* [`get_size`](#get_size)
+* [`get_position`](#get_position)
 
 **Setters**
-* [`set_title`](#windowset_title)
-* [`set_size`](#windowset_size)
-* [`set_position`](#windowset_position)
-* [`maximize`](#windowmaximize)
-* [`minimize`](#windowminimize)
+* [`set_title`](#set_title)
+* [`set_size`](#set_size)
+* [`set_position`](#set_position)
+* [`set_flags`](#set_flags)
+* [`maximize`](#maximize)
+* [`minimize`](#minimize)
 
 **Cursor & Clipboard**
-* [`set_cursor`](#windowset_cursor)
-* [`cursor_show`](#windowcursor_show)
-* [`cursor_hide`](#windowcursor_hide)
-* [`cursor_visible`](#windowcursor_visible)
-* [`get_clipboard`](#windowget_clipboard)
-* [`set_clipboard`](#windowset_clipboard)
+* [`set_cursor`](#set_cursor)
+* [`cursor_show`](#cursor_show)
+* [`cursor_hide`](#cursor_hide)
+* [`is_cursor_visible`](#is_cursor_visible)
+* [`get_clipboard`](#get_clipboard)
+* [`set_clipboard`](#set_clipboard)
+
+## Lifecycle
+These functions close the window or query close requests.
 
 ---
+### close
 
-### window.init
-Initializes the main window and renderer context.
+Closes the window.
 
-#### Usage
-```lua
-window.init(width, height, title, flags?)
-```
-
-#### Arguments
-- `number: width` - Initial window width in pixels.
-- `number: height` - Initial window height in pixels.
-- `string: title` - The window title.
-- `table: flags` (Optional) - A list of string flags: `{"fullscreen", "borderless", "resizable"}`.
-
----
-
-### window.close
-Closes the window and destroys the rendering context.
-
-#### Usage
 ```lua
 window.close()
 ```
 
 ---
+### cancel_close
 
-### window.should_close
-Checks if the user has requested the window to close (e.g., clicking the 'X' button).
+Cancels a close request.  
+Use this to keep the application running after a close request.
 
-#### Usage
 ```lua
-running = window.should_close()
+window.cancel_close()
 ```
 
-#### Returns
-- `boolean: requested` - `true` if a close event is pending.
-
 ---
+### should_close
 
-### window.get_size
-Returns the current window dimensions.
+Returns whether a close has been requested.  
+This returns `true` after the close button is pressed, or after `window.close()` is called.
 
-#### Usage
 ```lua
-w, h = window.get_size()
+window.should_close() -> bool
 ```
 
-#### Returns
-- `number: w` - Width in pixels.
-- `number: h` - Height in pixels.
+## Getters
+These functions return the current window state.
 
 ---
+### get_size
 
-### window.get_position
-Returns the window's position on the screen.
+Returns the current window size in pixels.
 
-#### Usage
 ```lua
-x, y = window.get_position()
+window.get_size() -> width, height
 ```
 
-#### Returns
-- `number: x` - X coordinate.
-- `number: y` - Y coordinate.
+---
+### get_position
+
+Returns the current window position on the desktop.
+
+```lua
+window.get_position() -> x, y
+```
+
+## Setters
+These functions change window properties such as title, size, position, and flags.
 
 ---
+### set_title
 
-### window.set_title
-Updates the window title text.
+Sets the window title.
 
-#### Usage
 ```lua
 window.set_title(text)
 ```
 
-#### Arguments
-- `string: text` - New title string.
-
 ---
+### set_size
 
-### window.set_size
-Sets the window dimensions.
+Sets the window size in pixels.
 
-#### Usage
 ```lua
-window.set_size(w, h)
+window.set_size(width, height)
 ```
 
-#### Arguments
-- `number: w`
-- `number: h`
-
 ---
+### set_position
 
-### window.set_position
-Sets the window position on the screen.
+Sets the window position on the desktop.
 
-#### Usage
 ```lua
 window.set_position(x, y)
 ```
 
-#### Arguments
-- `number: x`
-- `number: y`
+---
+### set_flags
+
+Sets the window flags.
+
+Passing no arguments or `nil` clears all optional flags.  
+`flags` is a table containing any combination of these strings:
+
+- `"fullscreen"`: switches the window to fullscreen mode.
+- `"borderless"`: removes the window border and title bar.
+- `"resizable"`: allows the window to be resized.
+
+```lua
+window.set_flags()
+window.set_flags(nil)
+window.set_flags(flags)
+```
+
+#### Error Cases
+
+- Throws if any flag string is invalid.
 
 ---
+### maximize
 
-### window.maximize
-Maximizes the window to fill the screen.
+Maximizes the window.
 
-#### Usage
 ```lua
 window.maximize()
 ```
 
 ---
+### minimize
 
-### window.minimize
-Minimizes the window to the taskbar/dock.
+Minimizes the window.
 
-#### Usage
 ```lua
 window.minimize()
 ```
 
+## Cursor & Clipboard
+These functions control the cursor and read or write clipboard text.
+
 ---
+### set_cursor
 
-### window.set_cursor
-Sets the system mouse cursor shape.
+Sets the cursor shape.  
+Supported cursor names:
 
-#### Usage
+- `"arrow"`: standard arrow cursor.
+- `"ibeam"`: text input cursor.
+- `"wait"`: busy cursor.
+- `"waitarrow"`: arrow with busy indicator.
+- `"crosshair"`: crosshair cursor.
+- `"sizenwse"`: diagonal resize cursor.
+- `"sizenesw"`: diagonal resize cursor.
+- `"sizewe"`: horizontal resize cursor.
+- `"sizens"`: vertical resize cursor.
+- `"sizeall"`: move cursor.
+- `"no"`: unavailable cursor.
+- `"hand"`: hand cursor.
+
 ```lua
 window.set_cursor(name)
 ```
 
-#### Arguments
-- `string: name` - One of: `"arrow"`, `"ibeam"`, `"wait"`, `"waitarrow"`, `"crosshair"`, `"sizenwse"`, `"sizenesw"`, `"sizewe"`, `"sizens"`, `"sizeall"`, `"no"`, `"hand"`.
+#### Error Cases
+
+- Throws if `name` is not a valid cursor name.
 
 ---
+### cursor_show
 
-### window.cursor_show
-Shows the mouse cursor.
+Shows the cursor.
 
-#### Usage
 ```lua
 window.cursor_show()
 ```
 
 ---
+### cursor_hide
 
-### window.cursor_hide
-Hides the mouse cursor.
+Hides the cursor.
 
-#### Usage
 ```lua
 window.cursor_hide()
 ```
 
 ---
+### is_cursor_visible
 
-### window.cursor_visible
-Checks if the cursor is currently visible.
+Returns whether the cursor is visible.
 
-#### Usage
 ```lua
-visible = window.cursor_visible()
+window.is_cursor_visible() -> bool
 ```
 
-#### Returns
-- `boolean: visible` - `true` if the cursor is visible.
-
 ---
+### get_clipboard
 
-### window.get_clipboard
-Gets the text currently in the OS clipboard.
+Returns the current clipboard text as a string.
 
-#### Usage
 ```lua
-text = window.get_clipboard()
+window.get_clipboard() -> text
 ```
 
-#### Returns
-- `string: text` - The clipboard content, or `nil` if empty.
-
 ---
+### set_clipboard
 
-### window.set_clipboard
-Sets the OS clipboard text.
+Sets the clipboard text.
 
-#### Usage
 ```lua
 window.set_clipboard(text)
 ```
 
-#### Arguments
-- `string: text` - The string to copy to the clipboard.
+#### Error Cases
+
+- Throws if `text` contains a NUL byte.

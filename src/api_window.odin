@@ -115,6 +115,12 @@ lua_window_close :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
+// window.cancel_close()
+lua_window_cancel_close :: proc "c" (L: ^lua.State) -> c.int {
+    Quit_Requested = false
+    return 0
+}
+
 // window.should_close() -> bool
 lua_window_should_close :: proc "c" (L: ^lua.State) -> c.int {
     lua.pushboolean(L, cast(b32)Quit_Requested)
@@ -364,6 +370,7 @@ register_window_api :: proc() {
     // Window control
     lua_bind_function(lua_window_set_flags, "set_flags")
     lua_bind_function(lua_window_close, "close")
+    lua_bind_function(lua_window_cancel_close, "cancel_close")
     lua_bind_function(lua_window_should_close, "should_close")
 
     // Getters

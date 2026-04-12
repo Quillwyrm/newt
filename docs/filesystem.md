@@ -1,250 +1,164 @@
 # filesystem
 
-The Luagame filesystem API provides access to the process environment, directory management, and basic file IO. All functions are available under the global `filesystem` module.
+The `filesystem` module provides access to process paths, directory queries, and basic file operations.  
+Unless noted otherwise, functions in this module throw on wrong arity or wrong argument types.
 
 ## Functions
 
-**Roots / Environment**
+**Environment**
+* [`get_resource_directory`](#get_resource_directory)
+* [`get_working_directory`](#get_working_directory)
+* [`set_working_directory`](#set_working_directory)
+* [`get_args`](#get_args)
 
-* [`get_resource_dir`](#filesystemget_resource_dir)
-* [`get_working_dir`](#filesystemget_working_dir)
-* [`set_working_dir`](#filesystemset_working_dir)
-* [`get_args`](#filesystemget_args)
+**Queries**
+* [`list_directory`](#list_directory)
+* [`get_path_info`](#get_path_info)
 
-**Directory Management**
+**File I/O**
+* [`read_file`](#read_file)
+* [`write_file`](#write_file)
 
-* [`list_dir`](#filesystemlist_dir)
-* [`info`](#filesysteminfo)
-* [`mkdir`](#filesystemmkdir)
+**Path Operations**
+* [`make_directory`](#make_directory)
+* [`rename`](#rename)
+* [`remove`](#remove)
 
-**File Operations**
+## Environment
 
-* [`read_file`](#filesystemread_file)
-* [`write_file`](#filesystemwrite_file)
-* [`rename`](#filesystemrename)
-* [`remove`](#filesystemremove)
+### get_resource_directory
+
+Returns the absolute directory containing the Luagame executable.
+
+```lua
+filesystem.get_resource_directory() -> path | nil, err
+```
 
 ---
 
-### filesystem.get_resource_dir
+### get_working_directory
 
-Returns the absolute directory containing the Luagame executable. Use this to locate bundled assets like scripts and fonts relative to the binary.
-
-#### Usage
+Returns the current working directory. Relative paths in other filesystem calls are resolved from this location.
 
 ```lua
-path, err = filesystem.get_resource_dir()
+filesystem.get_working_directory() -> path | nil, err
+```
+
+---
+
+### set_working_directory
+
+Sets the current working directory for the process.
+
+```lua
+filesystem.set_working_directory(path) -> true | false, err
+```
+
+---
+
+### get_args
+
+Returns the command-line arguments passed to the program, excluding the executable path.
+
+```lua
+filesystem.get_args() -> args
 ```
 
 #### Returns
 
-* `string: path` - Absolute directory of the executable.
-* On failure: `nil, string: err`
+`args` is an array of strings.
 
----
+## Queries
 
-### filesystem.get_working_dir
+### list_directory
 
-Returns the current working directory (CWD) of the process. Relative paths in other filesystem calls are resolved from this location.
-
-#### Usage
+Lists the entries in a directory.
 
 ```lua
-path, err = filesystem.get_working_dir()
+filesystem.list_directory(path) -> entries | nil, err
 ```
 
 #### Returns
 
-* `string: path` - The absolute CWD.
-* On failure: `nil, string: err`
-
----
-
-### filesystem.set_working_dir
-
-Sets the current working directory (CWD) for the process. This is a global side-effect affecting how the OS resolves relative paths.
-
-#### Usage
+`entries` is an array of tables with this shape:
 
 ```lua
-ok, err = filesystem.set_working_dir(path)
+{
+    name = string,
+    kind = "file" | "directory" | "other",
+}
 ```
 
-#### Arguments
-
-* `string: path` - The new directory path to set.
-
-#### Returns
-
-* `boolean: ok` - `true` on success.
-* On failure: `false, string: err`
-
 ---
 
-### filesystem.get_args
+### get_path_info
 
-Returns the command-line arguments passed to the program. This list excludes the executable path (`argv[0]`), providing only user-supplied arguments.
-
-#### Usage
+Returns metadata for a path.
 
 ```lua
-args = filesystem.get_args()
+filesystem.get_path_info(path) -> info | nil, err
 ```
 
 #### Returns
 
-* `table: args` - An array of strings.
-
----
-
-### filesystem.list_dir
-
-Lists the entries within a specified directory.
-
-#### Usage
+`info` has this shape:
 
 ```lua
-entries, err = filesystem.list_dir(path)
+{
+    kind = "file" | "directory" | "other",
+    size = number,
+    modified_time = number,
+}
 ```
 
-#### Arguments
+`modified_time` is a Unix timestamp in seconds.
 
-* `string: path` - The directory to list.
+## File I/O
 
-#### Returns
+### read_file
 
-* `table: entries` - An array of entry tables:
-  * `string: name` - The name of the file or directory.
-  * `string: kind` - `"file"`, `"dir"`, or `"other"`.
-* On failure: `nil, string: err`
-
----
-
-### filesystem.info
-
-Returns metadata for a specific path.
-
-#### Usage
+Reads an entire file into a string.
 
 ```lua
-stats, err = filesystem.info(path)
+filesystem.read_file(path) -> data | nil, err
 ```
-
-#### Arguments
-
-* `string: path` - The path to inspect.
-
-#### Returns
-
-* `table: stats`:
-  * `string: kind` - `"file"`, `"dir"`, or `"other"`.
-  * `number: size` - Size in bytes.
-  * `number: modified_time` - Last modification as a Unix timestamp.
-* On failure: `nil, string: err`
 
 ---
 
-### filesystem.read_file
+### write_file
 
-Reads the entire contents of a file into a string.
-
-#### Usage
+Writes a string to a file. Creates the file if it does not exist and overwrites it if it does.
 
 ```lua
-data, err = filesystem.read_file(path)
+filesystem.write_file(path, data) -> true | false, err
 ```
 
-#### Arguments
+## Path Operations
 
-* `string: path` - The file to read.
+### make_directory
 
-#### Returns
-
-* `string: data` - The file contents as a raw byte string.
-* On failure: `nil, string: err`
-
----
-
-### filesystem.write_file
-
-Writes a string to a file. Creates the file if missing and overwrites/truncates it if it exists.
-
-#### Usage
+Creates a directory.
 
 ```lua
-ok, err = filesystem.write_file(path, data)
+filesystem.make_directory(path) -> true | false, err
 ```
-
-#### Arguments
-
-* `string: path` - The destination path.
-* `string: data` - The string data to write.
-
-#### Returns
-
-* `boolean: ok` - `true` on success.
-* On failure: `false, string: err`
 
 ---
 
-### filesystem.mkdir
-
-Creates a new directory.
-
-#### Usage
-
-```lua
-ok, err = filesystem.mkdir(path)
-```
-
-#### Arguments
-
-* `string: path` - The directory path to create.
-
-#### Returns
-
-* `boolean: ok` - `true` on success.
-* On failure: `false, string: err`
-
----
-
-### filesystem.rename
+### rename
 
 Renames or moves a file or directory.
 
-#### Usage
-
 ```lua
-ok, err = filesystem.rename(old_path, new_path)
+filesystem.rename(old_path, new_path) -> true | false, err
 ```
-
-#### Arguments
-
-* `string: old_path`
-* `string: new_path`
-
-#### Returns
-
-* `boolean: ok` - `true` on success.
-* On failure: `false, string: err`
 
 ---
 
-### filesystem.remove
+### remove
 
-Deletes a file or an empty directory.
-
-#### Usage
+Removes a file or an empty directory.
 
 ```lua
-ok, err = filesystem.remove(path)
+filesystem.remove(path) -> true | false, err
 ```
-
-#### Arguments
-
-* `string: path`
-
-#### Returns
-
-* `boolean: ok` - `true` on success.
-* On failure: `false, string: err`

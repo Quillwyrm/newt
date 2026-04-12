@@ -175,13 +175,10 @@ KEYS := [?]Key_Def {
 // Input State
 // ============================================================================
 
-Keyboard_State: [^]bool = nil
-Keyboard_State_Count: int = 0
-
+Key_Down: [dynamic]bool
 Key_Pressed: [dynamic]bool
 Key_Repeat: [dynamic]bool
 Key_Released: [dynamic]bool
-Key_State_Index: [dynamic]int
 
 Token_To_Index: map[string]int
 Keycode_To_Index: map[sdl.Keycode]int
@@ -227,48 +224,37 @@ mouse_down :: proc "contextless"(idx: int) -> bool {
 	return false
 }
 
+clear_key_down_state :: proc() {
+	for i in 0..<len(Key_Down) {
+		Key_Down[i] = false
+	}
+}
+
 // ============================================================================
 // Frame Lifecycle
 // ============================================================================
 
 // input_init builds token/keycode maps and precomputes indices for SDL live keyboard state.
+// input_init builds token/keycode maps and initializes input state.
 input_init :: proc() {
 	if Input_Initialized {
 		return
 	}
 
-	num_keys: c.int = 0
-	Keyboard_State = sdl.GetKeyboardState(&num_keys)
-	Keyboard_State_Count = cast(int)(num_keys)
-	if Keyboard_State == nil || Keyboard_State_Count <= 0 {
-		fatal_engine_error("input.init: SDL_GetKeyboardState failed")
-	}
-
 	n := len(KEYS)
 
+	Key_Down = make([dynamic]bool, n)
 	Key_Pressed = make([dynamic]bool, n)
 	Key_Repeat = make([dynamic]bool, n)
 	Key_Released = make([dynamic]bool, n)
-	Key_State_Index = make([dynamic]int, n)
 
 	Token_To_Index = make(map[string]int)
 	Keycode_To_Index = make(map[sdl.Keycode]int)
 
-	for idx in 0 ..< n {
+	for idx in 0..<n {
 		def := KEYS[idx]
-
 		Token_To_Index[def.token] = idx
 		Keycode_To_Index[def.key] = idx
-
-		mod: sdl.Keymod
-		sc := sdl.GetScancodeFromKey(def.key, &mod)
-		sc_i := cast(int)(sc)
-
-		if sc_i > 0 && sc_i < Keyboard_State_Count {
-			Key_State_Index[idx] = sc_i
-		} else {
-			Key_State_Index[idx] = -1
-		}
 	}
 
 	mx, my: f32
@@ -307,6 +293,7 @@ input_begin_frame :: proc() {
 }
 
 // input_handle_event updates edge flags / accumulators from one SDL event.
+// input_handle_event updates edge flags / accumulators from one SDL event.
 input_handle_event :: proc(event: ^sdl.Event) {
 	if !Input_Initialized {
 		return
@@ -315,6 +302,8 @@ input_handle_event :: proc(event: ^sdl.Event) {
 	#partial switch event.type {
 	case .KEY_DOWN:
 		if idx, ok := Keycode_To_Index[event.key.key]; ok {
+			Key_Down[idx] = true
+
 			if event.key.repeat {
 				Key_Repeat[idx] = true
 			} else {
@@ -324,6 +313,7 @@ input_handle_event :: proc(event: ^sdl.Event) {
 
 	case .KEY_UP:
 		if idx, ok := Keycode_To_Index[event.key.key]; ok {
+			Key_Down[idx] = false
 			Key_Released[idx] = true
 		}
 
@@ -366,6 +356,7 @@ input_handle_event :: proc(event: ^sdl.Event) {
 
 	case .WINDOW_FOCUS_LOST:
 		sdl.ResetKeyboard()
+		clear_key_down_state()
 	}
 }
 
@@ -388,13 +379,11 @@ input_shutdown :: proc() {
 		return
 	}
 
-	// dynamic arrays
+	delete(Key_Down); Key_Down = nil
 	delete(Key_Pressed); Key_Pressed = nil
 	delete(Key_Repeat); Key_Repeat = nil
 	delete(Key_Released); Key_Released = nil
-	delete(Key_State_Index); Key_State_Index = nil
 
-	// maps
 	if Token_To_Index != nil {
 		delete(Token_To_Index)
 		Token_To_Index = nil
@@ -403,10 +392,6 @@ input_shutdown :: proc() {
 		delete(Keycode_To_Index)
 		Keycode_To_Index = nil
 	}
-
-	// state reset (no external ownership)
-	Keyboard_State = nil
-	Keyboard_State_Count = 0
 
 	Curr_MouseButtons = {}
 	Mouse_Pressed = {}
@@ -422,7 +407,6 @@ input_shutdown :: proc() {
 
 	Input_Initialized = false
 }
-
 
 // ============================================================================
 // Lua Input Bindings
@@ -456,13 +440,7 @@ lua_input_down :: proc "c" (L: ^lua.State) -> c.int {
 		return 0
 	}
 
-	state_i := Key_State_Index[idx]
-	if state_i < 0 {
-		lua.L_error(L, "input.down: token '%.*s' not supported on this keyboard/layout", c.int(name_len), name_c)
-		return 0
-	}
-
-	lua.pushboolean(L, b32(Keyboard_State[state_i]))
+	lua.pushboolean(L, b32(Key_Down[idx]))
 	return 1
 }
 

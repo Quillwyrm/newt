@@ -14,7 +14,7 @@ import lua "luajit"
 file_type_to_kind :: proc "contextless"(ft: os.File_Type) -> string {
     switch ft {
     case .Regular:   return "file"
-    case .Directory: return "dir"
+    case .Directory: return "directory"
 
     case .Undetermined,
          .Symlink,
@@ -40,12 +40,12 @@ push_lua_error :: proc(L: ^lua.State, err: os.Error) {
 // Lua Filesystem Bindings
 // ============================================================================
 
-// get_resource_dir() -> string | (nil, err)
-lua_filesystem_get_resource_dir :: proc "c" (L: ^lua.State) -> c.int {
+// get_resource_directory() -> string | (nil, err)
+lua_filesystem_get_resource_directory :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
     if lua.gettop(L) != 0 {
-        lua.L_error(L, "filesystem.get_resource_dir: expected 0 arguments")
+        lua.L_error(L, "filesystem.get_resource_directory: expected 0 arguments")
         return 0
     }
 
@@ -60,12 +60,12 @@ lua_filesystem_get_resource_dir :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// get_working_dir() -> string | (nil, err)
-lua_filesystem_get_working_dir :: proc "c" (L: ^lua.State) -> c.int {
+// get_working_directory() -> string | (nil, err)
+lua_filesystem_get_working_directory :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
     if lua.gettop(L) != 0 {
-        lua.L_error(L, "filesystem.get_working_dir: expected 0 arguments")
+        lua.L_error(L, "filesystem.get_working_directory: expected 0 arguments")
         return 0
     }
 
@@ -80,12 +80,12 @@ lua_filesystem_get_working_dir :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// set_working_dir(path:string) -> (ok:boolean, err?:string)
-lua_filesystem_set_working_dir :: proc "c" (L: ^lua.State) -> c.int {
+// set_working_directory(path:string) -> (ok:boolean, err?:string)
+lua_filesystem_set_working_directory :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
     if lua.gettop(L) != 1 {
-        lua.L_error(L, "filesystem.set_working_dir: expected 1 argument: path")
+        lua.L_error(L, "filesystem.set_working_directory: expected 1 argument: path")
         return 0
     }
 
@@ -130,12 +130,12 @@ lua_filesystem_get_args :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// list_dir(path:string) -> { {name:string, kind:string}... } | (nil, err)
-lua_filesystem_list_dir :: proc "c" (L: ^lua.State) -> c.int {
+// list_directory(path:string) -> { {name:string, kind:string}... } | (nil, err)
+lua_filesystem_list_directory :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
     if lua.gettop(L) != 1 {
-        lua.L_error(L, "filesystem.list_dir: expected 1 argument: path")
+        lua.L_error(L, "filesystem.list_directory: expected 1 argument: path")
         return 0
     }
 
@@ -172,12 +172,12 @@ lua_filesystem_list_dir :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// info(path:string) -> {kind:string, size:number, modified_time:number} | (nil, err)
-lua_filesystem_info :: proc "c" (L: ^lua.State) -> c.int {
+// get_path_info(path:string) -> {kind:string, size:number, modified_time:number} | (nil, err)
+lua_filesystem_get_path_info :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
     if lua.gettop(L) != 1 {
-        lua.L_error(L, "filesystem.info: expected 1 argument: path")
+        lua.L_error(L, "filesystem.get_path_info: expected 1 argument: path")
         return 0
     }
 
@@ -262,12 +262,12 @@ lua_filesystem_write_file :: proc "c" (L: ^lua.State) -> c.int {
 }
 
 
-// mkdir(path:string) -> (ok:boolean, err?:string)
-lua_filesystem_mkdir :: proc "c" (L: ^lua.State) -> c.int {
+// make_directory(path:string) -> (ok:boolean, err?:string)
+lua_filesystem_make_directory :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
     if lua.gettop(L) != 1 {
-        lua.L_error(L, "filesystem.mkdir: expected 1 argument: path")
+        lua.L_error(L, "filesystem.make_directory: expected 1 argument: path")
         return 0
     }
 
@@ -343,22 +343,22 @@ lua_filesystem_remove :: proc "c" (L: ^lua.State) -> c.int {
 register_filesystem_api :: proc() {
     lua.newtable(Lua) // [filesystem]
 
-    // Paths And Process State
-    lua_bind_function(lua_filesystem_get_resource_dir, "get_resource_dir")
-    lua_bind_function(lua_filesystem_get_working_dir, "get_working_dir")
-    lua_bind_function(lua_filesystem_set_working_dir, "set_working_dir")
+    // Environment
+    lua_bind_function(lua_filesystem_get_resource_directory, "get_resource_directory")
+    lua_bind_function(lua_filesystem_get_working_directory, "get_working_directory")
+    lua_bind_function(lua_filesystem_set_working_directory, "set_working_directory")
     lua_bind_function(lua_filesystem_get_args, "get_args")
 
-    // Directory Queries
-    lua_bind_function(lua_filesystem_list_dir, "list_dir")
-    lua_bind_function(lua_filesystem_info, "info")
+    // Queries
+    lua_bind_function(lua_filesystem_list_directory, "list_directory")
+    lua_bind_function(lua_filesystem_get_path_info, "get_path_info")
 
     // File I/O
     lua_bind_function(lua_filesystem_read_file, "read_file")
     lua_bind_function(lua_filesystem_write_file, "write_file")
 
-    // Mutations
-    lua_bind_function(lua_filesystem_mkdir, "mkdir")
+    // Path Operations
+    lua_bind_function(lua_filesystem_make_directory, "make_directory")
     lua_bind_function(lua_filesystem_rename, "rename")
     lua_bind_function(lua_filesystem_remove, "remove")
 

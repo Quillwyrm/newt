@@ -1,45 +1,41 @@
 # runtime
 
-The lifecycle hooks for the application. The Lua script must assign functions to these slots to handle initialization, logic updates, and rendering. All hooks are expected under the global `runtime` module.
+The `runtime` module contains the main lifecycle callbacks for the application.  
+Define these callbacks to run code during startup, per-frame updates, and drawing.
 
-## Callback Function
-* [`init`](#runtimeinit)
-* [`update`](#runtimeupdate)
-* [`draw`](#runtimedraw)
+## Callbacks
 
----
+### init
 
-### runtime.init
+Called once when the application starts.
 
-The entry point of the application. Called exactly once when the engine starts.
-**Critical:** You must call `window.init()` inside this function. If the window and graphics context are not created here, the engine will log an error and exit immediately.
-
-#### Usage
 ```lua
 runtime.init = function()
+    -- startup code here
+end
 ```
 
 ---
 
-### runtime.update
+### update
 
-The main game loop. Called once per frame to handle logic, input processing, and state changes.
+Called once per frame before `runtime.draw`.  
+`dt` is the elapsed time since the previous frame, in seconds.
 
-#### Usage
 ```lua
 runtime.update = function(dt)
+    -- runtime logic here
+end
 ```
-
-#### Arguments
-- `number: dt` - The time elapsed since the last frame in seconds (Delta Time).
 
 ---
 
-### runtime.draw
+### draw
 
-The rendering loop. Called once per frame after `update`. All `graphics` drawing calls should happen inside this function.
+Called once per frame after `runtime.update`.
 
-#### Usage
 ```lua
 runtime.draw = function()
+    -- draw calls here
+end
 ```
