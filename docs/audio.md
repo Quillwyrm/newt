@@ -220,6 +220,8 @@ Returns a voice handle on success, or `nil, err` if playback could not start.
 
 Unless noted otherwise, functions in this section ignore dead voice handles.
 
+---
+
 ### set_voice_volume
 
 Sets the volume of a voice. Negative values are treated as `0`.
@@ -319,6 +321,8 @@ audio.is_voice_playing(handle) -> bool
 
 Unless noted otherwise, functions in this section ignore dead voice handles.
 
+---
+
 ### set_voice_position
 
 Sets the world-space position of a voice. This enables spatialization for that voice.
@@ -392,6 +396,8 @@ audio.set_voice_pan_mode(handle, mode)
 
 These functions ignore dead voice handles.
 
+---
+
 ### pause_voice
 
 Pauses a voice.
@@ -433,6 +439,8 @@ audio.stop_all_voices()
 ## Bus Control
 
 These functions apply to buses `0` through `7`. Bus `0` is the master bus.
+
+---
 
 ### set_bus_volume
 
@@ -539,6 +547,8 @@ audio.stop_bus(bus)
 ## Bus Effects
 
 These functions apply only to buses `1` through `7`.
+
+---
 
 ### set_bus_lpf
 
