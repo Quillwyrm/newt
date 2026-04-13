@@ -66,11 +66,17 @@ Bus `0` is the master bus. Playback functions return integer voice handles. Quer
 
 ### config_bus_delay_times
 
-Configures delay buffer lengths for buses `1` through `7`.  
+Configures delay buffer lengths for buses `1` through `7`. `config` is a table keyed by bus index, where each value is a delay time in seconds.  
 Call this before engine initialization. Only entries for buses `1` through `7` are read. `nil` keeps the default delay time for that bus.
 
 ```lua
 audio.config_bus_delay_times(config)
+
+-- example
+audio.config_bus_delay_times({
+    [1] = 0.5, --bus 1
+    [4] = 2.0, --bus 4
+})
 ```
 
 #### Error Cases
