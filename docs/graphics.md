@@ -127,11 +127,12 @@ Clears the active render target. This clears the screen, or the current canvas i
 graphics.clear(color?)
 ```
 
-## Images & Canvases
+## Images & Canvases  
+Images are GPU resources used for drawing. A canvas is an `Image` created with `graphics.new_canvas()` that can also be used as a render target.
 
 ### load_image
 
-Loads an image into hardware texture memory. Newly loaded images use the current default filter.
+Loads an image into GPU memory. Newly loaded images use the current default filter.
 
 ```lua
 graphics.load_image(path) -> image | nil, err
@@ -170,7 +171,7 @@ graphics.set_default_filter(mode)
 
 ### new_canvas
 
-Creates a blank hardware image that can be used as a render target. Canvases use the current default filter.
+Creates an `Image` resource that can be used as a render target. Canvases use the current default filter.
 
 ```lua
 graphics.new_canvas(width, height) -> canvas | nil, err
@@ -178,13 +179,13 @@ graphics.new_canvas(width, height) -> canvas | nil, err
 
 #### Returns
 
-`canvas` is an `Image` userdata created as a render target.
+An `Image` resource created for use as a render target.
 
 ---
 
 ### set_canvas
 
-Sets the active render target. With no arguments or `nil`, drawing resets to the screen.
+Sets the active render target. With no arguments or `nil`, drawing returns to the screen.
 
 ```lua
 graphics.set_canvas()
@@ -194,7 +195,9 @@ graphics.set_canvas(canvas)
 
 #### Error Cases
 
-- `canvas` must be an image created with `graphics.new_canvas()`.
+- `canvas` must be an `Image` resource created with `graphics.new_canvas()`.
+
+---
 
 ## Render State
 
@@ -335,7 +338,7 @@ A built-in default font is available from startup. `graphics.set_font()` and `gr
 
 ### load_font
 
-Loads a font at a fixed size.
+Loads a font at a fixed pixel size.
 
 ```lua
 graphics.load_font(path, size) -> font | nil, err
@@ -343,7 +346,7 @@ graphics.load_font(path, size) -> font | nil, err
 
 #### Returns
 
-`font` is a `Font` userdata.
+A `Font` resource.
 
 ---
 
@@ -822,14 +825,14 @@ graphics.pixelmap_get_cptr(pixelmap) -> ptr | nil
 
 #### Returns
 
-`ptr` as `lightuserdata` for a live pixelmap.  
+A `lightuserdata` pointer for a live pixelmap.  
 `nil` if `pixelmap` has been freed.
 
 ## CPU to GPU Sync
 
 ### new_image_from_pixelmap
 
-Creates a hardware image from a pixelmap. The new image uses the current default filter.
+Creates an `Image` resource from a pixelmap. The new image uses the current default filter.
 
 ```lua
 graphics.new_image_from_pixelmap(pixelmap) -> image | nil, err

@@ -4,11 +4,11 @@ These functions are global and do not require a module prefix.
 
 ### free
 
-Immediately releases an engine userdata resource instead of waiting for garbage collection. This is used for values such as `Image`, `Sound`, `Font`, or `Pixeldata`.  
+Immediately releases an engine userdata resource instead of waiting for garbage collection. This is used for values such as `Image`, `Sound`, `Font`, or `Pixelmap`.  
 Passing a non-userdata value does nothing.
 
 ```lua
-free(userdata)
+free(resource)
 ```
 
 ---
