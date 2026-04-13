@@ -37,7 +37,7 @@ Bus `0` is the master bus. Playback functions return integer voice handles. Quer
 * [`set_voice_position`](#set_voice_position)
 * [`set_voice_velocity`](#set_voice_velocity)
 * [`set_voice_falloff`](#set_voice_falloff)
-* [`set_voice_rolloff`](#set_voice_rolloff)
+* [`set_voice_falloff_intensity`](#set_voice_falloff_intensity)
 * [`set_voice_falloff_mode`](#set_voice_falloff_mode)
 * [`set_voice_pan_mode`](#set_voice_pan_mode)
 
@@ -74,8 +74,8 @@ audio.config_bus_delay_times(config)
 
 -- example
 audio.config_bus_delay_times({
-    [1] = 0.5, --bus 1
-    [4] = 2.0, --bus 4
+    [1] = 0.5, -- bus 1
+    [4] = 2.0, -- bus 4
 })
 ```
 
@@ -122,8 +122,7 @@ audio.set_listener_velocity(vx, vy)
 Sets the default falloff distances used by future `audio.play_at()` calls. Negative distances are treated as `0`. If `max_px` is provided and is less than `min_px`, it is treated as `min_px`.
 
 ```lua
-audio.set_default_falloff(min_px)
-audio.set_default_falloff(min_px, max_px)
+audio.set_default_falloff(min_px, max_px?)
 ```
 
 ---
@@ -147,13 +146,12 @@ audio.set_default_falloff_mode(mode)
 Loads a sound asset from a file. `mode` may be `"static"` or `"stream"`. Static sounds are decoded into memory. Streamed sounds are decoded on demand.
 
 ```lua
-audio.load_sound(filepath) -> sound | nil, err
-audio.load_sound(filepath, mode) -> sound | nil, err
+audio.load_sound(filepath, mode?) -> sound | nil, err
 ```
 
 #### Returns
 
-`sound` is a `Sound` userdata.
+`sound` is `Sound` type userdata.
 
 #### Error Cases
 
@@ -166,8 +164,7 @@ audio.load_sound(filepath, mode) -> sound | nil, err
 Returns metadata for a sound asset.
 
 ```lua
-audio.get_sound_info(sound) -> path, duration, is_stream
-audio.get_sound_info(sound) -> nil, nil, nil
+audio.get_sound_info(sound) -> path, duration, is_stream | nil, nil, nil
 ```
 
 #### Returns
@@ -181,14 +178,11 @@ Returns `nil, nil, nil` if `sound` has been freed.
 
 ### play
 
-Starts non-spatialized playback of a sound on a bus. `volume`, `pitch`, and `pan` set the initial state of the new voice.   
+Starts non-spatialized playback of a sound on a bus. `volume`, `pitch`, and `pan` set the initial state of the new voice.  
 Negative `volume` is treated as `0`. `pitch` must be greater than `0`. `pan` is clamped to `-1.0` through `1.0`.
 
 ```lua
-audio.play(sound, bus) -> handle | nil, err
-audio.play(sound, bus, volume) -> handle | nil, err
-audio.play(sound, bus, volume, pitch) -> handle | nil, err
-audio.play(sound, bus, volume, pitch, pan) -> handle | nil, err
+audio.play(sound, bus, volume?, pitch?, pan?) -> handle | nil, err
 ```
 
 #### Returns
@@ -204,13 +198,10 @@ Returns a voice handle on success, or `nil, err` if playback could not start.
 
 ### play_at
 
-Starts spatialized playback of a sound at a world position on a bus.  
-`volume` and `pitch` set the initial state of the new voice. Negative `volume` is treated as `0`. `pitch` must be greater than `0`. This uses the current default falloff settings.
+Starts spatialized playback of a sound at a world position on a bus. `volume` and `pitch` set the initial state of the new voice. Negative `volume` is treated as `0`. `pitch` must be greater than `0`. This uses the current default falloff settings.
 
 ```lua
-audio.play_at(sound, bus, x, y) -> handle | nil, err
-audio.play_at(sound, bus, x, y, volume) -> handle | nil, err
-audio.play_at(sound, bus, x, y, volume, pitch) -> handle | nil, err
+audio.play_at(sound, bus, x, y, volume?, pitch?) -> handle | nil, err
 ```
 
 #### Returns
@@ -225,8 +216,6 @@ Returns a voice handle on success, or `nil, err` if playback could not start.
 ## Voice Control
 
 Unless noted otherwise, functions in this section ignore dead voice handles.
-
----
 
 ### set_voice_volume
 
@@ -254,8 +243,7 @@ audio.set_voice_pitch(handle, pitch)
 
 ### set_voice_pan
 
-Sets the stereo pan of a voice. This disables spatialization for that voice.   
-`pan` is clamped to `-1.0` through `1.0`.
+Sets the stereo pan of a voice. This disables spatialization for that voice. `pan` is clamped to `-1.0` through `1.0`.
 
 ```lua
 audio.set_voice_pan(handle, pan)
@@ -278,8 +266,7 @@ audio.set_voice_looping(handle, is_looping)
 Seeks within a voice. Negative offsets are clamped to `0`.
 
 ```lua
-audio.seek_voice(handle, offset)
-audio.seek_voice(handle, offset, unit)
+audio.seek_voice(handle, offset, unit?)
 ```
 
 #### Error Cases
@@ -290,8 +277,7 @@ audio.seek_voice(handle, offset, unit)
 
 ### fade_voice
 
-Fades a voice to a target volume over a duration in seconds.  
-Negative `target_volume` is treated as `0`. Negative `duration` is treated as `0`.
+Fades a voice to a target volume over a duration in seconds. Negative `target_volume` is treated as `0`. Negative `duration` is treated as `0`.
 
 ```lua
 audio.fade_voice(handle, target_volume, duration)
@@ -304,8 +290,7 @@ audio.fade_voice(handle, target_volume, duration)
 Returns the current playback position and total duration of a voice.
 
 ```lua
-audio.get_voice_info(handle) -> time, duration
-audio.get_voice_info(handle) -> nil, nil
+audio.get_voice_info(handle) -> time, duration | nil, nil
 ```
 
 #### Returns
@@ -326,8 +311,6 @@ audio.is_voice_playing(handle) -> bool
 ## Voice Spatialization
 
 Unless noted otherwise, functions in this section ignore dead voice handles.
-
----
 
 ### set_voice_position
 
@@ -351,20 +334,17 @@ audio.set_voice_velocity(handle, vx, vy)
 
 ### set_voice_falloff
 
-Sets the falloff distances for a voice.  
-Negative distances are treated as `0`. If `max_px` is provided and is less than `min_px`, it is treated as `min_px`.
+Sets the falloff distances for a voice. Negative distances are treated as `0`. If `max_px` is provided and is less than `min_px`, it is treated as `min_px`.
 
 ```lua
-audio.set_voice_falloff(handle, min_px)
-audio.set_voice_falloff(handle, min_px, max_px)
+audio.set_voice_falloff(handle, min_px, max_px?)
 ```
 
 ---
 
 ### set_voice_falloff_intensity
 
-Sets the falloff intensity for a voice.  
-Negative values are treated as `0`.
+Sets the falloff intensity for a voice. Negative values are treated as `0`.
 
 ```lua
 audio.set_voice_falloff_intensity(handle, factor)
@@ -401,8 +381,6 @@ audio.set_voice_pan_mode(handle, mode)
 ## Voice Lifecycle
 
 These functions ignore dead voice handles.
-
----
 
 ### pause_voice
 
@@ -446,12 +424,9 @@ audio.stop_all_voices()
 
 These functions apply to buses `0` through `7`. Bus `0` is the master bus.
 
----
-
 ### set_bus_volume
 
-Sets the volume of a bus.  
-Negative values are treated as `0`.
+Sets the volume of a bus. Negative values are treated as `0`.
 
 ```lua
 audio.set_bus_volume(bus, volume)
@@ -480,8 +455,7 @@ audio.set_bus_pitch(bus, pitch)
 
 ### set_bus_pan
 
-Sets the stereo pan of a bus.  
-`pan` is clamped to `-1.0` through `1.0`.
+Sets the stereo pan of a bus. `pan` is clamped to `-1.0` through `1.0`.
 
 ```lua
 audio.set_bus_pan(bus, pan)
@@ -491,14 +465,11 @@ audio.set_bus_pan(bus, pan)
 
 - `bus` must be between `0` and `7`.
 
-
-
 ---
 
 ### fade_bus
 
-Fades a bus to a target volume over a duration in seconds.  
-Negative `target_volume` is treated as `0`. Negative `duration` is treated as `0`.
+Fades a bus to a target volume over a duration in seconds. Negative `target_volume` is treated as `0`. Negative `duration` is treated as `0`.
 
 ```lua
 audio.fade_bus(bus, target_volume, duration)
@@ -554,8 +525,6 @@ audio.stop_bus(bus)
 
 These functions apply only to buses `1` through `7`.
 
----
-
 ### set_bus_lpf
 
 Sets the low-pass filter cutoff for a bus. Cutoff values are clamped to `10` through `22000`.
@@ -589,8 +558,7 @@ audio.set_bus_hpf(bus, hz)
 Sets the delay wet and dry mix for a bus. `wet` and `dry` are clamped to `0.0` through `1.0`.
 
 ```lua
-audio.set_bus_delay_mix(bus, wet)
-audio.set_bus_delay_mix(bus, wet, dry)
+audio.set_bus_delay_mix(bus, wet, dry?)
 ```
 
 #### Error Cases
