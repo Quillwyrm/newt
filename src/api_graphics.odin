@@ -2404,7 +2404,7 @@ lua_graphics_new_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
         if err != nil {
             lua.pushfstring(L, "graphics.new_image_from_pixelmap: failed to create texture from pixelmap: %s", err)
         } else {
-            lua.pushstring(L,"graphics.new_image_from_pixelmap: failed to create texture from pixelmap")
+            lua.pushstring(L, "graphics.new_image_from_pixelmap: failed to create texture from pixelmap")
         }
         return 2
     }
@@ -2517,7 +2517,7 @@ lua_graphics_pixelmap_clone :: proc "c" (L: ^lua.State) -> c.int {
 
         err := sdl.GetError()
         if err != nil {
-            lua.pushfstring(L,"graphics.pixelmap_clone: failed to duplicate pixelmap surface: %s", err,)
+            lua.pushfstring(L, "graphics.pixelmap_clone: failed to duplicate pixelmap surface: %s", err,)
         } else {
             lua.pushstring(L, "graphics.pixelmap_clone: failed to duplicate pixelmap surface")
         }

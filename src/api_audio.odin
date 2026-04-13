@@ -9,77 +9,6 @@ import lua "luajit"
 import ma "vendor:miniaudio"
 import sdl "vendor:sdl3"
 
-// # Audio API - audio.function()
-//
-// ### Engine Configuration (Call BEFORE Engine Init)
-// - `.config_bus_delay_times(table)` — configure per-bus delay times before audio init.
-//   Example: `{ [1] = 0.5, [4] = 2.0 }`
-//   Only buses `1..MAX_AUDIO_BUSES-1` are configurable here. Bus `0` is the master bus.
-//
-// ### Global Listener & Defaults
-// - `.set_listener_position(x, y)`
-// - `.set_listener_rotation(degrees)`
-// - `.set_listener_velocity(vx, vy)`
-// - `.set_default_falloff(min_px, max_px?)`
-// - `.set_default_falloff_mode(mode)` — modes: `"none"`, `"inverse"`, `"linear"`, `"exponential"`
-//
-// ### Asset Management
-// - `.load_sound(filepath, mode?) -> Sound | nil, err`
-//   `mode` must be `"static"` or `"stream"`.
-// - `.get_sound_info(sound) -> path, duration, is_stream`
-//   Returns `nil, nil, nil` if the sound has been freed.
-//
-// ### Playback Entry Points
-// - `.play(sound, bus_id, volume?, pitch?, pan?) -> handle | nil, err`
-//   Plays a non-spatialized 2D voice on the given bus.
-// - `.play_at(sound, bus_id, x, y, volume?, pitch?) -> handle | nil, err`
-//   Plays a spatialized voice at world position `(x, y)` on the given bus.
-//
-// ### Instance Control (Common)
-// - `.set_voice_volume(handle, volume)`
-// - `.set_voice_pitch(handle, pitch)`
-// - `.set_voice_pan(handle, pan)`
-// - `.set_voice_looping(handle, is_looping)`
-// - `.seek_voice(handle, offset, unit?)` — units: `"seconds"` (default), `"samples"`
-// - `.fade_voice(handle, target_volume, duration)`
-// - `.get_voice_info(handle) -> time_in_seconds, duration_in_seconds`
-//   Returns `nil, nil` for a dead or stale voice handle.
-// - `.is_voice_playing(handle) -> bool`
-//   Returns `false` for a dead or stale voice handle.
-//
-// ### Instance Control (Spatial)
-// - `.set_voice_position(handle, x, y)`
-// - `.set_voice_velocity(handle, vx, vy)`
-// - `.set_voice_falloff(handle, min_px, max_px?)`
-// - `.set_voice_rolloff(handle, factor)`
-// - `.set_voice_falloff_mode(handle, mode)` — modes: `"none"`, `"inverse"`, `"linear"`, `"exponential"`
-// - `.set_voice_pan_mode(handle, mode)` — modes: `"balance"`, `"pan"`
-//
-// ### Instance Lifecycle
-// - `.pause_voice(handle)`
-// - `.resume_voice(handle)`
-// - `.stop_voice(handle)` — halts playback and reclaims the voice slot
-//
-// ### Bus Mixing
-// - `.set_bus_volume(bus_id, volume)`
-// - `.set_bus_pitch(bus_id, pitch)`
-// - `.set_bus_pan(bus_id, pan)`
-// - `.fade_bus(bus_id, target_volume, duration)`
-// - `.set_bus_lpf(bus_id, hz)`
-// - `.set_bus_hpf(bus_id, hz)`
-// - `.set_bus_delay_mix(bus_id, wet, dry?)`
-// - `.set_bus_delay_feedback(bus_id, amount)`
-// - `.pause_bus(bus_id)`
-// - `.resume_bus(bus_id)`
-// - `.stop_bus(bus_id)` — halts the bus and destroys all active voices assigned to it
-// - `.stop_all_voices()`
-//
-// ### Bus Rules
-// - Bus `0` is the master bus.
-// - Bus `0` is valid for volume/pitch/pan/fade/pause/resume/stop.
-// - Bus `0` is invalid for LPF/HPF/delay controls.
-// - DSP buses are `1..MAX_AUDIO_BUSES-1`.
-
 // ============================================================================
 // Audio Data Structures
 // ============================================================================
@@ -429,7 +358,6 @@ lua_audio_load_sound :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_set_listener_position: audio.set_listener_position(x: number, y: number)
 lua_audio_set_listener_position :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.set_listener_position")
     x := f32(lua.L_checknumber(L, 1))
     y := f32(lua.L_checknumber(L, 2))
@@ -439,7 +367,6 @@ lua_audio_set_listener_position :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_set_listener_rotation: audio.set_listener_rotation(degrees: number)
 lua_audio_set_listener_rotation :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.set_listener_rotation")
 
     deg := f32(lua.L_checknumber(L, 1))
@@ -456,7 +383,6 @@ lua_audio_set_listener_rotation :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_set_listener_velocity: audio.set_listener_velocity(vx: number, vy: number)
 lua_audio_set_listener_velocity :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.set_listener_velocity")
 
     vx := f32(lua.L_checknumber(L, 1))
@@ -497,8 +423,16 @@ lua_audio_play :: proc "c" (L: ^lua.State) -> c.int {
     }
 
     vol := f32(lua.L_optnumber(L, 3, 1.0))
+    vol = max(vol, 0.0)
+
     pitch := f32(lua.L_optnumber(L, 4, 1.0))
+    if pitch <= 0 {
+        lua.L_error(L, "audio.play: pitch must be greater than 0")
+        return 0
+    }
+
     pan := f32(lua.L_optnumber(L, 5, 0.0))
+    pan = clamp(pan, -1.0, 1.0)
 
     // 2. Delegate Allocation & MA Graph Initialization
     voice, handle, err, ok := claim_and_init_voice(sound, int(bus_idx))
@@ -553,7 +487,12 @@ lua_audio_play_at :: proc "c" (L: ^lua.State) -> c.int {
     x := f32(lua.L_checknumber(L, 3))
     y := f32(lua.L_checknumber(L, 4))
     vol := f32(lua.L_optnumber(L, 5, 1.0))
+    vol = max(vol, 0.0)
     pitch := f32(lua.L_optnumber(L, 6, 1.0))
+    if pitch <= 0 {
+        lua.L_error(L, "audio.play_at: pitch must be greater than 0")
+        return 0
+    }
 
     // 2. Delegate Allocation & MA Graph Initialization
     voice, handle, err, ok := claim_and_init_voice(sound, int(bus_idx))
@@ -592,10 +531,12 @@ lua_audio_set_voice_volume :: proc "c" (L: ^lua.State) -> c.int {
     if voice == nil do return 0
 
     vol := f32(lua.L_checknumber(L, 2))
+    vol = max(vol, 0.0)
     ma.sound_set_volume(&voice.node, vol)
 
     return 0
 }
+
 
 // lua_audio_set_voice_pitch: audio.set_voice_pitch(handle: int, pitch: number)
 lua_audio_set_voice_pitch :: proc "c" (L: ^lua.State) -> c.int {
@@ -605,7 +546,13 @@ lua_audio_set_voice_pitch :: proc "c" (L: ^lua.State) -> c.int {
     voice := get_voice(u32(lua.L_checkinteger(L, 1)))
     if voice == nil do return 0
 
-    ma.sound_set_pitch(&voice.node, f32(lua.L_checknumber(L, 2)))
+    pitch := f32(lua.L_checknumber(L, 2))
+    if pitch <= 0 {
+        lua.L_error(L, "audio.set_voice_pitch: pitch must be greater than 0")
+        return 0
+    }
+
+    ma.sound_set_pitch(&voice.node, pitch)
     return 0
 }
 
@@ -618,6 +565,8 @@ lua_audio_set_voice_pan :: proc "c" (L: ^lua.State) -> c.int {
     if voice == nil do return 0
 
     pan := f32(lua.L_checknumber(L, 2))
+    pan = clamp(pan, -1.0, 1.0)
+
     // Drop back to 2D mode to honor the manual pan
     ma.sound_set_spatialization_enabled(&voice.node, false)
     ma.sound_set_pan(&voice.node, pan)
@@ -634,7 +583,7 @@ lua_audio_seek_voice :: proc "c" (L: ^lua.State) -> c.int {
     if voice == nil do return 0
 
     offset := f64(lua.L_checknumber(L, 2))
-    if offset < 0.0 do offset = 0.0
+    offset = max(offset, 0.0)
 
     // Default to seconds if no unit is provided
     unit := "seconds"
@@ -700,7 +649,9 @@ lua_audio_fade_voice :: proc "c" (L: ^lua.State) -> c.int {
     if voice == nil do return 0
 
     target := f32(lua.L_checknumber(L, 2))
+    target = max(target, 0.0)
     duration_seconds := f32(lua.L_checknumber(L, 3))
+    duration_seconds = max(duration_seconds, 0.0)
 
     // Miniaudio expects milliseconds for fades
     duration_ms := u64(duration_seconds * 1000.0)
@@ -754,17 +705,19 @@ lua_audio_stop_voice :: proc "c" (L: ^lua.State) -> c.int {
 // lua_audio_set_default_falloff: audio.set_default_falloff(min_px: number, max_px?: number)
 // Sets the global default radius for all FUTURE play_at calls.
 lua_audio_set_default_falloff :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.set_default_falloff")
 
-    // Arg 1: min_px (Required)
     min_px := f32(lua.L_checknumber(L, 1))
+    min_px = max(min_px, 0.0)
     audio_ctx.default_min_dist = min_px * AUDIO_SCALE
 
-    // Arg 2: max_px (Optional)
     if lua.gettop(L) >= 2 {
         max_px := f32(lua.L_checknumber(L, 2))
+        max_px = max(max_px, 0.0)
+        max_px = max(max_px, min_px)
         audio_ctx.default_max_dist = max_px * AUDIO_SCALE
+    } else {
+        audio_ctx.default_max_dist = max(audio_ctx.default_max_dist, audio_ctx.default_min_dist)
     }
 
     return 0
@@ -778,14 +731,19 @@ lua_audio_set_voice_falloff :: proc "c" (L: ^lua.State) -> c.int {
     voice := get_voice(u32(lua.L_checkinteger(L, 1)))
     if voice == nil do return 0
 
-    // Arg 2: min_px (Required)
     min_px := f32(lua.L_checknumber(L, 2))
+    min_px = max(min_px, 0.0)
     ma.sound_set_min_distance(&voice.node, min_px * AUDIO_SCALE)
 
-    // Arg 3: max_px (Optional)
     if lua.gettop(L) >= 3 {
         max_px := f32(lua.L_checknumber(L, 3))
+        max_px = max(max_px, 0.0)
+        max_px = max(max_px, min_px)
         ma.sound_set_max_distance(&voice.node, max_px * AUDIO_SCALE)
+    } else {
+        current_max := ma.sound_get_max_distance(&voice.node) / AUDIO_SCALE
+        current_max = max(current_max, min_px)
+        ma.sound_set_max_distance(&voice.node, current_max * AUDIO_SCALE)
     }
 
     return 0
@@ -793,7 +751,6 @@ lua_audio_set_voice_falloff :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_set_default_falloff_mode: audio.set_default_falloff_mode(mode: string)
 lua_audio_set_default_falloff_mode :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.set_default_falloff_mode")
 
     mode_str := string(lua.L_checkstring(L, 1))
@@ -844,15 +801,17 @@ lua_audio_set_voice_falloff_mode :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// lua_audio_set_voice_rolloff: audio.set_voice_rolloff(handle: int, factor: number)
-lua_audio_set_voice_rolloff :: proc "c" (L: ^lua.State) -> c.int {
+// lua_audio_set_voice_falloff_intensity: audio.set_voice_falloff_intensity(handle: int, factor: number)
+lua_audio_set_voice_falloff_intensity :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
-    check_audio_safety(L, "audio.set_voice_rolloff")
+    check_audio_safety(L, "audio.set_voice_falloff_intensity")
 
     voice := get_voice(u32(lua.L_checkinteger(L, 1)))
     if voice == nil do return 0
 
     factor := f32(lua.L_checknumber(L, 2))
+    factor = max(factor, 0.0)
+
     ma.sound_set_rolloff(&voice.node, factor)
     return 0
 }
@@ -902,7 +861,6 @@ lua_audio_set_voice_pan_mode :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_set_bus_volume: audio.set_bus_volume(bus: int, volume: number)
 lua_audio_set_bus_volume :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.set_bus_volume")
 
     idx := lua.L_checkinteger(L, 1)
@@ -912,6 +870,7 @@ lua_audio_set_bus_volume :: proc "c" (L: ^lua.State) -> c.int {
     }
 
     vol := f32(lua.L_checknumber(L, 2))
+    vol = max(vol, 0.0)
     ma.sound_group_set_volume(&audio_ctx.mixer[idx].group, vol)
 
     return 0
@@ -919,7 +878,6 @@ lua_audio_set_bus_volume :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_fade_bus: audio.fade_bus(bus: int, target: number, duration: number)
 lua_audio_fade_bus :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.fade_bus")
 
     idx := lua.L_checkinteger(L, 1)
@@ -929,7 +887,9 @@ lua_audio_fade_bus :: proc "c" (L: ^lua.State) -> c.int {
     }
 
     target := f32(lua.L_checknumber(L, 2))
+    target = max(target, 0.0)
     duration_seconds := f32(lua.L_checknumber(L, 3))
+    duration_seconds = max(duration_seconds, 0.0)
     duration_ms := u64(duration_seconds * 1000.0)
 
     current_vol := ma.sound_group_get_current_fade_volume(&audio_ctx.mixer[idx].group)
@@ -939,7 +899,6 @@ lua_audio_fade_bus :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_set_bus_pitch: audio.set_bus_pitch(bus: int, pitch: number)
 lua_audio_set_bus_pitch :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.set_bus_pitch")
 
     idx := lua.L_checkinteger(L, 1)
@@ -948,13 +907,18 @@ lua_audio_set_bus_pitch :: proc "c" (L: ^lua.State) -> c.int {
         return 0
     }
 
-    ma.sound_group_set_pitch(&audio_ctx.mixer[idx].group, f32(lua.L_checknumber(L, 2)))
+    pitch := f32(lua.L_checknumber(L, 2))
+    if pitch <= 0 {
+        lua.L_error(L, "audio.set_bus_pitch: pitch must be greater than 0")
+        return 0
+    }
+
+    ma.sound_group_set_pitch(&audio_ctx.mixer[idx].group, pitch)
     return 0
 }
 
 // lua_audio_set_bus_pan: audio.set_bus_pan(bus: int, pan: number)
 lua_audio_set_bus_pan :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.set_bus_pan")
 
     idx := lua.L_checkinteger(L, 1)
@@ -963,13 +927,15 @@ lua_audio_set_bus_pan :: proc "c" (L: ^lua.State) -> c.int {
         return 0
     }
 
-    ma.sound_group_set_pan(&audio_ctx.mixer[idx].group, f32(lua.L_checknumber(L, 2)))
+    pan := f32(lua.L_checknumber(L, 2))
+    pan = clamp(pan, -1.0, 1.0)
+
+    ma.sound_group_set_pan(&audio_ctx.mixer[idx].group, pan)
     return 0
 }
 
 // lua_audio_set_bus_lpf: audio.set_bus_lpf(bus: int, hz: number)
 lua_audio_set_bus_lpf :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.set_bus_lpf")
 
     idx := lua.L_checkinteger(L, 1)
@@ -999,7 +965,6 @@ lua_audio_set_bus_lpf :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_set_bus_hpf: audio.set_bus_hpf(bus: int, hz: number)
 lua_audio_set_bus_hpf :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.set_bus_hpf")
 
     idx := lua.L_checkinteger(L, 1)
@@ -1030,7 +995,6 @@ lua_audio_set_bus_hpf :: proc "c" (L: ^lua.State) -> c.int {
 // lua_audio_set_bus_delay_feedback: audio.set_bus_delay_feedback(bus: int, amount: number)
 // amount is the decay feedback (0.0 to 1.0). 0.0 is off, 0.5 is a medium echo tail.
 lua_audio_set_bus_delay_feedback :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.set_bus_delay_feedback")
 
     idx := lua.L_checkinteger(L, 1)
@@ -1050,7 +1014,6 @@ lua_audio_set_bus_delay_feedback :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_set_bus_delay_mix: audio.set_bus_delay_mix(bus: int, wet: number, dry?: number)
 lua_audio_set_bus_delay_mix :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.set_bus_delay_mix")
 
     // 1. Fetch and validate bus index
@@ -1078,7 +1041,6 @@ lua_audio_set_bus_delay_mix :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_config_bus_delay_times: audio.config_bus_delay_times({ [1] = 0.5, [4] = 2.0 })
 lua_audio_config_bus_delay_times :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     if audio_ctx.initialized {
         lua.L_error(L, "audio.config_bus_delay_times: must be called before engine initialization")
         return 0
@@ -1100,7 +1062,13 @@ lua_audio_config_bus_delay_times :: proc "c" (L: ^lua.State) -> c.int {
         // -1 is the top of the stack (the value we just fetched)
         t := lua.type(L, -1)
         if t == lua.TNUMBER {
-            audio_ctx.bus_delay_times[i] = f32(lua.tonumber(L, -1))
+            delay := f32(lua.tonumber(L, -1))
+            if delay <= 0 {
+                lua.L_error(L, "audio.config_bus_delay_times: bus %d delay must be greater than 0", i)
+                return 0
+            }
+            audio_ctx.bus_delay_times[i] = delay
+
         } else if t != lua.TNIL {
             lua.L_error(L, "audio.config_bus_delay_times: expected number or nil for bus %d", i)
             return 0
@@ -1115,7 +1083,6 @@ lua_audio_config_bus_delay_times :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_pause_bus: audio.pause_bus(bus_idx: int)
 lua_audio_pause_bus :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.pause_bus")
     idx := lua.L_checkinteger(L, 1)
     if idx < 0 || idx >= MAX_AUDIO_BUSES {
@@ -1129,7 +1096,6 @@ lua_audio_pause_bus :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_resume_bus: audio.resume_bus(bus_idx: int)
 lua_audio_resume_bus :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.resume_bus")
     idx := lua.L_checkinteger(L, 1)
     if idx < 0 || idx >= MAX_AUDIO_BUSES {
@@ -1142,7 +1108,6 @@ lua_audio_resume_bus :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_audio_stop_bus: audio.stop_bus(bus_idx: int)
 lua_audio_stop_bus :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.stop_bus")
     idx := lua.L_checkinteger(L, 1)
     if idx < 0 || idx >= MAX_AUDIO_BUSES {
@@ -1213,7 +1178,6 @@ lua_audio_is_voice_playing :: proc "c" (L: ^lua.State) -> c.int {
 // lua_audio_stop_all_voices: audio.stop_all_voices()
 // Immediately halts and destroys every active voice in the engine.
 lua_audio_stop_all_voices :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.stop_all_voices")
 
     for i in 0 ..< MAX_VOICES {
@@ -1232,7 +1196,6 @@ lua_audio_stop_all_voices :: proc "c" (L: ^lua.State) -> c.int {
 // lua_audio_get_sound_info: audio.get_sound_info(sound) -> (path, duration, is_stream)
 // Returns nil, nil, nil if the sound has been freed.
 lua_audio_get_sound_info :: proc "c" (L: ^lua.State) -> c.int {
-    context = runtime.default_context()
     check_audio_safety(L, "audio.get_sound_info")
     sound := cast(^Sound)lua.L_checkudata(L, 1, "Sound")
     if sound == nil || sound.filepath == nil {
@@ -1336,7 +1299,7 @@ register_audio_api :: proc() {
     lua_bind_function(lua_audio_set_voice_position, "set_voice_position")
     lua_bind_function(lua_audio_set_voice_velocity, "set_voice_velocity")
     lua_bind_function(lua_audio_set_voice_falloff, "set_voice_falloff")
-    lua_bind_function(lua_audio_set_voice_rolloff, "set_voice_rolloff")
+    lua_bind_function(lua_audio_set_voice_falloff_intensity, "set_voice_falloff_intensity")
     lua_bind_function(lua_audio_set_voice_falloff_mode, "set_voice_falloff_mode")
     lua_bind_function(lua_audio_set_voice_pan_mode, "set_voice_pan_mode")
 

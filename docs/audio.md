@@ -66,7 +66,8 @@ Bus `0` is the master bus. Playback functions return integer voice handles. Quer
 
 ### config_bus_delay_times
 
-Configures delay buffer lengths for buses `1` through `7`. Call this before engine initialization. Only entries for buses `1` through `7` are read.
+Configures delay buffer lengths for buses `1` through `7`.  
+Call this before engine initialization. Only entries for buses `1` through `7` are read. `nil` keeps the default delay time for that bus.
 
 ```lua
 audio.config_bus_delay_times(config)
@@ -76,7 +77,7 @@ audio.config_bus_delay_times(config)
 
 - Must be called before engine initialization.
 - `config` must be a table.
-- Values for buses `1` through `7` must be numbers or `nil`.
+- Values for buses `1` through `7` must be positive numbers or `nil`.
 
 ## Listener & Defaults
 
@@ -112,7 +113,7 @@ audio.set_listener_velocity(vx, vy)
 
 ### set_default_falloff
 
-Sets the default falloff distances used by future `audio.play_at()` calls.
+Sets the default falloff distances used by future `audio.play_at()` calls. Negative distances are treated as `0`. If `max_px` is provided and is less than `min_px`, it is treated as `min_px`.
 
 ```lua
 audio.set_default_falloff(min_px)
@@ -174,7 +175,8 @@ Returns `nil, nil, nil` if `sound` has been freed.
 
 ### play
 
-Starts 2D playback of a sound on a bus.
+Starts non-spatialized playback of a sound on a bus. `volume`, `pitch`, and `pan` set the initial state of the new voice.   
+Negative `volume` is treated as `0`. `pitch` must be greater than `0`. `pan` is clamped to `-1.0` through `1.0`.
 
 ```lua
 audio.play(sound, bus) -> handle | nil, err
@@ -185,17 +187,19 @@ audio.play(sound, bus, volume, pitch, pan) -> handle | nil, err
 
 #### Returns
 
-Returns a voice handle on success, or `nil, err` on failure.
+Returns a voice handle on success, or `nil, err` if playback could not start.
 
 #### Error Cases
 
 - `bus` must be between `0` and `7`.
+- `pitch` must be greater than `0`.
 
 ---
 
 ### play_at
 
-Starts spatialized playback of a sound at a world position on a bus. This uses the current default falloff settings.
+Starts spatialized playback of a sound at a world position on a bus.  
+`volume` and `pitch` set the initial state of the new voice. Negative `volume` is treated as `0`. `pitch` must be greater than `0`. This uses the current default falloff settings.
 
 ```lua
 audio.play_at(sound, bus, x, y) -> handle | nil, err
@@ -205,11 +209,12 @@ audio.play_at(sound, bus, x, y, volume, pitch) -> handle | nil, err
 
 #### Returns
 
-Returns a voice handle on success, or `nil, err` on failure.
+Returns a voice handle on success, or `nil, err` if playback could not start.
 
 #### Error Cases
 
 - `bus` must be between `0` and `7`.
+- `pitch` must be greater than `0`.
 
 ## Voice Control
 
@@ -217,7 +222,7 @@ Unless noted otherwise, functions in this section ignore dead voice handles.
 
 ### set_voice_volume
 
-Sets the volume of a voice.
+Sets the volume of a voice. Negative values are treated as `0`.
 
 ```lua
 audio.set_voice_volume(handle, volume)
@@ -233,11 +238,16 @@ Sets the pitch of a voice.
 audio.set_voice_pitch(handle, pitch)
 ```
 
+#### Error Cases
+
+- `pitch` must be greater than `0`.
+
 ---
 
 ### set_voice_pan
 
-Sets the stereo pan of a voice. This disables spatialization for that voice.
+Sets the stereo pan of a voice. This disables spatialization for that voice.   
+`pan` is clamped to `-1.0` through `1.0`.
 
 ```lua
 audio.set_voice_pan(handle, pan)
@@ -272,7 +282,8 @@ audio.seek_voice(handle, offset, unit)
 
 ### fade_voice
 
-Fades a voice to a target volume over a duration in seconds.
+Fades a voice to a target volume over a duration in seconds.  
+Negative `target_volume` is treated as `0`. Negative `duration` is treated as `0`.
 
 ```lua
 audio.fade_voice(handle, target_volume, duration)
@@ -330,7 +341,8 @@ audio.set_voice_velocity(handle, vx, vy)
 
 ### set_voice_falloff
 
-Sets the falloff distances for a voice.
+Sets the falloff distances for a voice.  
+Negative distances are treated as `0`. If `max_px` is provided and is less than `min_px`, it is treated as `min_px`.
 
 ```lua
 audio.set_voice_falloff(handle, min_px)
@@ -339,12 +351,13 @@ audio.set_voice_falloff(handle, min_px, max_px)
 
 ---
 
-### set_voice_rolloff
+### set_voice_falloff_intensity
 
-Sets the rolloff factor for a voice.
+Sets the falloff intensity for a voice.  
+Negative values are treated as `0`.
 
 ```lua
-audio.set_voice_rolloff(handle, factor)
+audio.set_voice_falloff_intensity(handle, factor)
 ```
 
 ---
@@ -423,7 +436,8 @@ These functions apply to buses `0` through `7`. Bus `0` is the master bus.
 
 ### set_bus_volume
 
-Sets the volume of a bus.
+Sets the volume of a bus.  
+Negative values are treated as `0`.
 
 ```lua
 audio.set_bus_volume(bus, volume)
@@ -446,12 +460,14 @@ audio.set_bus_pitch(bus, pitch)
 #### Error Cases
 
 - `bus` must be between `0` and `7`.
+- `pitch` must be greater than `0`.
 
 ---
 
 ### set_bus_pan
 
-Sets the stereo pan of a bus.
+Sets the stereo pan of a bus.  
+`pan` is clamped to `-1.0` through `1.0`.
 
 ```lua
 audio.set_bus_pan(bus, pan)
@@ -461,11 +477,14 @@ audio.set_bus_pan(bus, pan)
 
 - `bus` must be between `0` and `7`.
 
+
+
 ---
 
 ### fade_bus
 
-Fades a bus to a target volume over a duration in seconds.
+Fades a bus to a target volume over a duration in seconds.  
+Negative `target_volume` is treated as `0`. Negative `duration` is treated as `0`.
 
 ```lua
 audio.fade_bus(bus, target_volume, duration)

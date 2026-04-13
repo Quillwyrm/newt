@@ -23,7 +23,7 @@ check_window_safety :: #force_inline proc "contextless"(L: ^lua.State, fn_name: 
     }
 }
 
-// Parses a Lua flag list like {"fullscreen","borderless","resizable"}.
+// Parses a Lua flag list like {"fullscreen", "borderless", "resizable"}.
 read_window_flags :: proc "contextless" (L: ^lua.State, idx: lua.Index) -> (fullscreen, borderless, resizable: bool) {
     lua.L_checktype(L, cast(c.int)(idx), lua.Type.TABLE)
 
@@ -163,7 +163,7 @@ lua_window_get_position :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_window_set_title implements window.set_title(title).
 lua_window_set_title :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L,"window.set_title")
+    check_window_safety(L, "window.set_title")
 
     title_c := lua.L_checkstring(L, 1)
     sdl.SetWindowTitle(Window, title_c)
@@ -173,7 +173,7 @@ lua_window_set_title :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_window_set_size implements window.set_size(width, height) in pixels.
 lua_window_set_size :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L,"window.set_size")
+    check_window_safety(L, "window.set_size")
 
     w := lua.L_checkinteger(L, 1)
     h := lua.L_checkinteger(L, 2)
@@ -188,7 +188,7 @@ lua_window_set_size :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_window_set_position implements window.set_position(x, y) in pixels.
 lua_window_set_position :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L,"window.set_position")
+    check_window_safety(L, "window.set_position")
 
     x := lua.L_checkinteger(L, 1)
     y := lua.L_checkinteger(L, 2)
@@ -203,7 +203,7 @@ lua_window_set_position :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_window_maximize implements window.maximize().
 lua_window_maximize :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L,"window.maximize")
+    check_window_safety(L, "window.maximize")
 
     if !sdl.MaximizeWindow(Window) {
         lua.L_error(L, "window.maximize: failed to maximize window: %s", sdl.GetError())
@@ -215,7 +215,7 @@ lua_window_maximize :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_window_minimize implements window.minimize().
 lua_window_minimize :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L,"window.minimize")
+    check_window_safety(L, "window.minimize")
 
     if !sdl.MinimizeWindow(Window) {
         lua.L_error(L, "window.minimize: failed to minimize window: %s", sdl.GetError())
@@ -229,7 +229,7 @@ lua_window_minimize :: proc "c" (L: ^lua.State) -> c.int {
 
 // window.set_cursor(name)
 lua_window_set_cursor :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L,"window.set_cursor")
+    check_window_safety(L, "window.set_cursor")
 
     len: c.size_t
     p := lua.L_checklstring(L, 1, &len)
@@ -288,7 +288,7 @@ lua_window_set_cursor :: proc "c" (L: ^lua.State) -> c.int {
 
 // window.cursor_show()
 lua_window_cursor_show :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L,"window.cursor_show")
+    check_window_safety(L, "window.cursor_show")
 
     if !sdl.ShowCursor() {
         lua.L_error(L, "window.cursor_show: failed to show cursor: %s", sdl.GetError())
@@ -299,7 +299,7 @@ lua_window_cursor_show :: proc "c" (L: ^lua.State) -> c.int {
 
 // window.cursor_hide()
 lua_window_cursor_hide :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L,"window.cursor_hide")
+    check_window_safety(L, "window.cursor_hide")
 
     if !sdl.HideCursor() {
         lua.L_error(L, "window.cursor_hide: failed to hide cursor: %s", sdl.GetError())
@@ -310,7 +310,7 @@ lua_window_cursor_hide :: proc "c" (L: ^lua.State) -> c.int {
 
 // window.is_cursor_visible() -> bool
 lua_window_is_cursor_visible :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L,"window.is_cursor_visible")
+    check_window_safety(L, "window.is_cursor_visible")
 
     lua.pushboolean(L, cast(b32)sdl.CursorVisible())
     return 1
@@ -321,7 +321,7 @@ lua_window_is_cursor_visible :: proc "c" (L: ^lua.State) -> c.int {
 // window.get_clipboard() -> string
 // Must free the SDL buffer via sdl.free (SDL_free).
 lua_window_get_clipboard :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L,"window.get_clipboard")
+    check_window_safety(L, "window.get_clipboard")
 
     p := sdl.GetClipboardText()
     if p == nil {
@@ -340,7 +340,7 @@ lua_window_get_clipboard :: proc "c" (L: ^lua.State) -> c.int {
 
 // window.set_clipboard(text)
 lua_window_set_clipboard :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L,"window.set_clipboard")
+    check_window_safety(L, "window.set_clipboard")
 
     len: c.size_t
     p := lua.L_checklstring(L, 1, &len)
