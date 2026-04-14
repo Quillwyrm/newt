@@ -20,6 +20,8 @@ Window: ^sdl.Window
 Renderer: ^sdl.Renderer
 Lua: ^lua.State
 
+Resource_Directory_Path: string
+
 // ============================================================================
 // Engine Global Bindings
 // ============================================================================
@@ -293,15 +295,13 @@ call_lua_number :: proc(func_name: cstring, arg: f64) {
     lua.pop(Lua, 2)
 }
 
-prepend_package_path :: proc(exe_dir: string) {
-    // Build:
-    //   <exe_dir>/lua/?.lua;<exe_dir>/lua/?/init.lua;<old package.path>
-    p1, err1 := os.join_path({exe_dir, "lua", "?.lua"}, context.temp_allocator)
-    if err1 != os.ERROR_NONE { 
+configure_lua_package_path :: proc() {
+    p1, err1 := os.join_path({Resource_Directory_Path, "lua", "?.lua"}, context.temp_allocator)
+    if err1 != os.ERROR_NONE {
         fatal_engine_error(fmt.caprintf("engine.boot: join_path for lua/?.lua failed: %v", err1))
     }
 
-    p2, err2 := os.join_path({exe_dir, "lua", "?", "init.lua"}, context.temp_allocator)
+    p2, err2 := os.join_path({Resource_Directory_Path, "lua", "?", "init.lua"}, context.temp_allocator)
     if err2 != os.ERROR_NONE {
         fatal_engine_error(fmt.caprintf("engine.boot: join_path for lua/?/init.lua failed: %v", err2))
     }
@@ -309,25 +309,24 @@ prepend_package_path :: proc(exe_dir: string) {
     p1_c := strings.clone_to_cstring(p1, context.temp_allocator)
     p2_c := strings.clone_to_cstring(p2, context.temp_allocator)
 
-    // package.path = p1..";"..p2..";"..package.path
-    lua.getglobal(Lua, "package") // [package]
-    lua.getfield(Lua, -1, "path") // [package, old_path]
+    lua.getglobal(Lua, "package")
+    lua.getfield(Lua, -1, "path")
 
     old_len: c.size_t
     old_c := lua.tolstring(Lua, -1, &old_len)
 
-    lua.remove(Lua, -1) // [package]
+    lua.remove(Lua, -1)
 
-    lua.pushstring(Lua, p1_c) // [package, p1]
-    lua.pushstring(Lua, ";") // [package, p1, ";"]
-    lua.pushstring(Lua, p2_c) // [package, p1, ";", p2]
-    lua.pushstring(Lua, ";") // [package, p1, ";", p2, ";"]
-    lua.pushlstring(Lua, old_c, old_len) // [package, p1, ";", p2, ";", old]
+    lua.pushstring(Lua, p1_c)
+    lua.pushstring(Lua, ";")
+    lua.pushstring(Lua, p2_c)
+    lua.pushstring(Lua, ";")
+    lua.pushlstring(Lua, old_c, old_len)
 
-    lua.concat(Lua, 5) // [package, new_path]
-    lua.setfield(Lua, -2, "path") // package.path = new_path; pops value
+    lua.concat(Lua, 5)
+    lua.setfield(Lua, -2, "path")
 
-    lua.settop(Lua, 0) // []
+    lua.settop(Lua, 0)
 }
 
 // ============================================================================
@@ -368,16 +367,17 @@ main :: proc() {
     register_lua_api()
     init_graphics_state()
 
-    exe_dir, err := os.get_executable_directory(context.temp_allocator)
+    Resource_Directory_Path, err := os.get_executable_directory(context.allocator)
     if err != os.ERROR_NONE {
         fatal_engine_error(fmt.caprintf("engine.boot: failed to get executable directory: %v", err))
     }
-
-    prepend_package_path(exe_dir)
+    defer delete(Resource_Directory_Path)
+    
+    configure_lua_package_path()
 
 // == script Boot ==
 
-    main_path, err2 := os.join_path({exe_dir, "lua", "main.lua"}, context.temp_allocator)
+    main_path, err2 := os.join_path({Resource_Directory_Path, "lua", "main.lua"}, context.temp_allocator)
     if err2 != os.ERROR_NONE {
         fatal_engine_error(fmt.caprintf("engine.boot: failed to build path to lua/main.lua: %v", err2))
     }

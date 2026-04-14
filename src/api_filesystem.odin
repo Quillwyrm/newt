@@ -40,7 +40,7 @@ push_lua_error :: proc(L: ^lua.State, err: os.Error) {
 // Lua Filesystem Bindings
 // ============================================================================
 
-// get_resource_directory() -> string | (nil, err)
+// get_resource_directory() -> string
 lua_filesystem_get_resource_directory :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -49,14 +49,7 @@ lua_filesystem_get_resource_directory :: proc "c" (L: ^lua.State) -> c.int {
         return 0
     }
 
-    dir, err := os.get_executable_directory(context.temp_allocator)
-    if err != os.ERROR_NONE {
-        lua.pushnil(L)
-        push_lua_error(L, err)
-        return 2
-    }
-
-    push_lua_string(L, dir)
+    push_lua_string(L, Resource_Directory_Path)
     return 1
 }
 

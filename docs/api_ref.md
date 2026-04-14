@@ -1,6 +1,6 @@
 # API Reference
 
-This reference documents the available global functions and modules.
+This reference documents the available modules, global functions, and the basic project structure expected by the host.
 
 ## Modules
 
@@ -19,11 +19,12 @@ This reference documents the available global functions and modules.
 
 Projects are loaded relative to the `Resource Directory`, which is the directory containing the executable. The executable can be renamed, and additional files or folders can be placed anywhere under the `Resource Directory`.
 
+The `Resource Directory` is not the same as the `Working Directory`, which can be changed at runtime. (See [filesystem](filesystem.md))
+
 The host expects a `lua/main.lua` file inside the `Resource Directory`. This file is the application entry point, and is where runtime callbacks such as `runtime.init`, `runtime.update`, and `runtime.draw` are typically defined.
 
-A minimal project might look like this:
-
-```text
+Project layout:
+```sh
 your_project/
 ├── your_game.exe
 ├── SDL3.dll
@@ -32,8 +33,7 @@ your_project/
     └── main.lua
 ```
 
-A minimal `main.lua` could look like this:
-
+Example `main.lua`:
 ```lua
 local px, py = 16, 16 -- Position
 local pw, ph          -- Scale

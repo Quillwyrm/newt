@@ -1,7 +1,7 @@
 # filesystem
 
 The `filesystem` module provides access to process paths, directory queries, and basic file operations.  
-Unless noted otherwise, functions in this module throw on wrong arity or wrong argument types.
+Unless noted otherwise, functions in this module throw on wrong arity or wrong argument types. Relative paths in this module are resolved from the `Working Directory`.
 
 ## Functions
 
@@ -28,17 +28,17 @@ Unless noted otherwise, functions in this module throw on wrong arity or wrong a
 
 ### get_resource_directory
 
-Returns the absolute directory containing the Luagame executable.
+Returns the absolute path of the `Resource Directory`, which is the directory containing the executable. This value is fixed by the host for the lifetime of the process.
 
 ```lua
-filesystem.get_resource_directory() -> path | nil, err
+filesystem.get_resource_directory() -> path
 ```
 
 ---
 
 ### get_working_directory
 
-Returns the current working directory. Relative paths in other filesystem calls are resolved from this location.
+Returns the current `Working Directory` path. This is separate from the `Resource Directory` and can be changed at runtime.
 
 ```lua
 filesystem.get_working_directory() -> path | nil, err
@@ -48,7 +48,7 @@ filesystem.get_working_directory() -> path | nil, err
 
 ### set_working_directory
 
-Sets the current working directory for the process.
+Sets the current `Working Directory` for the process. This affects how relative paths are resolved by other filesystem calls.
 
 ```lua
 filesystem.set_working_directory(path) -> true | false, err
