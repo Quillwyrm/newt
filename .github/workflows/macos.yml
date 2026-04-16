@@ -1,4 +1,4 @@
-name: mac-build-smoke-test
+name: mac-build-app-test
 
 on:
   workflow_dispatch:
@@ -10,11 +10,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Native deps for Luagame on the mac runner
       - name: Install deps
         run: brew install llvm luajit sdl3 sdl3_ttf
 
-      # Build Odin from source exactly the way that already worked for you
       - name: Install Odin
         run: |
           git clone --depth=1 https://github.com/odin-lang/Odin odin
@@ -28,7 +26,6 @@ jobs:
       - name: Check Odin
         run: odin version
 
-      # Make sure linker/runtime can see brewed libs
       - name: Export brew library paths
         run: |
           echo "LIBRARY_PATH=/opt/homebrew/lib:$(brew --prefix luajit)/lib:$(brew --prefix sdl3)/lib:$(brew --prefix sdl3_ttf)/lib:$LIBRARY_PATH" >> "$GITHUB_ENV"
@@ -36,7 +33,7 @@ jobs:
 
       - name: Build miniaudio
         run: make -C "$ODIN_ROOT/vendor/miniaudio/src"
-        
+
       - name: Create test main.lua
         run: |
           mkdir -p build/lua
@@ -61,17 +58,94 @@ jobs:
       - name: Build luagame
         run: odin build src -out:build/luagame
 
-      - name: Show linked libraries
-        run: otool -L build/luagame
+      - name: Package app bundle
+        run: |
+          set -e
 
-      - name: Run luagame
-        run: ./build/luagame
+          APP_ROOT="deploy/macos/luagame.app"
+          APP_CONTENTS="$APP_ROOT/Contents"
+          APP_MACOS="$APP_CONTENTS/MacOS"
+          APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
 
-      - name: Show smoke file
-        run: cat build/mac_smoke.txt
+          rm -rf "$APP_ROOT"
+          mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS"
 
-      - name: Upload smoke file
+          cp build/luagame "$APP_MACOS/luagame"
+          chmod +x "$APP_MACOS/luagame"
+
+          cp -R build/lua "$APP_MACOS/"
+
+          cat > "$APP_CONTENTS/Info.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>luagame</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.quillwyrm.luagame</string>
+              <key>CFBundleName</key>
+              <string>luagame</string>
+              <key>CFBundleDisplayName</key>
+              <string>luagame</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleVersion</key>
+              <string>0.0.0</string>
+              <key>CFBundleShortVersionString</key>
+              <string>0.0.0</string>
+          </dict>
+          </plist>
+          EOF
+
+          bundle_and_rewrite() {
+            local target="$1"
+            local dep
+            local dep_name
+            local dep_dst
+
+            chmod u+w "$target" || true
+
+            while read -r dep; do
+              case "$dep" in
+                /opt/homebrew/*)
+                  dep_name="$(basename "$dep")"
+                  dep_dst="$APP_FRAMEWORKS/$dep_name"
+
+                  if [ ! -e "$dep_dst" ]; then
+                    cp -L "$dep" "$dep_dst"
+                    chmod u+w "$dep_dst" || true
+                    install_name_tool -id "@executable_path/../Frameworks/$dep_name" "$dep_dst" || true
+                    bundle_and_rewrite "$dep_dst"
+                  fi
+
+                  install_name_tool -change "$dep" "@executable_path/../Frameworks/$dep_name" "$target" || true
+                  ;;
+              esac
+            done < <(otool -L "$target" | tail -n +2 | awk '{print $1}')
+          }
+
+          bundle_and_rewrite "$APP_MACOS/luagame"
+
+      - name: Show bundled executable links
+        run: otool -L deploy/macos/luagame.app/Contents/MacOS/luagame
+
+      - name: Ad-hoc sign app
+        run: codesign --force --deep --sign - deploy/macos/luagame.app
+
+      - name: Run bundled app
+        run: |
+          unset DYLD_FALLBACK_LIBRARY_PATH
+          ./deploy/macos/luagame.app/Contents/MacOS/luagame
+
+      - name: Show bundle smoke file
+        run: cat deploy/macos/luagame.app/Contents/MacOS/mac_smoke.txt
+
+      - name: Archive app bundle
+        run: tar -czf deploy/macos/luagame-macos-arm64.tar.gz -C deploy/macos luagame.app
+
+      - name: Upload app artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mac-smoke-output
-          path: build/mac_smoke.txt
+          name: luagame-macos-arm64
+          path: deploy/macos/luagame-macos-arm64.tar.gz
