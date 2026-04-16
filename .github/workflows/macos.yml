@@ -10,19 +10,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Mac deps needed for your build/runtime test
       - name: Install Homebrew deps
-        run: brew install luajit sdl3 sdl3_ttf
+        run: brew install llvm luajit sdl3 sdl3_ttf
 
-      # Install Odin into a local folder inside the runner workspace
-      - name: Install Odin
+      - name: Install Odin from source
         run: |
-          curl -L https://github.com/odin-lang/Odin/releases/latest/download/odin-macos-arm64-dev-2026-10.zip -o odin.zip
-          unzip odin.zip -d odin
+          git clone --depth=1 https://github.com/odin-lang/Odin odin
+          cd odin
+          git fetch --depth=1 origin tag dev-2026-04
+          git checkout dev-2026-04
+          LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config" make release-native
           echo "$GITHUB_WORKSPACE/odin" >> $GITHUB_PATH
           echo "ODIN_ROOT=$GITHUB_WORKSPACE/odin" >> $GITHUB_ENV
 
-      # Build miniaudio static archive for non-Windows
+      - name: Check Odin
+        run: odin version
+
       - name: Build miniaudio
         run: make -C "$ODIN_ROOT/vendor/miniaudio/src"
 
@@ -43,10 +46,8 @@ jobs:
           end
           EOF
 
-      # Build the mac executable
       - name: Build luagame
         run: odin build src -out:build/luagame
 
-      # Run it
       - name: Run luagame
         run: ./build/luagame
