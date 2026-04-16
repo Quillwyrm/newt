@@ -1,50 +1,23 @@
-name: mac-basic-test
+name: mac-brew-test
 
-# Only run when you click "Run workflow" in the Actions tab.
+# Show a "Run workflow" button in the Actions tab.
 on:
   workflow_dispatch:
 
 jobs:
-  test:
+  brew-test:
     # Apple Silicon macOS runner.
     runs-on: macos-26
 
     steps:
-      # Clone your repo onto the runner so later commands can see your files.
+      # Put your repo files onto the runner machine.
       - name: Check out repo
         uses: actions/checkout@v4
 
-      # Show basic machine info so you can confirm this really is a mac runner.
-      - name: Show OS info
-        run: |
-          echo "Runner OS: $RUNNER_OS"
-          echo "Workspace: $GITHUB_WORKSPACE"
-          uname -a
-          sw_vers
+      # Install the mac build dependencies you care about.
+      - name: Install Homebrew deps
+        run: brew install luajit sdl3 sdl3_ttf
 
-      # Show that your repo files are actually present on the runner.
-      - name: List repo files
-        run: |
-          pwd
-          ls
-          ls -la
-          find . -maxdepth 2 -type f | sort | head -200
-
-      # Check that Homebrew exists on this mac runner.
-      - name: Check brew
-        run: |
-          brew --version
-          brew config | head -20
-
-      # Tiny proof that shell commands work and files can be written.
-      - name: Write and read a test file
-        run: |
-          echo "hello from mac runner" > runner_test.txt
-          cat runner_test.txt
-
-      # Upload the tiny test file so you can download it from the workflow page.
-      - name: Upload test artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mac-basic-test-output
-          path: runner_test.txt
+      # Tiny sanity check so the log shows what got installed.
+      - name: Show installed versions
+        run: brew list --versions luajit sdl3 sdl3_ttf
