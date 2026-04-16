@@ -4,7 +4,6 @@ local gfx = graphics
 -- Engine Configuration (MUST BE BEFORE ENGINE INIT)
 -- =============================================================================
 audio.config_bus_delay_times({ 
-    [1] = 0, 
     [3] = 0.1,  
     [4] = 0.5, 
     [5] = 0.8   
@@ -66,18 +65,21 @@ local function apply_filter_preset(bus_id, label, lpf, hpf)
     end
 end
 
+local Res_Dir 
+
 runtime.init = function()
-    window.init(1280, 720, "Audio API Testbed", {"resizable"})
+    window.set_size(1280, 720)
+    Res_Dir = filesystem.get_resource_directory()
     gfx.set_default_filter("linear")
-    player_img = gfx.load_image("player.png")
+    player_img = gfx.load_image(Res_Dir .. "/player.png")
 
-    snd_sfx = audio.load_sound("test_sfx.wav", "static")
-    snd_music = audio.load_sound("test_bgm.ogg", "stream")
+    snd_sfx = audio.load_sound(Res_Dir .. "/test_sfx.wav", "static")
+    snd_music = audio.load_sound(Res_Dir .. "/test_bgm.ogg", "stream")
 
-    if snd_music then
-        bgm_handle = audio.play(snd_music, 2, 0.1, 1.0)
-        audio.set_voice_looping(bgm_handle, true)
-    end
+
+    bgm_handle = audio.play(snd_music, 2, 0.1, 1.0)
+    audio.set_voice_looping(bgm_handle, true)
+
 
     audio.set_bus_delay_feedback(3, 0.5)
     audio.set_bus_delay_feedback(4, 0.5)

@@ -144,12 +144,12 @@ local function find_entry(list, name)
     return nil
 end
 
-local resource_dir = filesystem.get_resource_dir()
+local resource_dir = filesystem.get_resource_directory()
 if type(resource_dir) ~= "string" then
     resource_dir = "."
 end
 
-local original_cwd = filesystem.get_working_dir()
+local original_cwd = filesystem.get_working_directory()
 if type(original_cwd) ~= "string" then
     original_cwd = resource_dir
 end
@@ -173,13 +173,13 @@ local SUITE_ROOT = join_path(original_cwd, "__luagame_test_" .. RUN_ID)
 local sandbox_counter = 0
 
 local function rm_tree(path)
-    local info = filesystem.info(path)
+    local info = filesystem.get_path_info(path)
     if not info then
         return
     end
 
-    if info.kind == "dir" then
-        local entries = filesystem.list_dir(path)
+    if info.kind == "directory" then
+        local entries = filesystem.list_directory(path)
         if type(entries) == "table" then
             for i = 1, #entries do
                 rm_tree(join_path(path, entries[i].name))
@@ -191,15 +191,15 @@ local function rm_tree(path)
 end
 
 local function ensure_suite_root()
-    local info = filesystem.info(SUITE_ROOT)
+    local info = filesystem.get_path_info(SUITE_ROOT)
     if info then
-        if info.kind == "dir" then
+        if info.kind == "directory" then
             return
         end
         fail("suite sandbox root exists but is not a directory")
     end
 
-    local ok_mkdir, err = filesystem.mkdir(SUITE_ROOT)
+    local ok_mkdir, err = filesystem.make_directory(SUITE_ROOT)
     if not ok_mkdir then
         fail("suite sandbox root create failed: " .. tostring(err))
     end
@@ -210,7 +210,7 @@ local function new_sandbox(tag)
     sandbox_counter = sandbox_counter + 1
 
     local dir = join_path(SUITE_ROOT, string.format("%02d_%s", sandbox_counter, tag))
-    local ok_mkdir, err = filesystem.mkdir(dir)
+    local ok_mkdir, err = filesystem.make_directory(dir)
     if not ok_mkdir then
         fail("sandbox create failed: " .. tostring(err))
     end
@@ -450,53 +450,53 @@ local function run_filesystem_tests()
     section("filesystem")
 
     test("filesystem.*", "representative arity misuse throws", function()
-        expect_throw(function() filesystem.get_resource_dir(1) end)
-        expect_throw(function() filesystem.get_working_dir(1) end)
-        expect_throw(function() filesystem.set_working_dir() end)
+        expect_throw(function() filesystem.get_resource_directory(1) end)
+        expect_throw(function() filesystem.get_working_directory(1) end)
+        expect_throw(function() filesystem.set_working_directory() end)
         expect_throw(function() filesystem.get_args(1) end)
-        expect_throw(function() filesystem.list_dir() end)
-        expect_throw(function() filesystem.info() end)
+        expect_throw(function() filesystem.list_directory() end)
+        expect_throw(function() filesystem.get_path_info() end)
         expect_throw(function() filesystem.read_file() end)
         expect_throw(function() filesystem.write_file("x") end)
-        expect_throw(function() filesystem.mkdir() end)
+        expect_throw(function() filesystem.make_directory() end)
         expect_throw(function() filesystem.rename("x") end)
         expect_throw(function() filesystem.remove() end)
     end)
 
-    test("filesystem.get_resource_dir", "returns string", function()
-        local dir, err = filesystem.get_resource_dir()
+    test("filesystem.get_resource_directory", "returns string", function()
+        local dir, err = filesystem.get_resource_directory()
         ok(dir, err)
         is_type(dir, "string")
     end)
 
-    test("filesystem.get_working_dir", "returns string", function()
-        local dir, err = filesystem.get_working_dir()
+    test("filesystem.get_working_directory", "returns string", function()
+        local dir, err = filesystem.get_working_directory()
         ok(dir, err)
         is_type(dir, "string")
     end)
 
-    test("filesystem.set_working_dir/get_working_dir", "roundtrips and restores", function()
-        local cwd, err = filesystem.get_working_dir()
+    test("filesystem.set_working_directory/get_working_directory", "roundtrips and restores", function()
+        local cwd, err = filesystem.get_working_directory()
         ok(cwd, err)
 
         local dir = new_sandbox("cwd")
-        local ok_set, err_set = filesystem.set_working_dir(dir)
+        local ok_set, err_set = filesystem.set_working_directory(dir)
         ok(ok_set, err_set)
 
-        local changed, err_changed = filesystem.get_working_dir()
+        local changed, err_changed = filesystem.get_working_directory()
         ok(changed, err_changed)
         eq(changed, dir)
 
-        local ok_restore, err_restore = filesystem.set_working_dir(cwd)
+        local ok_restore, err_restore = filesystem.set_working_directory(cwd)
         ok(ok_restore, err_restore)
 
-        local restored, err_restored = filesystem.get_working_dir()
+        local restored, err_restored = filesystem.get_working_directory()
         ok(restored, err_restored)
         eq(restored, cwd)
     end)
 
-    test("filesystem.set_working_dir", "missing path returns false, err", function()
-        local ok_set, err = filesystem.set_working_dir(join_path(SUITE_ROOT, "does_not_exist"))
+    test("filesystem.set_working_directory", "missing path returns false, err", function()
+        local ok_set, err = filesystem.set_working_directory(join_path(SUITE_ROOT, "does_not_exist"))
         expect_false_err(ok_set, err)
     end)
 
@@ -508,9 +508,9 @@ local function run_filesystem_tests()
         end
     end)
 
-    test("filesystem.mkdir", "existing dir returns false, err", function()
+    test("filesystem.make_directory", "existing dir returns false, err", function()
         local dir = new_sandbox("fs_mkdir_exists")
-        local ok_mkdir, err = filesystem.mkdir(dir)
+        local ok_mkdir, err = filesystem.make_directory(dir)
         expect_false_err(ok_mkdir, err)
     end)
 
@@ -520,7 +520,7 @@ local function run_filesystem_tests()
         ok(ok_remove, err)
     end)
 
-    test("filesystem.mkdir/write_file/read_file/info/list_dir/rename/remove", "roundtrip and metadata", function()
+    test("filesystem.make_directory/write_file/read_file/get_path_info/list_directory/rename/remove", "roundtrip and metadata", function()
         local dir = new_sandbox("fs_roundtrip")
         local file_a = join_path(dir, "roundtrip.bin")
         local file_b = join_path(dir, "renamed.bin")
@@ -532,14 +532,14 @@ local function run_filesystem_tests()
         ok(data, err_read)
         eq(data, "hello")
 
-        local info, err_info = filesystem.info(file_a)
+        local info, err_info = filesystem.get_path_info(file_a)
         ok(info, err_info)
         eq(type(info), "table")
         eq(info.kind, "file")
         is_type(info.size, "number")
         is_type(info.modified_time, "number")
 
-        local items, err_list = filesystem.list_dir(dir)
+        local items, err_list = filesystem.list_directory(dir)
         ok(items, err_list)
         local entry = find_entry(items, "roundtrip.bin")
         ok(entry, "missing directory entry")
@@ -556,17 +556,17 @@ local function run_filesystem_tests()
         ok(ok_remove, err_remove)
     end)
 
-    test("filesystem.list_dir", "mixed file and directory kinds", function()
+    test("filesystem.list_directory", "mixed file and directory kinds", function()
         local dir = new_sandbox("fs_mixed")
-        filesystem.mkdir(join_path(dir, "subdir"))
+        filesystem.make_directory(join_path(dir, "subdir"))
         filesystem.write_file(join_path(dir, "file.txt"), "data")
 
-        local items = filesystem.list_dir(dir)
+        local items = filesystem.list_directory(dir)
         local d_entry = find_entry(items, "subdir")
         local f_entry = find_entry(items, "file.txt")
 
         ok(d_entry, "missing subdir entry")
-        eq(d_entry.kind, "dir")
+        eq(d_entry.kind, "directory")
         ok(f_entry, "missing file entry")
         eq(f_entry.kind, "file")
     end)
@@ -603,15 +603,15 @@ local function run_filesystem_tests()
         expect_false_err(ok_write, err)
     end)
 
-    test("filesystem.list_dir", "missing dir returns nil, err", function()
+    test("filesystem.list_directory", "missing dir returns nil, err", function()
         local dir = new_sandbox("fs_missing_list")
-        local items, err = filesystem.list_dir(join_path(dir, "missing_dir"))
+        local items, err = filesystem.list_directory(join_path(dir, "missing_dir"))
         expect_nil_err(items, err)
     end)
 
-    test("filesystem.info", "missing path returns nil, err", function()
+    test("filesystem.get_path_info", "missing path returns nil, err", function()
         local dir = new_sandbox("fs_missing_info")
-        local info, err = filesystem.info(join_path(dir, "missing.bin"))
+        local info, err = filesystem.get_path_info(join_path(dir, "missing.bin"))
         expect_nil_err(info, err)
     end)
 
@@ -1521,7 +1521,7 @@ local function run_audio_runtime_tests()
         expect_nothrow(function() audio.set_voice_velocity(handle, 5, 6) end)
         expect_nothrow(function() audio.set_voice_falloff(handle, 100) end)
         expect_nothrow(function() audio.set_voice_falloff(handle, 100, 500) end)
-        expect_nothrow(function() audio.set_voice_rolloff(handle, 1.5) end)
+        expect_nothrow(function() audio.set_voice_falloff_intensity(handle, 1.5) end)
 
         expect_nothrow(function() audio.set_voice_falloff_mode(handle, "none") end)
         expect_nothrow(function() audio.set_voice_falloff_mode(handle, "exponential") end)
@@ -1553,7 +1553,7 @@ local function run_audio_runtime_tests()
         expect_nothrow(function() audio.set_voice_position(handle, 0, 0) end)
         expect_nothrow(function() audio.set_voice_velocity(handle, 0, 0) end)
         expect_nothrow(function() audio.set_voice_falloff(handle, 50, 100) end)
-        expect_nothrow(function() audio.set_voice_rolloff(handle, 1.0) end)
+        expect_nothrow(function() audio.set_voice_falloff_intensity(handle, 1.0) end)
         expect_nothrow(function() audio.pause_voice(handle) end)
         expect_nothrow(function() audio.resume_voice(handle) end)
         expect_nothrow(function() audio.stop_voice(handle) end)
@@ -1896,15 +1896,15 @@ local function finalize_and_exit()
 
     section("cleanup")
 
-    test("filesystem cleanup", "sandbox cleanup leaves working dir restored", function()
-        filesystem.set_working_dir(original_cwd)
+    test("filesystem cleanup", "sandbox cleanup leaves working directory restored", function()
+        filesystem.set_working_directory(original_cwd)
         rm_tree(SUITE_ROOT)
 
-        local cwd, err = filesystem.get_working_dir()
+        local cwd, err = filesystem.get_working_directory()
         ok(cwd, err)
         eq(cwd, original_cwd)
 
-        local info = filesystem.info(SUITE_ROOT)
+        local info = filesystem.get_path_info(SUITE_ROOT)
         eq(info, nil)
     end)
 

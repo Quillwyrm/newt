@@ -13,7 +13,7 @@ local C = {
 }
 
 runtime.init = function()
-  window.init(W * SCALE, H * SCALE, "Test: Final Shape API")
+  window.set_size(W * SCALE, H * SCALE)
   gfx.set_default_filter("nearest")
 
   pmap = gfx.new_pixelmap(W, H)
@@ -64,19 +64,19 @@ end
 runtime.draw = function()
   gfx.clear(C.BG)
   
-  gfx.begin_transform_group()
-    gfx.set_draw_scale(SCALE, SCALE)
+  gfx.begin_transform()
+    gfx.set_scale(SCALE, SCALE)
     gfx.draw_image(img, 0, 0)
-  gfx.end_transform_group()
+  gfx.end_transform()
   
   local info = string.format("Rad: %d | Thick: %.1f | [ ] Rad | - = Thick", radius, thickness)
-  gfx.draw_debug_text(10, 10, info, C.TEXT)
+  gfx.debug_text(10, 10, info, C.TEXT)
   
   local label_y = (H / 2 + 45) * SCALE
   local step_px = (W / 4) * SCALE
   
-  gfx.draw_debug_text(step_px * 0.5 - 30, label_y, "Capsule", C.TEXT)
-  gfx.draw_debug_text(step_px * 1.5 - 25, label_y, "Circle", C.TEXT)
-  gfx.draw_debug_text(step_px * 2.5 - 25, label_y, "Donut", C.TEXT)
-  gfx.draw_debug_text(step_px * 3.5 - 40, label_y, "PxOutline", C.TEXT)
+  gfx.debug_text(step_px * 0.5 - 30, label_y, "Capsule", C.TEXT)
+  gfx.debug_text(step_px * 1.5 - 25, label_y, "Circle", C.TEXT)
+  gfx.debug_text(step_px * 2.5 - 25, label_y, "Donut", C.TEXT)
+  gfx.debug_text(step_px * 3.5 - 40, label_y, "PxOutline", C.TEXT)
 end

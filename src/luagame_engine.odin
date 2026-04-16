@@ -367,7 +367,8 @@ main :: proc() {
     register_lua_api()
     init_graphics_state()
 
-    Resource_Directory_Path, err := os.get_executable_directory(context.allocator)
+    err: os.Error
+    Resource_Directory_Path, err = os.get_executable_directory(context.allocator)
     if err != os.ERROR_NONE {
         fatal_engine_error(fmt.caprintf("engine.boot: failed to get executable directory: %v", err))
     }

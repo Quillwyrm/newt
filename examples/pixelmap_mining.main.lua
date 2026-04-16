@@ -41,7 +41,7 @@ local function can_move(x, y)
 end
 
 runtime.init = function()
-  window.init(W * SCALE, H * SCALE, "Toy: Mining Laser + Movement")
+  window.set_size(W * SCALE, H * SCALE)
   gfx.set_default_filter("nearest")
 
   pmap_terrain = gfx.new_pixelmap(W, H)
@@ -122,5 +122,5 @@ runtime.draw = function()
   
   gfx.end_transform()
 
-  gfx.draw_debug_text(10, 10, "WASD: Move | LMB: Mine Terrain", C.WHITE)
+  gfx.debug_text(10, 10, "WASD: Move | LMB: Mine Terrain", C.WHITE)
 end
