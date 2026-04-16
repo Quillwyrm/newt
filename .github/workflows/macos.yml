@@ -1,0 +1,26 @@
+name: mac-luajit-inspect
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: macos-26
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install luajit only
+        run: brew install luajit
+
+      - name: Show luajit prefix
+        run: brew --prefix luajit
+
+      - name: List luajit lib files
+        run: ls -la "$(brew --prefix luajit)/lib"
+
+      - name: List luajit include files
+        run: ls -la "$(brew --prefix luajit)/include"
+
+      - name: Find luajit libs recursively
+        run: find "$(brew --prefix luajit)" | grep luajit
