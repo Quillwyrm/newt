@@ -1,26 +1,64 @@
-name: mac-luajit-inspect
+name: mac-build-smoke-test
 
 on:
   workflow_dispatch:
 
 jobs:
-  inspect:
+  smoke:
     runs-on: macos-26
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install luajit only
-        run: brew install luajit
+      # Native deps for Luagame on the mac runner
+      - name: Install deps
+        run: brew install llvm luajit sdl3 sdl3_ttf
 
-      - name: Show luajit prefix
-        run: brew --prefix luajit
+      # Build Odin from source exactly the way that already worked for you
+      - name: Install Odin
+        run: |
+          git clone --depth=1 https://github.com/odin-lang/Odin odin
+          cd odin
+          git fetch --depth=1 origin tag dev-2026-04
+          git checkout dev-2026-04
+          LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config" make release-native
+          echo "$GITHUB_WORKSPACE/odin" >> "$GITHUB_PATH"
+          echo "ODIN_ROOT=$GITHUB_WORKSPACE/odin" >> "$GITHUB_ENV"
 
-      - name: List luajit lib files
-        run: ls -la "$(brew --prefix luajit)/lib"
+      - name: Check Odin
+        run: odin version
 
-      - name: List luajit include files
-        run: ls -la "$(brew --prefix luajit)/include"
+      # Make sure linker/runtime can see brewed libs
+      - name: Export brew library paths
+        run: |
+          echo "LIBRARY_PATH=/opt/homebrew/lib:$(brew --prefix luajit)/lib:$(brew --prefix sdl3)/lib:$(brew --prefix sdl3_ttf)/lib:$LIBRARY_PATH" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib:$(brew --prefix luajit)/lib:$(brew --prefix sdl3)/lib:$(brew --prefix sdl3_ttf)/lib:$DYLD_FALLBACK_LIBRARY_PATH" >> "$GITHUB_ENV"
 
-      - name: Find luajit libs recursively
-        run: find "$(brew --prefix luajit)" | grep luajit
+      - name: Build miniaudio
+        run: make -C "$ODIN_ROOT/vendor/miniaudio/src"
+
+      - name: Create test main.lua
+        run: |
+          mkdir -p build/lua
+          cat > build/lua/main.lua <<'EOF'
+          runtime.init = function()
+              local resdir = filesystem.get_resource_directory()
+              local cwd = filesystem.get_working_directory()
+              local charw, charh = graphics.measure_text("@")
+              local winw, winh = window.get_size()
+
+              print(string.format("resdir: %s", tostring(resdir)))
+              print(string.format("cwd: %s", tostring(cwd)))
+              print(string.format("char: %s x %s", tostring(charw), tostring(charh)))
+              print(string.format("window: %s x %s", tostring(winw), tostring(winh)))
+          end
+          EOF
+
+      - name: Build luagame
+        run: odin build src -out:build/luagame
+
+      - name: Show linked libraries
+        run: otool -L build/luagame
+
+      - name: Run luagame
+        run: ./build/luagame
