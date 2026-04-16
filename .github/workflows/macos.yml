@@ -1,53 +1,26 @@
-name: mac-build-smoke-test
+name: mac-luajit-inspect
 
 on:
   workflow_dispatch:
 
 jobs:
-  smoke:
+  inspect:
     runs-on: macos-26
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Homebrew deps
-        run: brew install llvm luajit sdl3 sdl3_ttf
+      - name: Install luajit only
+        run: brew install luajit
 
-      - name: Install Odin from source
-        run: |
-          git clone --depth=1 https://github.com/odin-lang/Odin odin
-          cd odin
-          git fetch --depth=1 origin tag dev-2026-04
-          git checkout dev-2026-04
-          LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config" make release-native
-          echo "$GITHUB_WORKSPACE/odin" >> $GITHUB_PATH
-          echo "ODIN_ROOT=$GITHUB_WORKSPACE/odin" >> $GITHUB_ENV
+      - name: Show luajit prefix
+        run: brew --prefix luajit
 
-      - name: Check Odin
-        run: odin version
+      - name: List luajit lib files
+        run: ls -la "$(brew --prefix luajit)/lib"
 
-      - name: Build miniaudio
-        run: make -C "$ODIN_ROOT/vendor/miniaudio/src"
+      - name: List luajit include files
+        run: ls -la "$(brew --prefix luajit)/include"
 
-      - name: Create test main.lua
-        run: |
-          mkdir -p build/lua
-          cat > build/lua/main.lua <<'EOF'
-          runtime.init = function()
-              local resdir = filesystem.get_resource_directory()
-              local cwd = filesystem.get_working_directory()
-              local charw, charh = graphics.measure_text("@")
-              local winw, winh = window.get_size()
-
-              print(string.format("resdir: %s", tostring(resdir)))
-              print(string.format("cwd: %s", tostring(cwd)))
-              print(string.format("char: %s x %s", tostring(charw), tostring(charh)))
-              print(string.format("window: %s x %s", tostring(winw), tostring(winh)))
-          end
-          EOF
-
-      - name: Build luagame
-        run: odin build src -out:build/luagame
-
-      - name: Run luagame
-        run: ./build/luagame
+      - name: Find luajit libs recursively
+        run: find "$(brew --prefix luajit)" | grep luajit
