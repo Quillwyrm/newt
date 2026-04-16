@@ -149,12 +149,13 @@ jobs:
       - name: Sign app for smoke test
         run: codesign --force --deep --sign - deploy/macos/luagame.app
 
-      - name: Run bundled app smoke test
+      - name: Run app smoke test
         run: |
           unset DYLD_FALLBACK_LIBRARY_PATH
-          ./deploy/macos/luagame.app/Contents/MacOS/luagame
+          rm -f deploy/macos/luagame.app/Contents/MacOS/mac_smoke.txt
+          open -W -n "$PWD/deploy/macos/luagame.app"
 
-      - name: Show bundle smoke file
+      - name: Show smoke file
         run: cat deploy/macos/luagame.app/Contents/MacOS/mac_smoke.txt
 
       - name: Replace main.lua with hello world
