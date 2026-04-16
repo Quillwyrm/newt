@@ -1,23 +1,45 @@
-name: mac-brew-test
+name: mac-build-smoke-test
 
-# Show a "Run workflow" button in the Actions tab.
 on:
   workflow_dispatch:
 
 jobs:
-  brew-test:
-    # Apple Silicon macOS runner.
+  smoke:
     runs-on: macos-26
 
     steps:
-      # Put your repo files onto the runner machine.
-      - name: Check out repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Install the mac build dependencies you care about.
       - name: Install Homebrew deps
         run: brew install luajit sdl3 sdl3_ttf
 
-      # Tiny sanity check so the log shows what got installed.
-      - name: Show installed versions
-        run: brew list --versions luajit sdl3 sdl3_ttf
+      - name: Install Odin
+        run: |
+          # put your Odin install stuff here
+          # and set ODIN_ROOT / PATH
+
+      - name: Build miniaudio
+        run: make -C "$ODIN_ROOT/vendor/miniaudio/src"
+
+      - name: Create test main.lua
+        run: |
+          mkdir -p build/lua
+          cat > build/lua/main.lua <<'EOF'
+          runtime.init = function()
+              local resdir = filesystem.get_resource_directory()
+              local cwd = filesystem.get_working_directory()
+              local charw, charh = graphics.measure_text("@")
+              local winw, winh = window.get_size()
+
+              print(string.format("resdir: %s", tostring(resdir)))
+              print(string.format("cwd: %s", tostring(cwd)))
+              print(string.format("char: %s x %s", tostring(charw), tostring(charh)))
+              print(string.format("window: %s x %s", tostring(winw), tostring(winh)))
+          end
+          EOF
+
+      - name: Build luagame
+        run: odin build src -out:build/luagame
+
+      - name: Run luagame
+        run: ./build/luagame
