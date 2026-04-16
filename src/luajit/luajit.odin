@@ -21,7 +21,9 @@ import "base:builtin"
 import "base:intrinsics"
 import "core:c/libc"
 import "core:c"
-foreign import lj "lua51.lib"
+
+when ODIN_OS == .Windows do foreign import lj "lua51.lib"
+when ODIN_OS == .Darwin  do foreign import lj "system:luajit-5.1"
 
 #assert(size_of(c.int) == size_of(b32))
 
