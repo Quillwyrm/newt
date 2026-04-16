@@ -36,21 +36,25 @@ jobs:
 
       - name: Build miniaudio
         run: make -C "$ODIN_ROOT/vendor/miniaudio/src"
-
+        
       - name: Create test main.lua
         run: |
           mkdir -p build/lua
           cat > build/lua/main.lua <<'EOF'
           runtime.init = function()
               local resdir = filesystem.get_resource_directory()
-              local cwd = filesystem.get_working_directory()
+              local cwd, cwd_err = filesystem.get_working_directory()
               local charw, charh = graphics.measure_text("@")
               local winw, winh = window.get_size()
 
-              print(string.format("resdir: %s", tostring(resdir)))
-              print(string.format("cwd: %s", tostring(cwd)))
-              print(string.format("char: %s x %s", tostring(charw), tostring(charh)))
-              print(string.format("window: %s x %s", tostring(winw), tostring(winh)))
+              local out = ""
+              out = out .. "resdir=" .. tostring(resdir) .. "\n"
+              out = out .. "cwd=" .. tostring(cwd or cwd_err) .. "\n"
+              out = out .. "char=" .. tostring(charw) .. "x" .. tostring(charh) .. "\n"
+              out = out .. "window=" .. tostring(winw) .. "x" .. tostring(winh) .. "\n"
+
+              filesystem.write_file(resdir .. "/mac_smoke.txt", out)
+              window.close()
           end
           EOF
 
@@ -62,3 +66,12 @@ jobs:
 
       - name: Run luagame
         run: ./build/luagame
+
+      - name: Show smoke file
+        run: cat build/mac_smoke.txt
+
+      - name: Upload smoke file
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-smoke-output
+          path: build/mac_smoke.txt
