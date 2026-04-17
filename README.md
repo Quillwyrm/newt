@@ -1,6 +1,6 @@
-# Luagame
+# Newt🦎
 
-Luagame is a lightweight, scriptable 2D game engine. It uses a high-performance host environment (written in Odin) to handle windowing, rendering, audio, and input, while deferring all application logic and state to Lua scripts. 
+Newt is a lightweight, Lua scripted 2D game engine. It provides a performant host environment (written in Odin) to handle windowing, rendering, audio, and input, while deferring all application logic and state to Lua scripts. 
 
 The goal is a fast, "no bullshit" development experience: drop in your assets, write some Lua, and run.
 
