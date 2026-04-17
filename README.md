@@ -1,69 +1,51 @@
-# Newt🦎
+# Newt 🦎
 
-Newt is a lightweight, Lua scripted 2D game engine. It provides a performant host environment (written in Odin) to handle windowing, rendering, audio, and input, while deferring all application logic and state to Lua scripts. 
+Newt is a nimble framework for making 2D games with Lua.
 
-The goal is a fast, "no bullshit" development experience: drop in your assets, write some Lua, and run.
+## What you get
 
-### Features
-* **Script-Driven:** Complete control over the application lifecycle via Lua callbacks.
-* **Graphics:** Hardware-accelerated 2D rendering with sprite batching and CPU pixelmap rasterization.
-* **Audio:** Real-time 8-bus mixing engine with 3D spatialization and DSP effects.
-* **Input:** Clean state polling and edge detection for keyboard and mouse.
-* **Filesystem:** Directory management and file I/O.
+- 2D graphics with images, text, fonts, render targets, transforms, and CPU pixel read/write, drawing, and utilities
+- Audio playback with mixing, 2D spatialization, and effects
+- Keyboard, mouse, text input, clipboard, cursor, and window control
+- Filesystem access, working directory control, and file operations
+- Grid utilities for pathfinding, distance maps, reachability, visibility, and more
 
----
-
-## Quick Start
-
-The engine expects a specific file layout relative to the executable. Your entire game lives inside the `lua/` directory, starting with `main.lua`.
-
-```sh
-/luagame_project
-  ├── luagame.exe
-  ├── SDL3.dll
-  ├── SDL3_ttf.dll
-  └── lua/
-       └── main.lua
-```
-
-### Minimal Example (`main.lua`)
+## Example
 
 ```lua
--- Initialize the window
-function runtime.init()
-    window.init(800, 600, "Hello Luagame")
+runtime.init = function()
+    window.set_title("Hello Newt")
+    window.set_size(800, 600)
 end
 
--- Handle logic
-function runtime.update(dt)
-    if input.pressed("escape") then 
-        window.close() 
+runtime.update = function(dt)
+    if input.pressed("escape") then
+        window.close()
     end
 end
 
--- Render the frame
-function runtime.draw()
-    graphics.clear(rgba("#1E1E2E"))
-    graphics.draw_debug_text(10, 10, "Luagame is running.", rgba(255, 255, 255))
+runtime.draw = function()
+    graphics.clear(rgba(20, 20, 24))
+    graphics.draw_text("hello from newt", 16, 16)
 end
 ```
 
----
+## Getting Started
+
+Newt looks for `lua/main.lua` in the project resource directory. That file is your application entry point.
+
+- [Getting Started](docs/getting_started.md)
+- [GitHub Releases](../../releases)
 
 ## Documentation
 
-The complete API documentation, including detailed overviews of all core modules, is available in the [Luagame API Reference](docs/api_ref.md).
+- [API Reference](docs/api_ref.md)
 
-* `runtime` - Application lifecycle hooks (`init`, `update`, `draw`).
-* `window` - Window management, cursor control, and clipboard access.
-* `graphics` - 2D hardware rendering and sprite management.
-* `audio` - Real-time 8-bus mixing and 3D spatialization.
-* `input` - Keyboard and mouse state polling.
-* `filesystem` - File I/O and directory management.
-* `core` - Global primitives and manual memory management.
+## Platforms
 
----
+- Windows
+- macOS (Apple Silicon)
 
 ## Status
 
-**Active Development.** The core API is stabilizing but is still subject to change.
+Newt is in active development.
