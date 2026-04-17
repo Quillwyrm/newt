@@ -13,20 +13,24 @@ Newt is a nimble framework for making 2D games with Lua.
 ## Example
 
 ```lua
+local x, y = 400, 300
+local speed = 420
+
 runtime.init = function()
-    window.set_title("Hello Newt")
-    window.set_size(800, 600)
+    window.set_title("Welcome to Newt!")
 end
 
 runtime.update = function(dt)
-    if input.pressed("escape") then
-        window.close()
-    end
+    if input.down("a") or input.down("left")  then x = x - speed * dt end
+    if input.down("d") or input.down("right") then x = x + speed * dt end
+    if input.down("w") or input.down("up")    then y = y - speed * dt end
+    if input.down("s") or input.down("down")  then y = y + speed * dt end
 end
 
 runtime.draw = function()
-    graphics.clear(rgba(20, 20, 24))
-    graphics.draw_text("hello from newt", 16, 16)
+    graphics.clear(rgba(20, 30, 20))
+    graphics.draw_text("WASD or arrow keys to move", 16, 16, rgba("#00FF00"))
+    graphics.draw_rect(x, y, 32, 32, rgba("#00FF00"))
 end
 ```
 
