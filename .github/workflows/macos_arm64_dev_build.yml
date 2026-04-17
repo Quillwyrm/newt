@@ -12,7 +12,7 @@ env:
 
 jobs:
   dev-build:
-    runs-on: macos-26
+    runs-on: macos-15
 
     steps:
       - uses: actions/checkout@v4
@@ -70,9 +70,9 @@ jobs:
               window.close()
           end
           EOF
-
+          
       - name: Build luagame
-        run: odin build src -out:build/luagame
+        run: odin build src -out:build/luagame -minimum-os-version:15.0
 
       - name: Package app bundle
         run: |
@@ -110,6 +110,8 @@ jobs:
               <string>0.0.0</string>
               <key>CFBundleShortVersionString</key>
               <string>0.0.0</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>15.0</string>
           </dict>
           </plist>
           EOF
@@ -142,6 +144,9 @@ jobs:
           }
 
           bundle_and_rewrite "$APP_MACOS/luagame"
+
+      - name: Show min OS version of main executable
+        run: otool -l deploy/macos/luagame.app/Contents/MacOS/luagame | grep -A 4 LC_BUILD_VERSION
 
       - name: Show bundled executable links
         run: otool -L deploy/macos/luagame.app/Contents/MacOS/luagame
