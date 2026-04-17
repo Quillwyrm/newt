@@ -1,10 +1,6 @@
 local gfx = graphics
 local bit = require("bit")
 
-local function rgba(r, g, b, a)
-  return bit.bor(bit.lshift(r, 24), bit.lshift(g, 16), bit.lshift(b, 8), a)
-end
-
 -- 16:9 Low-Res Playfield
 local W, H = 320, 180
 local SCALE = 4
