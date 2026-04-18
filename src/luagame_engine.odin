@@ -413,6 +413,8 @@ main :: proc() {
         Window = nil
         fatal_engine_error(fmt.caprintf("engine.boot: SDL_CreateRenderer failed: %s", sdl.GetError()))
     }
+    //sync Renderer blend mode with engine global ctx
+    sdl.SetRenderDrawBlendMode(Renderer, Gfx_Ctx.current_blend_mode)
 
     if !sdl.SetRenderVSync(Renderer, 1) {
         sdl.DestroyRenderer(Renderer)
