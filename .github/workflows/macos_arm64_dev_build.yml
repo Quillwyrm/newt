@@ -1,4 +1,4 @@
-name: macos_arm64_dev_build
+name: newt_macos_arm64_dev_build
 
 on:
   workflow_dispatch:
@@ -10,6 +10,12 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   ODIN_VERSION: dev-2026-04
 
+  APP_NAME: newt
+  APP_DISPLAY_NAME: Newt
+  BUNDLE_ID: com.quillwyrm.newt
+  APP_VERSION: 0.0.0
+  MIN_MACOS_VERSION: 15.0
+
 jobs:
   dev-build:
     runs-on: macos-15
@@ -17,15 +23,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install deps
-        run: brew install llvm luajit sdl3 sdl3_ttf
-
       - name: Restore Odin cache
         id: odin-cache
         uses: actions/cache@v4
         with:
           path: odin
           key: macos-arm64-odin-${{ env.ODIN_VERSION }}
+
+      - name: Install deps
+        run: brew install llvm luajit sdl3 sdl3_ttf
 
       - name: Build Odin
         if: steps.odin-cache.outputs.cache-hit != 'true'
@@ -70,48 +76,55 @@ jobs:
               window.close()
           end
           EOF
-          
-      - name: Build luagame
-        run: odin build src -out:build/luagame -minimum-os-version:15.0
+
+      - name: Build Newt
+        run: odin build src -out:build/$APP_NAME -minimum-os-version:$MIN_MACOS_VERSION
 
       - name: Package app bundle
         run: |
           set -e
 
-          APP_ROOT="deploy/macos/luagame.app"
+          ICON_SRC="platform/macOS/newt.icns"
+          test -f "$ICON_SRC"
+
+          APP_ROOT="deploy/macos/$APP_NAME.app"
           APP_CONTENTS="$APP_ROOT/Contents"
           APP_MACOS="$APP_CONTENTS/MacOS"
           APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
+          APP_RESOURCES="$APP_CONTENTS/Resources"
 
           rm -rf "$APP_ROOT"
-          mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS"
+          mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES"
 
-          cp build/luagame "$APP_MACOS/luagame"
-          chmod +x "$APP_MACOS/luagame"
+          cp "build/$APP_NAME" "$APP_MACOS/$APP_NAME"
+          chmod +x "$APP_MACOS/$APP_NAME"
 
           cp -R build/lua "$APP_MACOS/"
+          cp "$ICON_SRC" "$APP_RESOURCES/newt.icns"
 
-          cat > "$APP_CONTENTS/Info.plist" <<'EOF'
+          cat > "$APP_CONTENTS/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
               <key>CFBundleExecutable</key>
-              <string>luagame</string>
+              <string>$APP_NAME</string>
               <key>CFBundleIdentifier</key>
-              <string>com.quillwyrm.luagame</string>
+              <string>$BUNDLE_ID</string>
               <key>CFBundleName</key>
-              <string>luagame</string>
+              <string>$APP_DISPLAY_NAME</string>
               <key>CFBundleDisplayName</key>
-              <string>luagame</string>
+              <string>$APP_DISPLAY_NAME</string>
+              <key>CFBundleIconFile</key>
+              <string>newt</string>
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleVersion</key>
-              <string>0.0.0</string>
+              <string>$APP_VERSION</string>
               <key>CFBundleShortVersionString</key>
-              <string>0.0.0</string>
+              <string>$APP_VERSION</string>
               <key>LSMinimumSystemVersion</key>
-              <string>15.0</string>
+              <string>$MIN_MACOS_VERSION</string>
           </dict>
           </plist>
           EOF
@@ -143,31 +156,31 @@ jobs:
             done < <(otool -L "$target" | tail -n +2 | awk '{print $1}')
           }
 
-          bundle_and_rewrite "$APP_MACOS/luagame"
+          bundle_and_rewrite "$APP_MACOS/$APP_NAME"
 
       - name: Show min OS version of main executable
-        run: otool -l deploy/macos/luagame.app/Contents/MacOS/luagame | grep -A 4 LC_BUILD_VERSION
+        run: otool -l deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME | grep -A 4 LC_BUILD_VERSION
 
       - name: Show bundled executable links
-        run: otool -L deploy/macos/luagame.app/Contents/MacOS/luagame
+        run: otool -L deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME
 
       - name: Sign app for smoke test
-        run: codesign --force --deep --sign - deploy/macos/luagame.app
+        run: codesign --force --deep --sign - deploy/macos/$APP_NAME.app
 
       - name: Run app smoke test
         run: |
           unset DYLD_FALLBACK_LIBRARY_PATH
-          rm -f deploy/macos/luagame.app/Contents/MacOS/mac_smoke.txt
-          open -W -n "$PWD/deploy/macos/luagame.app"
+          rm -f "deploy/macos/$APP_NAME.app/Contents/MacOS/mac_smoke.txt"
+          open -W -n "$PWD/deploy/macos/$APP_NAME.app"
 
       - name: Show smoke file
-        run: cat deploy/macos/luagame.app/Contents/MacOS/mac_smoke.txt
+        run: cat deploy/macos/$APP_NAME.app/Contents/MacOS/mac_smoke.txt
 
       - name: Replace main.lua with hello world
         run: |
-          cat > deploy/macos/luagame.app/Contents/MacOS/lua/main.lua <<'EOF'
-          local px, py = 16, 16 -- Position
-          local pw, ph          -- Scale
+          cat > "deploy/macos/$APP_NAME.app/Contents/MacOS/lua/main.lua" <<'EOF'
+          local px, py = 16, 16
+          local pw, ph
 
           runtime.init = function()
               window.set_title("Hello World!")
@@ -187,18 +200,18 @@ jobs:
           end
           EOF
 
-          rm -f deploy/macos/luagame.app/Contents/MacOS/mac_smoke.txt
-          find deploy/macos/luagame.app -name '.DS_Store' -delete
-          find deploy/macos/luagame.app -name '._*' -delete
+          rm -f "deploy/macos/$APP_NAME.app/Contents/MacOS/mac_smoke.txt"
+          find "deploy/macos/$APP_NAME.app" -name '.DS_Store' -delete
+          find "deploy/macos/$APP_NAME.app" -name '._*' -delete
 
       - name: Re-sign final dev app
-        run: codesign --force --deep --sign - deploy/macos/luagame.app
+        run: codesign --force --deep --sign - deploy/macos/$APP_NAME.app
 
       - name: Archive app bundle
-        run: tar -czf deploy/macos/luagame-macos-arm64-dev.tar.gz -C deploy/macos luagame.app
+        run: tar -czf "deploy/macos/$APP_NAME-macos-arm64-dev.tar.gz" -C deploy/macos "$APP_NAME.app"
 
       - name: Upload app artifact
         uses: actions/upload-artifact@v4
         with:
-          name: luagame-macos-arm64-dev
-          path: deploy/macos/luagame-macos-arm64-dev.tar.gz
+          name: newt-macos-arm64-dev
+          path: deploy/macos/newt-macos-arm64-dev.tar.gz
