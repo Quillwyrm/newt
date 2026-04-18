@@ -10,7 +10,7 @@ import sdl "vendor:sdl3"
 import "vendor:sdl3/ttf"
 import stbi "vendor:stb/image"
 
-BUILTIN_DEFAULT_FONT_SIZE :: f32(16.0)
+BUILTIN_DEFAULT_FONT_SIZE :: f32(18.0)
 BUILTIN_DEFAULT_FONT_BYTES :: #load("../res/iAWriterMonoS-Regular.ttf")
 
 // ============================================================================
@@ -54,9 +54,10 @@ u32rgba :: distinct u32
 // == global graphics context
 
 Gfx_Ctx: struct {
-    current_sdl_color:  u32rgba,
+    active_sdl_color:  u32rgba,
     default_scale_mode: sdl.ScaleMode,
-    current_blend_mode: sdl.BlendMode,
+    active_blend_mode: sdl.BlendMode,
+    active_text_alignment: ttf.HorizontalAlignment,
 
     active_font: ^Font,
     default_font: Font,
@@ -81,11 +82,12 @@ check_render_safety :: #force_inline proc "contextless"(L: ^lua.State, fn_name: 
 
 // CPU state only. Safe to call at boot.
 init_graphics_state :: proc() {
-    Gfx_Ctx.current_sdl_color = u32rgba(0xFFFFFFFF)
+    Gfx_Ctx.active_sdl_color = u32rgba(0xFFFFFFFF)
     Gfx_Ctx.default_scale_mode = .LINEAR
-    Gfx_Ctx.current_blend_mode = sdl.BLENDMODE_BLEND
+    Gfx_Ctx.active_blend_mode = sdl.BLENDMODE_BLEND
     Gfx_Ctx.active_font = nil
     Gfx_Ctx.default_font = {}
+    Gfx_Ctx.active_text_alignment = ttf.HorizontalAlignment.LEFT
 
     // '1' is the Odin literal for an Identity Matrix
     Gfx_Ctx.transform.matrix_stack[0] = 1
@@ -153,13 +155,13 @@ load_image_from_path :: proc(path: cstring) -> (Image, cstring, bool) {
 }
 
 set_global_sdl_color :: proc(c: u32rgba) {
-    if Gfx_Ctx.current_sdl_color != c {
+    if Gfx_Ctx.active_sdl_color != c {
         r := u8((u32(c) >> 24) & 0xFF)
         g := u8((u32(c) >> 16) & 0xFF)
         b := u8((u32(c) >> 8) & 0xFF)
         a := u8(u32(c) & 0xFF)
         sdl.SetRenderDrawColor(Renderer, r, g, b, a)
-        Gfx_Ctx.current_sdl_color = c
+        Gfx_Ctx.active_sdl_color = c
     }
 }
 
@@ -199,7 +201,7 @@ draw_geometry :: proc(
     indices := [6]c.int{0, 1, 2, 0, 2, 3}
 
     if tex != nil {
-        sdl.SetTextureBlendMode(tex, Gfx_Ctx.current_blend_mode)
+        sdl.SetTextureBlendMode(tex, Gfx_Ctx.active_blend_mode)
     }
 
     sdl.RenderGeometry(Renderer, tex, raw_data(verts[:]), 4, raw_data(indices[:]), 6)
@@ -435,7 +437,9 @@ lua_graphics_load_image :: proc "c" (L: ^lua.State) -> c.int {
         return 0
     }
 
-    path_cstr := cast(cstring)lua.L_checklstring(L, 1, nil)
+    path := string(lua.L_checkstring(L, 1))
+    resolved_path := resolve_resource_path(path)
+    path_cstr := strings.clone_to_cstring(resolved_path, context.temp_allocator)
 
     img, err, ok := load_image_from_path(path_cstr)
     if !ok {
@@ -852,7 +856,7 @@ lua_graphics_set_blend_mode :: proc "c" (L: ^lua.State) -> c.int {
     mode := parse_gpu_blend_mode_checked(L, mode_str, "graphics.set_blend_mode")
 
     sdl.SetRenderDrawBlendMode(Renderer, mode)
-    Gfx_Ctx.current_blend_mode = mode
+    Gfx_Ctx.active_blend_mode = mode
 
     return 0
 }
@@ -986,7 +990,9 @@ lua_graphics_set_canvas :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_load_font :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
-    path_c := cast(cstring)lua.L_checklstring(L, 1, nil)
+    path := string(lua.L_checkstring(L, 1))
+    resolved_path := resolve_resource_path(path)
+    path_c := strings.clone_to_cstring(resolved_path, context.temp_allocator)
     size := f32(lua.L_checknumber(L, 2))
 
     if size <= 0 {
@@ -1126,7 +1132,7 @@ lua_graphics_draw_text :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// graphics.draw_text_wrap(text, x, y, width, [align], [color])
+// graphics.draw_text_wrap(text, x, y, width, color?)
 lua_graphics_draw_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
     check_render_safety(L, "graphics.draw_text_wrap")
@@ -1137,8 +1143,8 @@ lua_graphics_draw_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
     }
 
     argc := lua.gettop(L)
-    if argc < 4 || argc > 6 {
-        lua.L_error(L, "graphics.draw_text_wrap: expected 4 to 6 arguments: text, x, y, width, [align], [color]")
+    if argc < 4 || argc > 5 {
+        lua.L_error(L, "graphics.draw_text_wrap: expected 4 or 5 arguments: text, x, y, width, color?")
         return 0
     }
 
@@ -1156,26 +1162,14 @@ lua_graphics_draw_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
 
     if text_len == 0 do return 0
 
-    align := ttf.HorizontalAlignment.LEFT
+    align := Gfx_Ctx.active_text_alignment
     raw_color := lua.Integer(0xFFFFFFFF)
 
     if argc == 5 {
-        arg5_type := lua.type(L, 5)
-
-        if arg5_type == lua.TSTRING {
-            align = parse_text_align_checked(L, lua.L_checkstring(L, 5), "graphics.draw_text_wrap")
-        } else if arg5_type == lua.TNUMBER {
-            raw_color = lua.L_checkinteger(L, 5)
-        } else {
-            lua.L_error(L, "graphics.draw_text_wrap: argument 5 must be align string or color")
-            return 0
-        }
-    } else if argc == 6 {
-        align = parse_text_align_checked(L, lua.L_checkstring(L, 5), "graphics.draw_text_wrap")
-        raw_color = lua.L_checkinteger(L, 6)
+        raw_color = lua.L_checkinteger(L, 5)
     }
 
-    probe_key := WrapTextKey {
+    probe_key := WrapTextKey{
         text  = strings.string_from_ptr(cast(^u8)text_c, int(text_len)),
         width = wrap_width,
         align = align,
@@ -1189,7 +1183,7 @@ lua_graphics_draw_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
             return 0
         }
 
-        owned_key := WrapTextKey {
+        owned_key := WrapTextKey{
             text  = owned_text,
             width = wrap_width,
             align = align,
@@ -1229,6 +1223,24 @@ lua_graphics_draw_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
 
     world_m := Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth]
     draw_geometry(entry.texture, x, y, entry.width, entry.height, 0.0, 0.0, 1.0, 1.0, u32rgba(raw_color), world_m)
+
+    return 0
+}
+
+// graphics.set_text_alignment(mode: string)
+lua_graphics_set_text_alignment :: proc "c" (L: ^lua.State) -> c.int {
+    mode := string(lua.L_checkstring(L, 1))
+
+    switch mode {
+    case "left":
+        Gfx_Ctx.active_text_alignment = .LEFT
+    case "center":
+        Gfx_Ctx.active_text_alignment = .CENTER
+    case "right":
+        Gfx_Ctx.active_text_alignment = .RIGHT
+    case:
+        lua.L_error(L, "graphics.set_text_alignment: expected 'left', 'center', or 'right'")
+    }
 
     return 0
 }
@@ -1363,7 +1375,7 @@ lua_graphics_get_font_line_skip :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// graphics.measure_text([font], text) -> width, height | nil, nil
+// graphics.measure_text(text, font?) -> width, height | nil, nil
 lua_graphics_measure_text :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -1377,12 +1389,12 @@ lua_graphics_measure_text :: proc "c" (L: ^lua.State) -> c.int {
         text_c = lua.L_checklstring(L, 1, &text_len)
 
     } else if argc == 2 {
-        if lua.isnil(L, 1) {
-            text_c = lua.L_checklstring(L, 2, &text_len)
-        } else {
-            explicit_font := cast(^Font)lua.L_testudata(L, 1, "Font")
+        text_c = lua.L_checklstring(L, 1, &text_len)
+
+        if !lua.isnil(L, 2) {
+            explicit_font := cast(^Font)lua.L_testudata(L, 2, "Font")
             if explicit_font == nil {
-                lua.L_error(L, "graphics.measure_text: expected [Font|nil], text")
+                lua.L_error(L, "graphics.measure_text: expected text, Font?")
                 return 0
             }
 
@@ -1393,11 +1405,10 @@ lua_graphics_measure_text :: proc "c" (L: ^lua.State) -> c.int {
             }
 
             font = explicit_font
-            text_c = lua.L_checklstring(L, 2, &text_len)
         }
 
     } else {
-        lua.L_error(L, "graphics.measure_text: expected 1 or 2 arguments: [font], text")
+        lua.L_error(L, "graphics.measure_text: expected 1 or 2 arguments: text, font?")
         return 0
     }
 
@@ -1417,7 +1428,7 @@ lua_graphics_measure_text :: proc "c" (L: ^lua.State) -> c.int {
     return 2
 }
 
-// graphics.measure_text_wrap([font], text, width) -> width, height | nil, nil
+// graphics.measure_text_wrap(text, width, font?) -> width, height | nil, nil
 lua_graphics_measure_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -1433,13 +1444,13 @@ lua_graphics_measure_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
         wrap_width = cast(c.int)lua.L_checkinteger(L, 2)
 
     } else if argc == 3 {
-        if lua.isnil(L, 1) {
-            text_c = lua.L_checklstring(L, 2, &text_len)
-            wrap_width = cast(c.int)lua.L_checkinteger(L, 3)
-        } else {
-            explicit_font := cast(^Font)lua.L_testudata(L, 1, "Font")
+        text_c = lua.L_checklstring(L, 1, &text_len)
+        wrap_width = cast(c.int)lua.L_checkinteger(L, 2)
+
+        if !lua.isnil(L, 3) {
+            explicit_font := cast(^Font)lua.L_testudata(L, 3, "Font")
             if explicit_font == nil {
-                lua.L_error(L, "graphics.measure_text_wrap: expected [Font|nil], text, width")
+                lua.L_error(L, "graphics.measure_text_wrap: expected text, width, Font?")
                 return 0
             }
 
@@ -1450,12 +1461,10 @@ lua_graphics_measure_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
             }
 
             font = explicit_font
-            text_c = lua.L_checklstring(L, 2, &text_len)
-            wrap_width = cast(c.int)lua.L_checkinteger(L, 3)
         }
 
     } else {
-        lua.L_error(L, "graphics.measure_text_wrap: expected 2 or 3 arguments: [font], text, width")
+        lua.L_error(L, "graphics.measure_text_wrap: expected 2 or 3 arguments: text, width, font?")
         return 0
     }
 
@@ -1480,7 +1489,7 @@ lua_graphics_measure_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
     return 2
 }
 
-// graphics.measure_text_fit([font], text, width) -> fit_width, fit_length | nil, nil
+// graphics.measure_text_fit(text, width, font?) -> fit_width, fit_length | nil, nil
 lua_graphics_measure_text_fit :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -1496,13 +1505,13 @@ lua_graphics_measure_text_fit :: proc "c" (L: ^lua.State) -> c.int {
         max_width = cast(c.int)lua.L_checkinteger(L, 2)
 
     } else if argc == 3 {
-        if lua.isnil(L, 1) {
-            text_c = lua.L_checklstring(L, 2, &text_len)
-            max_width = cast(c.int)lua.L_checkinteger(L, 3)
-        } else {
-            explicit_font := cast(^Font)lua.L_testudata(L, 1, "Font")
+        text_c = lua.L_checklstring(L, 1, &text_len)
+        max_width = cast(c.int)lua.L_checkinteger(L, 2)
+
+        if !lua.isnil(L, 3) {
+            explicit_font := cast(^Font)lua.L_testudata(L, 3, "Font")
             if explicit_font == nil {
-                lua.L_error(L, "graphics.measure_text_fit: expected [Font|nil], text, width")
+                lua.L_error(L, "graphics.measure_text_fit: expected text, width, Font?")
                 return 0
             }
 
@@ -1513,12 +1522,10 @@ lua_graphics_measure_text_fit :: proc "c" (L: ^lua.State) -> c.int {
             }
 
             font = explicit_font
-            text_c = lua.L_checklstring(L, 2, &text_len)
-            max_width = cast(c.int)lua.L_checkinteger(L, 3)
         }
 
     } else {
-        lua.L_error(L, "graphics.measure_text_fit: expected 2 or 3 arguments: [font], text, width")
+        lua.L_error(L, "graphics.measure_text_fit: expected 2 or 3 arguments: text, width, font?")
         return 0
     }
 
@@ -1544,7 +1551,7 @@ lua_graphics_measure_text_fit :: proc "c" (L: ^lua.State) -> c.int {
     return 2
 }
 
-// graphics.font_has_glyph([font], codepoint) -> bool
+// graphics.font_has_glyph(codepoint, font?) -> bool | nil
 lua_graphics_font_has_glyph :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -1557,12 +1564,12 @@ lua_graphics_font_has_glyph :: proc "c" (L: ^lua.State) -> c.int {
         codepoint = cast(u32)lua.L_checkinteger(L, 1)
 
     } else if argc == 2 {
-        if lua.isnil(L, 1) {
-            codepoint = cast(u32)lua.L_checkinteger(L, 2)
-        } else {
-            explicit_font := cast(^Font)lua.L_testudata(L, 1, "Font")
+        codepoint = cast(u32)lua.L_checkinteger(L, 1)
+
+        if !lua.isnil(L, 2) {
+            explicit_font := cast(^Font)lua.L_testudata(L, 2, "Font")
             if explicit_font == nil {
-                lua.L_error(L, "graphics.font_has_glyph: expected [Font|nil], codepoint")
+                lua.L_error(L, "graphics.font_has_glyph: expected codepoint, Font?")
                 return 0
             }
 
@@ -1572,11 +1579,10 @@ lua_graphics_font_has_glyph :: proc "c" (L: ^lua.State) -> c.int {
             }
 
             font = explicit_font
-            codepoint = cast(u32)lua.L_checkinteger(L, 2)
         }
 
     } else {
-        lua.L_error(L, "graphics.font_has_glyph: expected 1 or 2 arguments: [font], codepoint")
+        lua.L_error(L, "graphics.font_has_glyph: expected 1 or 2 arguments: codepoint, font?")
         return 0
     }
 
@@ -1585,7 +1591,7 @@ lua_graphics_font_has_glyph :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// graphics.get_glyph_metrics([font], codepoint) -> minx, maxx, miny, maxy, advance | nil, nil, nil, nil, nil
+// graphics.get_glyph_metrics(codepoint, font?) -> minx, maxx, miny, maxy, advance | nil, nil, nil, nil, nil
 lua_graphics_get_glyph_metrics :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -1598,12 +1604,12 @@ lua_graphics_get_glyph_metrics :: proc "c" (L: ^lua.State) -> c.int {
         codepoint = cast(u32)lua.L_checkinteger(L, 1)
 
     } else if argc == 2 {
-        if lua.isnil(L, 1) {
-            codepoint = cast(u32)lua.L_checkinteger(L, 2)
-        } else {
-            explicit_font := cast(^Font)lua.L_testudata(L, 1, "Font")
+        codepoint = cast(u32)lua.L_checkinteger(L, 1)
+
+        if !lua.isnil(L, 2) {
+            explicit_font := cast(^Font)lua.L_testudata(L, 2, "Font")
             if explicit_font == nil {
-                lua.L_error(L, "graphics.get_glyph_metrics: expected [Font|nil], codepoint")
+                lua.L_error(L, "graphics.get_glyph_metrics: expected codepoint, Font?")
                 return 0
             }
 
@@ -1617,11 +1623,10 @@ lua_graphics_get_glyph_metrics :: proc "c" (L: ^lua.State) -> c.int {
             }
 
             font = explicit_font
-            codepoint = cast(u32)lua.L_checkinteger(L, 2)
         }
 
     } else {
-        lua.L_error(L, "graphics.get_glyph_metrics: expected 1 or 2 arguments: [font], codepoint")
+        lua.L_error(L, "graphics.get_glyph_metrics: expected 1 or 2 arguments: codepoint, font?")
         return 0
     }
 
@@ -1729,7 +1734,9 @@ lua_graphics_new_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 lua_graphics_load_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
-    path_cstr := cast(cstring)lua.L_checklstring(L, 1, nil)
+    path := string(lua.L_checkstring(L, 1))
+    resolved_path := resolve_resource_path(path)
+    path_cstr := strings.clone_to_cstring(resolved_path, context.temp_allocator)
 
     w, h, channels: c.int
     pixels := stbi.load(path_cstr, &w, &h, &channels, 4)
@@ -1798,7 +1805,9 @@ lua_graphics_save_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
     pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
-    path_cstr := cast(cstring)lua.L_checklstring(L, 2, nil)
+    path := string(lua.L_checkstring(L, 2))
+    resolved_path := resolve_resource_path(path)
+    path_cstr := strings.clone_to_cstring(resolved_path, context.temp_allocator)
 
     if pmap == nil || pmap.surface == nil {
         lua.pushboolean(L, b32(false))
@@ -2679,6 +2688,7 @@ register_graphics_api :: proc() {
     lua_bind_function(lua_graphics_set_font, "set_font")
     lua_bind_function(lua_graphics_draw_text, "draw_text")
     lua_bind_function(lua_graphics_draw_text_wrap, "draw_text_wrap")
+    lua_bind_function(lua_graphics_set_text_alignment, "set_text_alignment")
 
     // Text Query
     lua_bind_function(lua_graphics_get_font_height, "get_font_height")

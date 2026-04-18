@@ -1,7 +1,9 @@
 # filesystem
 
 The `filesystem` module provides access to process paths, directory queries, and basic file operations.  
-Unless noted otherwise, functions in this module throw on wrong arity or wrong argument types. Relative paths in this module are resolved from the `Working Directory`.
+Unless noted otherwise, functions in this module throw on wrong arity or wrong argument types. Relative paths resolve from the `Resource Directory` by default. Absolute paths are used as-is.
+
+The `Working Directory` is exposed explicitly through this module. Normal relative paths do not resolve from it.
 
 ## Functions
 
@@ -48,7 +50,7 @@ filesystem.get_working_directory() -> path | nil, err
 
 ### set_working_directory
 
-Sets the current `Working Directory` for the process. This affects how relative paths are resolved by other filesystem calls.
+Sets the current `Working Directory` for the process.
 
 ```lua
 filesystem.set_working_directory(path) -> true | false, err

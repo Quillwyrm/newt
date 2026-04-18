@@ -17,6 +17,7 @@ Bus `0` is the master bus. Playback functions return integer voice handles. Quer
 
 **Sounds**
 * [`load_sound`](#load_sound)
+* [`load_sound_stream`](#load_sound_stream)
 * [`get_sound_info`](#get_sound_info)
 
 **Playback**
@@ -143,19 +144,30 @@ audio.set_default_falloff_mode(mode)
 
 ### load_sound
 
-Loads a sound asset from a file. `mode` may be `"static"` or `"stream"`. Static sounds are decoded into memory. Streamed sounds are decoded on demand.
+Loads a sound asset into memory.
 
 ```lua
-audio.load_sound(filepath, mode?) -> sound | nil, err
+audio.load_sound(filepath) -> Sound | nil, err
 ```
 
 #### Returns
 
 `sound` is `Sound` type userdata.
 
-#### Error Cases
+---
 
-- `mode` must be `"static"` or `"stream"`.
+### load_sound_stream
+
+Loads a streamed sound asset.
+
+```lua
+audio.load_sound_stream(filepath) -> Sound | nil, err
+```
+
+#### Returns
+
+`Sound` type userdata.
+`nil, err` on load failure.
 
 ---
 

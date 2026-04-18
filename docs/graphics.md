@@ -40,6 +40,7 @@ Unless noted otherwise, functions in this module throw on wrong arity or wrong a
 * [`set_font`](#set_font)
 * [`draw_text`](#draw_text)
 * [`draw_text_wrap`](#draw_text_wrap)
+* [`set_text_alignment`](#set_text_alignment)
 
 **Font Queries**
 * [`get_font_height`](#get_font_height)
@@ -374,19 +375,31 @@ graphics.draw_text(text, x, y, color?)
 
 ### draw_text_wrap
 
-Draws wrapped text using the active font. Alignment may be `"left"`, `"center"`, or `"right"`.
+Draws wrapped text using the active font and active text alignment.
 
 ```lua
-graphics.draw_text_wrap(text, x, y, width)
-graphics.draw_text_wrap(text, x, y, width, align)
-graphics.draw_text_wrap(text, x, y, width, color)
-graphics.draw_text_wrap(text, x, y, width, align, color)
+graphics.draw_text_wrap(text, x, y, width, color?)
 ```
 
 #### Error Cases
 
 - `width` must be positive.
-- `align` must be `"left"`, `"center"`, or `"right"`.
+
+---
+
+### set_text_alignment
+
+Sets the active alignment used by wrapped text drawing.
+
+```lua
+graphics.set_text_alignment(mode)
+```
+
+#### Error Cases
+
+- `mode` must be `"left"`, `"center"`, or `"right"`.
+
+---
 
 ## Font Queries
 
@@ -458,90 +471,73 @@ graphics.get_font_line_skip(font) -> line_skip | nil
 
 ### measure_text
 
-Measures text without width wrapping. This is newline-aware.
+Measures text using the active font, or a specific font override.
 
 ```lua
-graphics.measure_text(text) -> width, height
-graphics.measure_text(font, text) -> width, height | nil, nil
+graphics.measure_text(text, font?) -> width, height | nil, nil
 ```
 
 #### Returns
 
-`width, height` for the default font, or for a live explicit `font`.  
-`nil, nil` if an explicit `font` has been freed.
+`nil, nil` is returned only when `font` is passed and has been freed.
 
 ---
 
 ### measure_text_wrap
 
-Measures wrapped text at the given width.
+Measures wrapped text using the active font, or a specific `font` when passed.
 
 ```lua
-graphics.measure_text_wrap(text, width) -> width, height
-graphics.measure_text_wrap(font, text, width) -> width, height | nil, nil
+graphics.measure_text_wrap(text, width, font?) -> width, height | nil, nil
 ```
 
 #### Returns
 
-`width, height` for the default font, or for a live explicit `font`.  
-`nil, nil` if an explicit `font` has been freed.
-
-#### Error Cases
-
-- `width` must be positive.
+`nil, nil` is returned only when `font` is passed and has been freed.
 
 ---
 
 ### measure_text_fit
 
-Measures how much of a string fits within the given width.
+Measures how much text fits within `width` using the active font, or a specific `font` when passed.
 
 ```lua
-graphics.measure_text_fit(text, width) -> fit_width, fit_length
-graphics.measure_text_fit(font, text, width) -> fit_width, fit_length | nil, nil
+graphics.measure_text_fit(text, width, font?) -> fit_width, fit_length | nil, nil
 ```
 
 #### Returns
 
-`fit_width` and `fit_length` for the default font, or for a live explicit `font`.  
-`fit_length` is the fitted byte length from `text`.  
-`nil, nil` if an explicit `font` has been freed.
-
-#### Error Cases
-
-- `width` must be non-negative.
+`nil, nil` is returned only when `font` is passed and has been freed.
 
 ---
 
 ### font_has_glyph
 
-Returns whether the font contains a glyph for the given codepoint.
+Reports whether a glyph exists in the active font, or a specific `font` when passed.
 
 ```lua
-graphics.font_has_glyph(codepoint) -> bool
-graphics.font_has_glyph(font, codepoint) -> bool | nil
+graphics.font_has_glyph(codepoint, font?) -> bool | nil
 ```
 
 #### Returns
 
-`bool` for the default font, or for a live explicit `font`.  
-`nil` if an explicit `font` has been freed.
+`nil` is returned only when `font` is passed and has been freed.
 
 ---
 
 ### get_glyph_metrics
 
-Returns glyph metrics for a codepoint.
+Returns glyph metrics from the active font, or a specific `font` when passed.
 
 ```lua
-graphics.get_glyph_metrics(codepoint) -> minx, maxx, miny, maxy, advance
-graphics.get_glyph_metrics(font, codepoint) -> minx, maxx, miny, maxy, advance | nil, nil, nil, nil, nil
+graphics.get_glyph_metrics(codepoint, font?) -> minx, maxx, miny, maxy, advance | nil, nil, nil, nil, nil
 ```
 
 #### Returns
 
-`minx`, `maxx`, `miny`, `maxy`, and `advance` for the default font, or for a live explicit `font`.  
-`nil, nil, nil, nil, nil` if an explicit `font` has been freed.
+`nil, nil, nil, nil, nil` is returned only when `font` is passed and has been freed.
+
+---
 
 ## Debug Drawing
 

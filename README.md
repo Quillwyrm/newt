@@ -36,14 +36,11 @@ end
 
 ## Getting Started
 
-Newt looks for `lua/main.lua` in the project resource directory. That file is your application entry point.
+Newt looks for `lua/main.lua` in the project resource directory. That file is your application entry point. See [Getting Started](docs/getting_started.md) for project layout and path semantics.
 
-- [Getting Started](docs/getting_started.md)
 - [GitHub Releases](../../releases)
-
-## Documentation
-
 - [API Reference](docs/api_ref.md)
+- [Examples](examples/)
 
 ## Platforms
 

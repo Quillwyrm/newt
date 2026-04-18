@@ -22,6 +22,18 @@ Lua: ^lua.State
 
 Resource_Directory_Path: string
 
+resolve_resource_path :: proc(path: string) -> string {
+    if os.is_absolute_path(path) {
+        return path
+    }
+
+    path, err := os.join_path({Resource_Directory_Path, path}, context.temp_allocator)
+    if err != os.ERROR_NONE {
+        panic("resolve_resource_path: os.join_path failed")
+    }
+
+    return path
+}
 // ============================================================================
 // Engine Global Bindings
 // ============================================================================
@@ -414,7 +426,7 @@ main :: proc() {
         fatal_engine_error(fmt.caprintf("engine.boot: SDL_CreateRenderer failed: %s", sdl.GetError()))
     }
     //sync Renderer blend mode with engine global ctx
-    sdl.SetRenderDrawBlendMode(Renderer, Gfx_Ctx.current_blend_mode)
+    sdl.SetRenderDrawBlendMode(Renderer, Gfx_Ctx.active_blend_mode)
 
     if !sdl.SetRenderVSync(Renderer, 1) {
         sdl.DestroyRenderer(Renderer)
@@ -479,7 +491,7 @@ main :: proc() {
 
         sdl.SetRenderDrawColor(Renderer, 0, 0, 0, 255)
         sdl.RenderClear(Renderer)
-        Gfx_Ctx.current_sdl_color = u32rgba(0x000000FF)
+        Gfx_Ctx.active_sdl_color = u32rgba(0x000000FF)
 
         call_lua_noargs("draw")
         sdl.RenderPresent(Renderer)

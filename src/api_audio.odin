@@ -320,34 +320,43 @@ claim_and_init_voice :: proc(sound: ^Sound, bus_idx: int) -> (^Voice, u32, cstri
 
 // == Asset Management ==
 
-// lua_audio_load_sound: audio.load_sound(filepath: string, mode?: string) -> Sound | nil, err
+// lua_audio_load_sound: audio.load_sound(filepath: string) -> Sound | nil, err
 lua_audio_load_sound :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
     check_audio_safety(L, "audio.load_sound")
 
     c_path := lua.L_checkstring(L, 1)
-    mode := "static"
-    if lua.gettop(L) >= 2 do mode = string(lua.L_checkstring(L, 2))
-    if mode != "static" && mode != "stream" {
-        lua.L_error(L, "audio.load_sound: expected mode 'static' or 'stream'")
-        return 0
-    }
+    resolved_path := resolve_resource_path(string(c_path))
 
     sound := cast(^Sound)lua.newuserdata(L, size_of(Sound))
-    sound.filepath = strings.clone_to_cstring(string(c_path))
-    sound.is_stream = (mode == "stream")
+    sound.filepath = strings.clone_to_cstring(resolved_path)
+    sound.is_stream = false
 
-    flags: ma.sound_flags = {}
-    if !sound.is_stream {
-        result := ma.sound_init_from_file(&audio_ctx.engine, sound.filepath, {.DECODE}, nil, nil, &sound.cache_ref)
-        if result != .SUCCESS {
-            delete(sound.filepath)
-            sound.filepath = nil
-            lua.pushnil(L)
-            lua.pushfstring(L, "audio.load_sound: failed to load static sound '%s': %s", c_path, ma.result_description(result))
-            return 2
-        }
+    result := ma.sound_init_from_file(&audio_ctx.engine, sound.filepath, {.DECODE}, nil, nil, &sound.cache_ref)
+    if result != .SUCCESS {
+        delete(sound.filepath)
+        sound.filepath = nil
+        lua.pushnil(L)
+        lua.pushfstring(L, "audio.load_sound: failed to load sound '%s': %s", c_path, ma.result_description(result))
+        return 2
     }
+
+    lua.L_getmetatable(L, "Sound")
+    lua.setmetatable(L, -2)
+    return 1
+}
+
+// lua_audio_load_sound_stream: audio.load_sound_stream(filepath: string) -> Sound | nil, err
+lua_audio_load_sound_stream :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+    check_audio_safety(L, "audio.load_sound_stream")
+
+    c_path := lua.L_checkstring(L, 1)
+    resolved_path := resolve_resource_path(string(c_path))
+
+    sound := cast(^Sound)lua.newuserdata(L, size_of(Sound))
+    sound.filepath = strings.clone_to_cstring(resolved_path)
+    sound.is_stream = true
 
     lua.L_getmetatable(L, "Sound")
     lua.setmetatable(L, -2)
@@ -1279,6 +1288,7 @@ register_audio_api :: proc() {
 
     // Asset Management
     lua_bind_function(lua_audio_load_sound, "load_sound")
+    lua_bind_function(lua_audio_load_sound_stream, "load_sound_stream")
     lua_bind_function(lua_audio_get_sound_info, "get_sound_info")
 
     // Playback

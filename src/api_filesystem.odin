@@ -135,8 +135,9 @@ lua_filesystem_list_directory :: proc "c" (L: ^lua.State) -> c.int {
     path_len: c.size_t
     path_c := lua.L_checklstring(L, 1, &path_len)
     path := strings.string_from_ptr(cast(^byte)(path_c), int(path_len))
+    res_path := resolve_resource_path(path)
 
-    infos, err := os.read_all_directory_by_path(path, context.temp_allocator)
+    infos, err := os.read_all_directory_by_path(res_path, context.temp_allocator)
     if err != os.ERROR_NONE {
         lua.pushnil(L)
         push_lua_error(L, err)
@@ -177,8 +178,9 @@ lua_filesystem_get_path_info :: proc "c" (L: ^lua.State) -> c.int {
     path_len: c.size_t
     path_c := lua.L_checklstring(L, 1, &path_len)
     path := strings.string_from_ptr(cast(^byte)(path_c), int(path_len))
+    res_path := resolve_resource_path(path)
 
-    fi, err := os.stat(path, context.temp_allocator)
+    fi, err := os.stat(res_path, context.temp_allocator)
     if err != os.ERROR_NONE {
         lua.pushnil(L)
         push_lua_error(L, err)
@@ -213,8 +215,9 @@ lua_filesystem_read_file :: proc "c" (L: ^lua.State) -> c.int {
     path_len: c.size_t
     path_c := lua.L_checklstring(L, 1, &path_len)
     path := strings.string_from_ptr(cast(^byte)(path_c), int(path_len))
+    res_path := resolve_resource_path(path)
 
-    data, err := os.read_entire_file_from_path(path, context.temp_allocator)
+    data, err := os.read_entire_file_from_path(res_path, context.temp_allocator)
     if err != os.ERROR_NONE {
         lua.pushnil(L)
         push_lua_error(L, err)
@@ -238,12 +241,13 @@ lua_filesystem_write_file :: proc "c" (L: ^lua.State) -> c.int {
     path_len: c.size_t
     path_c := lua.L_checklstring(L, 1, &path_len)
     path := strings.string_from_ptr(cast(^byte)(path_c), int(path_len))
+    res_path := resolve_resource_path(path)
 
     data_len: c.size_t
     data_c := lua.L_checklstring(L, 2, &data_len)
     data_str := strings.string_from_ptr(cast(^byte)(data_c), int(data_len))
 
-    err := os.write_entire_file_from_string(path, data_str)
+    err := os.write_entire_file_from_string(res_path, data_str)
     if err != os.ERROR_NONE {
         lua.pushboolean(L, b32(false))
         push_lua_error(L, err)
@@ -267,8 +271,9 @@ lua_filesystem_make_directory :: proc "c" (L: ^lua.State) -> c.int {
     path_len: c.size_t
     path_c := lua.L_checklstring(L, 1, &path_len)
     path := strings.string_from_ptr(cast(^byte)(path_c), int(path_len))
+    res_path := resolve_resource_path(path)
 
-    err := os.make_directory(path)
+    err := os.make_directory(res_path)
     if err != os.ERROR_NONE {
         lua.pushboolean(L, b32(false))
         push_lua_error(L, err)
@@ -291,12 +296,14 @@ lua_filesystem_rename :: proc "c" (L: ^lua.State) -> c.int {
     old_len: c.size_t
     old_c := lua.L_checklstring(L, 1, &old_len)
     old_path := strings.string_from_ptr(cast(^byte)(old_c), int(old_len))
+    old_res_path := resolve_resource_path(old_path)
 
     new_len: c.size_t
     new_c := lua.L_checklstring(L, 2, &new_len)
     new_path := strings.string_from_ptr(cast(^byte)(new_c), int(new_len))
+    new_res_path := resolve_resource_path(new_path)
 
-    err := os.rename(old_path, new_path)
+    err := os.rename(old_res_path, new_res_path)
     if err != os.ERROR_NONE {
         lua.pushboolean(L, b32(false))
         push_lua_error(L, err)
@@ -319,8 +326,9 @@ lua_filesystem_remove :: proc "c" (L: ^lua.State) -> c.int {
     path_len: c.size_t
     path_c := lua.L_checklstring(L, 1, &path_len)
     path := strings.string_from_ptr(cast(^byte)(path_c), int(path_len))
+    res_path := resolve_resource_path(path)
 
-    err := os.remove(path)
+    err := os.remove(res_path)
     if err != os.ERROR_NONE {
         lua.pushboolean(L, b32(false))
         push_lua_error(L, err)
