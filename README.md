@@ -4,7 +4,7 @@ Newt is a nimble framework for making 2D games with Lua.
 
 ## What you get
 
-- 2D graphics with images, text, fonts, render targets, transforms, and CPU pixel read/write, drawing, and utilities
+- 2D graphics with images, text, fonts, render targets, transforms, and CPU pixel read/write and utilities
 - Audio playback with mixing, 2D spatialization, and effects
 - Keyboard, mouse, text input, clipboard, cursor, and window control
 - Filesystem access, working directory control, and file operations
