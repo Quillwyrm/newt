@@ -43,11 +43,11 @@ See [Getting Started](docs/getting_started.md) for project layout and path seman
 - [API Reference](docs/api_ref.md)
 - [Examples](examples/)
 
-## Platforms
+# Platforms
 
 - Windows (x64)
-- macOS (Arm64)
-- linux - not yet validated, but the codebase is intended to be portable.
+- macOS (arm64)
+- Linux (not yet validated)
 
 ## Status
 
