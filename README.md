@@ -1,6 +1,7 @@
 # Newt 🦎
 
-Newt is a nimble framework for making 2D games with Lua.
+Newt, a nimble 2D game framework for Lua!  
+Newt is a native script-driven runtime built in Odin. It exposes a clear, composable API to LuaJIT for building 2D games, tools, and interactive apps without drowning in giant engine workflows.
 
 ## What you get
 
