@@ -1,4 +1,4 @@
-# Newt 🦎
+![newt](res/newtbanner.png)
 
 Newt, a nimble 2D game framework for Lua!  
 
