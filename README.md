@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="res/newtbanner.png" alt="newt">
-</p>
+![newt](res/newtbanner.png)
 
 Newt, a nimble 2D game framework for Lua!  
 
