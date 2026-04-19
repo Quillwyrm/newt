@@ -913,7 +913,7 @@ lua_graphics_get_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
     return 4
 }
 
-// graphics.new_canvas(w, h) -> Image | nil, err
+// graphics.new_canvas(w, h) -> Image
 lua_graphics_new_canvas :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
     check_render_safety(L, "graphics.new_canvas")
@@ -928,15 +928,13 @@ lua_graphics_new_canvas :: proc "c" (L: ^lua.State) -> c.int {
 
     texture := sdl.CreateTexture(Renderer, .RGBA32, .TARGET, cast(c.int)w_i, cast(c.int)h_i)
     if texture == nil {
-        lua.pushnil(L)
-
         err := sdl.GetError()
         if err != nil {
-            lua.pushfstring(L, "graphics.new_canvas: failed to create canvas texture: %s", err)
+            lua.L_error(L, "graphics.new_canvas: failed to create canvas texture: %s", err)
         } else {
-            lua.pushstring(L, "graphics.new_canvas: failed to create canvas texture")
+            lua.L_error(L, "graphics.new_canvas: failed to create canvas texture")
         }
-        return 2
+        return 0
     }
 
     sdl.SetTextureBlendMode(texture, {.BLEND})
@@ -1690,7 +1688,7 @@ lua_graphics_get_glyph_metrics :: proc "c" (L: ^lua.State) -> c.int {
 
 // == Pixelmap I/O ==
 
-// lua_graphics_new_pixelmap implements: graphics.new_pixelmap(w, h) -> pmap | nil, err
+// graphics.new_pixelmap(w, h) -> pmap
 lua_graphics_new_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -1698,23 +1696,19 @@ lua_graphics_new_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
     h := cast(c.int)lua.L_checkinteger(L, 2)
 
     if w <= 0 || h <= 0 {
-        lua.pushnil(L)
-        lua.pushstring(L, "graphics.new_pixelmap: width and height must be positive")
-        return 2
+        lua.L_error(L, "graphics.new_pixelmap: width and height must be positive")
+        return 0
     }
 
     surface := sdl.CreateSurface(w, h, sdl.PixelFormat.RGBA32)
     if surface == nil {
-        lua.pushnil(L)
-
         err := sdl.GetError()
         if err != nil {
-            lua.pushfstring(L, "graphics.new_pixelmap: failed to create pixelmap surface: %s", err)
+            lua.L_error(L, "graphics.new_pixelmap: failed to create pixelmap surface: %s", err)
         } else {
-            lua.pushstring(L, "graphics.new_pixelmap: failed to create pixelmap surface")
+            lua.L_error(L, "graphics.new_pixelmap: failed to create pixelmap surface")
         }
-
-        return 2
+        return 0
     }
 
     sdl.FillSurfaceRect(surface, nil, 0x00000000)
@@ -1851,9 +1845,7 @@ lua_graphics_pixelmap_set_pixel :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// lua_graphics_pixelmap_get_pixel implements: graphics.pixelmap_get_pixel(pmap, x, y) -> color
-// Returns nil if the pixelmap has been freed.
-// Returns 0 for out-of-bounds reads.
+// graphics.pixelmap_get_pixel(pmap, x, y) -> color | nil
 lua_graphics_pixelmap_get_pixel :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -1868,7 +1860,7 @@ lua_graphics_pixelmap_get_pixel :: proc "c" (L: ^lua.State) -> c.int {
 
     surf := pmap.surface
     if x < 0 || x >= surf.w || y < 0 || y >= surf.h {
-        lua.pushinteger(L, 0)
+        lua.pushnil(L)
         return 1
     }
 
@@ -2509,28 +2501,25 @@ lua_graphics_pixelmap_get_cptr :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// lua_graphics_pixelmap_clone implements: graphics.pixelmap_clone(pmap) -> new_pmap | nil, err
+// graphics.pixelmap_clone(pmap) -> new_pmap
 lua_graphics_pixelmap_clone :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
     pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
     if pmap == nil || pmap.surface == nil {
-        lua.pushnil(L)
-        lua.pushstring(L, "graphics.pixelmap_clone: source pixelmap has been freed")
-        return 2
+        lua.L_error(L, "graphics.pixelmap_clone: source pixelmap has been freed")
+        return 0
     }
 
     clone_surf := sdl.DuplicateSurface(pmap.surface)
     if clone_surf == nil {
-        lua.pushnil(L)
-
         err := sdl.GetError()
         if err != nil {
-            lua.pushfstring(L, "graphics.pixelmap_clone: failed to duplicate pixelmap surface: %s", err,)
+            lua.L_error(L, "graphics.pixelmap_clone: failed to duplicate pixelmap surface: %s", err)
         } else {
-            lua.pushstring(L, "graphics.pixelmap_clone: failed to duplicate pixelmap surface")
+            lua.L_error(L, "graphics.pixelmap_clone: failed to duplicate pixelmap surface")
         }
-        return 2
+        return 0
     }
 
     new_pmap := cast(^Pixelmap)lua.newuserdata(L, size_of(Pixelmap))

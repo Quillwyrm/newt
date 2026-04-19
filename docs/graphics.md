@@ -175,12 +175,16 @@ graphics.set_default_filter(mode)
 Creates an `Image` resource that can be used as a render target. Canvases use the current default filter.
 
 ```lua
-graphics.new_canvas(width, height) -> canvas | nil, err
+graphics.new_canvas(width, height) -> canvas
 ```
 
 #### Returns
 
-An `Image` resource created for use as a render target.
+`Image` resource created for use as a render target.
+
+#### Error Cases
+
+- `width` and `height` must be positive.
 
 ---
 
@@ -580,8 +584,14 @@ Pixelmaps are CPU-side pixel buffers for software drawing and per-pixel access.
 Creates a blank pixelmap initialized to transparent black.
 
 ```lua
-graphics.new_pixelmap(width, height) -> pixelmap | nil, err
+graphics.new_pixelmap(width, height) -> pixelmap
 ```
+
+#### Returns
+`Pixelmap` resource.
+
+#### Error Cases
+- `width` and `height` must be positive.
 
 ---
 
@@ -771,7 +781,7 @@ graphics.pixelmap_get_pixel(pixelmap, x, y) -> color | nil
 #### Returns
 
 `color` for an in-bounds read.  
-`0` for an out-of-bounds read.  
+`nil` for an out-of-bounds read.  
 `nil` if `pixelmap` has been freed.
 
 ---
@@ -806,9 +816,12 @@ graphics.pixelmap_raycast(pixelmap, x1, y1, x2, y2) -> true, x, y, color | false
 Creates a deep copy of a pixelmap.
 
 ```lua
-graphics.pixelmap_clone(pixelmap) -> pixelmap | nil, err
+graphics.pixelmap_clone(pixelmap) -> pixelmap
 ```
 
+#### Error Cases
+
+- `pixelmap` must be a live pixelmap.
 ---
 
 ### pixelmap_get_cptr
