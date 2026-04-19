@@ -45,8 +45,9 @@ See [Getting Started](docs/getting_started.md) for project layout and path seman
 
 ## Platforms
 
-- Windows
-- macOS (Apple Silicon)
+- Windows (x64)
+- macOS (Arm64)
+- linux - not yet validated, but the codebase is intended to be portable.
 
 ## Status
 
