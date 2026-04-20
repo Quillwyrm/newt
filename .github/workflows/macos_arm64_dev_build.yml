@@ -156,24 +156,22 @@ jobs:
             done < <(otool -L "$target" | tail -n +2 | awk '{print $1}')
           }
 
-          sign_macho_tree() {
-            local root="$1"
+          sign_frameworks() {
             while IFS= read -r -d '' f; do
               if file "$f" | grep -q 'Mach-O'; then
                 codesign --force --sign - "$f"
               fi
-            done < <(find "$root" -type f -print0)
+            done < <(find "$APP_FRAMEWORKS" -type f -print0)
           }
 
           bundle_and_rewrite "$APP_MACOS/$APP_NAME"
-          sign_macho_tree "$APP_FRAMEWORKS"
-          codesign --force --sign - "$APP_MACOS/$APP_NAME"
+          sign_frameworks
 
       - name: Show min OS version of main executable
-        run: otool -l deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME | grep -A 4 LC_BUILD_VERSION
+        run: otool -l "deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME" | grep -A 4 LC_BUILD_VERSION
 
       - name: Show bundled executable links
-        run: otool -L deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME
+        run: otool -L "deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME"
 
       - name: Run app smoke test
         run: |
@@ -182,7 +180,7 @@ jobs:
           open -W -n "$PWD/deploy/macos/$APP_NAME.app"
 
       - name: Show smoke file
-        run: cat deploy/macos/$APP_NAME.app/Contents/MacOS/mac_smoke.txt
+        run: cat "deploy/macos/$APP_NAME.app/Contents/MacOS/mac_smoke.txt"
 
       - name: Replace main.lua with hello world
         run: |
