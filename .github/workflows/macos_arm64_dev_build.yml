@@ -214,7 +214,7 @@ jobs:
         run: ditto -c -k --sequesterRsrc --keepParent "deploy/macos/$APP_NAME.app" "deploy/macos/$APP_NAME-macos-arm64-dev.zip"
 
       - name: Upload app artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: newt-macos-arm64-dev
           path: deploy/macos/newt-macos-arm64-dev.zip
+          archive: false
