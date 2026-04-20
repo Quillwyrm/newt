@@ -164,9 +164,6 @@ jobs:
       - name: Show bundled executable links
         run: otool -L deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME
 
-      - name: Sign app for smoke test
-        run: codesign --force --deep --sign - deploy/macos/$APP_NAME.app
-
       - name: Run app smoke test
         run: |
           unset DYLD_FALLBACK_LIBRARY_PATH
@@ -203,9 +200,6 @@ jobs:
           rm -f "deploy/macos/$APP_NAME.app/Contents/MacOS/mac_smoke.txt"
           find "deploy/macos/$APP_NAME.app" -name '.DS_Store' -delete
           find "deploy/macos/$APP_NAME.app" -name '._*' -delete
-
-      - name: Re-sign final dev app
-        run: codesign --force --deep --sign - deploy/macos/$APP_NAME.app
 
       - name: Archive app bundle
         run: tar -czf "deploy/macos/$APP_NAME-macos-arm64-dev.tar.gz" -C deploy/macos "$APP_NAME.app"
