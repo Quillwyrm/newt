@@ -156,16 +156,22 @@ jobs:
             done < <(otool -L "$target" | tail -n +2 | awk '{print $1}')
           }
 
+          sign_frameworks() {
+            while IFS= read -r -d '' f; do
+              if file "$f" | grep -q 'Mach-O'; then
+                codesign --force --sign - "$f"
+              fi
+            done < <(find "$APP_FRAMEWORKS" -type f -print0)
+          }
+
           bundle_and_rewrite "$APP_MACOS/$APP_NAME"
+          sign_frameworks
 
       - name: Show min OS version of main executable
-        run: otool -l deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME | grep -A 4 LC_BUILD_VERSION
+        run: otool -l "deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME" | grep -A 4 LC_BUILD_VERSION
 
       - name: Show bundled executable links
-        run: otool -L deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME
-
-      - name: Sign app for smoke test
-        run: codesign --force --deep --sign - deploy/macos/$APP_NAME.app
+        run: otool -L "deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME"
 
       - name: Run app smoke test
         run: |
@@ -174,7 +180,7 @@ jobs:
           open -W -n "$PWD/deploy/macos/$APP_NAME.app"
 
       - name: Show smoke file
-        run: cat deploy/macos/$APP_NAME.app/Contents/MacOS/mac_smoke.txt
+        run: cat "deploy/macos/$APP_NAME.app/Contents/MacOS/mac_smoke.txt"
 
       - name: Replace main.lua with hello world
         run: |
@@ -204,14 +210,11 @@ jobs:
           find "deploy/macos/$APP_NAME.app" -name '.DS_Store' -delete
           find "deploy/macos/$APP_NAME.app" -name '._*' -delete
 
-      - name: Re-sign final dev app
-        run: codesign --force --deep --sign - deploy/macos/$APP_NAME.app
-
-      - name: Archive app bundle
-        run: tar -czf "deploy/macos/$APP_NAME-macos-arm64-dev.tar.gz" -C deploy/macos "$APP_NAME.app"
+      - name: Zip app bundle
+        run: ditto -c -k --sequesterRsrc --keepParent "deploy/macos/$APP_NAME.app" "deploy/macos/$APP_NAME-macos-arm64-dev.zip"
 
       - name: Upload app artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: newt-macos-arm64-dev
-          path: deploy/macos/newt-macos-arm64-dev.tar.gz
+          path: deploy/macos/newt-macos-arm64-dev.zip
+          archive: false
