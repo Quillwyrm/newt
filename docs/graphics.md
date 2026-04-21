@@ -615,7 +615,10 @@ graphics.save_pixelmap(pixelmap, path) -> true | false, err
 
 #### Returns
 
-`true` on success, or `false, err` on failure.
+true on success, or false, err if the PNG could not be written.
+
+#### Error Cases
+- Throws if `pixelmap` has been freed.
 
 ---
 
@@ -844,8 +847,11 @@ A `lightuserdata` pointer for a live pixelmap.
 Creates an `Image` resource from a pixelmap. The new image uses the current default filter.
 
 ```lua
-graphics.new_image_from_pixelmap(pixelmap) -> image | nil, err
+graphics.new_image_from_pixelmap(pixelmap) -> image
 ```
+
+#### Error Cases
+- Throws if `pixelmap` has been freed.
 
 ---
 

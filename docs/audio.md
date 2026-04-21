@@ -158,16 +158,17 @@ audio.load_sound(filepath) -> Sound | nil, err
 
 ### load_sound_stream
 
-Loads a streamed sound asset.
+
+Creates a streamed sound handle for later playback. 
+Stream opening and playback can still fail later when the sound is played.
 
 ```lua
-audio.load_sound_stream(filepath) -> Sound | nil, err
+audio.load_sound_stream(filepath) -> Sound
 ```
 
 #### Returns
 
 `Sound` type userdata.
-`nil, err` on load failure.
 
 ---
 

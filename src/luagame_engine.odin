@@ -238,6 +238,7 @@ register_lua_api :: proc() {
     register_window_api()
     register_input_api()
     register_audio_api()
+    register_grid_api()
 
     lua.newtable(Lua)
     lua.setglobal(Lua, "runtime")

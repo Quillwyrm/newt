@@ -1804,9 +1804,8 @@ lua_graphics_save_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
     path_cstr := strings.clone_to_cstring(resolved_path, context.temp_allocator)
 
     if pmap == nil || pmap.surface == nil {
-        lua.pushboolean(L, b32(false))
-        lua.pushstring(L, "graphics.save_pixelmap: pixelmap has been freed")
-        return 2
+        lua.L_error(L, "graphics.save_pixelmap: pixelmap has been freed")
+        return 0
     }
 
     res := stbi.write_png(path_cstr, pmap.surface.w, pmap.surface.h, 4, pmap.surface.pixels, pmap.surface.pitch)
@@ -2383,38 +2382,35 @@ lua_graphics_blit_region :: proc "c" (L: ^lua.State) -> c.int {
 
 // == Image Mutation And VRAM Sync ==
 
-// lua_graphics_new_image_from_pixelmap implements: graphics.new_image_from_pixelmap(pmap) -> img | nil, err
+// lua_graphics_new_image_from_pixelmap implements: graphics.new_image_from_pixelmap(pmap) -> img
 lua_graphics_new_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
     check_render_safety(L, "graphics.new_image_from_pixelmap")
 
     pmap := cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap")
     if pmap == nil || pmap.surface == nil {
-        lua.pushnil(L)
-        lua.pushstring(L, "graphics.new_image_from_pixelmap: source pixelmap has been freed")
-        return 2
+        lua.L_error(L, "graphics.new_image_from_pixelmap: source pixelmap has been freed")
+        return 0
     }
 
     surf := pmap.surface
 
     texture := sdl.CreateTextureFromSurface(Renderer, surf)
     if texture == nil {
-        lua.pushnil(L)
-
         err := sdl.GetError()
         if err != nil {
-            lua.pushfstring(L, "graphics.new_image_from_pixelmap: failed to create texture from pixelmap: %s", err)
+            lua.L_error(L, "graphics.new_image_from_pixelmap: failed to create texture from pixelmap: %s", err)
         } else {
-            lua.pushstring(L, "graphics.new_image_from_pixelmap: failed to create texture from pixelmap")
+            lua.L_error(L, "graphics.new_image_from_pixelmap: failed to create texture from pixelmap")
         }
-        return 2
+        return 0
     }
 
     sdl.SetTextureBlendMode(texture, {.BLEND})
     sdl.SetTextureScaleMode(texture, Gfx_Ctx.default_scale_mode)
 
     img := cast(^Image)lua.newuserdata(L, size_of(Image))
-    img^ = Image { texture = texture, width = f32(surf.w), height = f32(surf.h) }
+    img^ = Image{texture = texture, width = f32(surf.w), height = f32(surf.h)}
 
     lua.L_getmetatable(L, "Image")
     lua.setmetatable(L, -2)
