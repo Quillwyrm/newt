@@ -10,7 +10,7 @@ Newt is a native script-driven runtime built in Odin. It exposes a clear, compos
 - Audio playback with mixing, 2D spatialization, and effects
 - Keyboard, mouse, text input, clipboard, cursor, and window control
 - Filesystem access, working directory control, and file operations
-- Grid utilities for pathfinding, distance maps, reachability, visibility, and more
+- Grid utilities for pathfinding, distance maps, visibility, and 2d array logic
 
 ## Example
 

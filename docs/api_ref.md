@@ -10,6 +10,7 @@ This reference documents the available modules, global functions, and the basic 
 * [audio](audio.md) - Sound loading, playback, spatialization, buses, and effects.
 * [input](input.md) - Keyboard and mouse state, mouse position and wheel, and text input.
 * [filesystem](filesystem.md) - Resource and working directory access, file operations, and directory queries.
+* [grid](grid.md) - Datagrid Type & utilities for pathfinding, distance maps, visibility, and 2d array math.
 
 ## Global Functions
 
