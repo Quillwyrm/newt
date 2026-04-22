@@ -233,11 +233,13 @@ graphics.set_clip_rect(x, y, w, h)
 
 ### get_clip_rect
 
-Returns the current clip rectangle in absolute screen coordinates. When clipping is disabled, this returns `0, 0, 0, 0`.
+Returns the current clip rectangle in absolute screen coordinates. When clipping is disabled, this returns `nil, nil, nil, nil`.
 
 ```lua
-graphics.get_clip_rect() -> x, y, w, h
+graphics.get_clip_rect() -> x, y, w, h | nil, nil, nil, nil
 ```
+
+---
 
 ## Transforms
 

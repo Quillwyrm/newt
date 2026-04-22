@@ -890,7 +890,7 @@ lua_graphics_set_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
 
 // lua_graphics_get_clip_rect implements: x, y, w, h = graphics.get_clip_rect()
 // Returns the current hardware clip rectangle.
-// Returns 0, 0, 0, 0 if clipping is disabled.
+// Returns nil, nil, nil, nil if clipping is disabled.
 lua_graphics_get_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
     check_render_safety(L, "graphics.get_clip_rect")
@@ -899,10 +899,10 @@ lua_graphics_get_clip_rect :: proc "c" (L: ^lua.State) -> c.int {
     enabled := sdl.GetRenderClipRect(Renderer, &rect)
 
     if !enabled {
-        lua.pushinteger(L, 0)
-        lua.pushinteger(L, 0)
-        lua.pushinteger(L, 0)
-        lua.pushinteger(L, 0)
+        lua.pushnil(L)
+        lua.pushnil(L)
+        lua.pushnil(L)
+        lua.pushnil(L)
         return 4
     }
 

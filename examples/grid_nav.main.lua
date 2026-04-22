@@ -8,7 +8,7 @@
 -- Controls:
 --   Arrows  = move source (green)
 --   Numpad  = move target (red)
---   LMB     = move A* goal (white), including onto blocked cells
+--   LMB     = move A* goal inside reachable area
 --   1       = 4-way uniform
 --   2       = 8-way uniform
 --   3       = 8-way diagonal expensive
@@ -16,13 +16,14 @@
 --   X       = corner mode no_squeeze
 --   C       = corner mode no_cut
 --   TAB     = toggle terrain / distance view
+--   V       = toggle reachable overlay
 --   R       = rebuild map + reset markers
 -- =============================================================================
 
 local ASCII_MAP = {
     "000000000000000000000000000000",
-    "011111111111111111110111111110",
-    "011111111111111111110111111110",
+    "011111111111111111111111111110",
+    "011111111111111111111111111110",
     "011111111111111111110011111110",
     "011111111001111111000111111110",
     "011000001001111111000100011110",
@@ -56,6 +57,7 @@ local agent_x = 6
 local agent_y = 13
 local agent_goal_x = 6
 local agent_goal_y = 13
+local agent_move_budget = 12
 
 local source_move_timer = 0
 local target_move_timer = 0
@@ -67,8 +69,10 @@ local agent_step_time = 0.09
 local view_mode = "distance" -- "distance" | "terrain"
 local rule_preset = 3        -- 1 = 4-way uniform, 2 = 8-way uniform, 3 = 8-way diag expensive
 local corner_mode = "no_squeeze"
+local show_reachable_overlay = true
 
 local cost = nil
+local agent_reachable_dist = nil
 
 local prev_down = {}
 local just_pressed = {}
@@ -129,7 +133,7 @@ local function validate_ascii_map()
 end
 
 local function update_key_edges()
-    local keys = { "1", "2", "3", "z", "x", "c", "r", "tab" }
+    local keys = { "1", "2", "3", "z", "x", "c", "r", "tab", "v" }
 
     for i = 1, #keys do
         local key = keys[i]
@@ -343,6 +347,23 @@ local function draw_grid(dist)
     end
 end
 
+local function draw_reachable_overlay(reachable_dist)
+    if not show_reachable_overlay or not reachable_dist then
+        return
+    end
+
+    for y = 0, GRID_H - 1 do
+        for x = 0, GRID_W - 1 do
+            local d = grid.get_cell(reachable_dist, x, y)
+
+            if d and d >= 0 then
+                local sx, sy = cell_to_screen(x, y)
+                graphics.draw_rect(sx + 4, sy + 4, CELL - 9, CELL - 9, rgba(90, 160, 255, 70))
+            end
+        end
+    end
+end
+
 local function draw_path_lines(path, start_x, start_y, color)
     if not path or #path < 2 then
         return
@@ -441,18 +462,27 @@ runtime.update = function(dt)
         end
     end
 
+    if pressed("v") then
+        show_reachable_overlay = not show_reachable_overlay
+    end
+
     if pressed("r") then
         build_test_map()
         apply_rules()
     end
+
+    agent_reachable_dist = grid.compute_distance(cost, agent_x, agent_y, agent_move_budget)
 
     if input.pressed("mouse1") then
         local mx, my = input.get_mouse_position()
         local gx, gy = screen_to_cell(mx, my)
 
         if gx >= 0 and gx < GRID_W and gy >= 0 and gy < GRID_H then
-            agent_goal_x = gx
-            agent_goal_y = gy
+            local d = grid.get_cell(agent_reachable_dist, gx, gy)
+            if d and d >= 0 then
+                agent_goal_x = gx
+                agent_goal_y = gy
+            end
         end
     end
 
@@ -524,6 +554,7 @@ runtime.draw = function()
     graphics.clear(rgba(14, 12, 16))
 
     draw_grid(dist)
+    draw_reachable_overlay(agent_reachable_dist)
     draw_path_lines(exact_path, target_x, target_y, rgba(70, 235, 255))
     draw_path_lines(downhill_path, target_x, target_y, rgba(255, 70, 220))
     draw_path_lines(astar_path, agent_x, agent_y, rgba(255, 210, 70))
@@ -531,8 +562,9 @@ runtime.draw = function()
 
     graphics.debug_text(20, 16, "Arrows = move source", rgba("8eff8e"))
     graphics.debug_text(20, 34, "Numpad = move target (8-way)", rgba("ff7070"))
-    graphics.debug_text(20, 52, "LMB = move A* goal", rgba("ffd95a"))
-    graphics.debug_text(20, 70, "1/2/3 rules  Z/X/C corners  TAB terrain/distance  R rebuild", rgba("d0d8ff"))
+    graphics.debug_text(20, 52, "LMB = move A* goal inside reachable area", rgba("ffd95a"))
+    graphics.debug_text(20, 70, "V = toggle reachable overlay", rgba("9fd0ff"))
+    graphics.debug_text(20, 88, "1/2/3 rules  Z/X/C corners  TAB terrain/distance  R rebuild", rgba("d0d8ff"))
 
     local dist_v = grid.get_cell(dist, target_x, target_y)
     local cost_v = grid.get_cell(cost, target_x, target_y)
@@ -542,6 +574,7 @@ runtime.draw = function()
     graphics.debug_text(220, bottom_y, "corner: " .. corner_mode, rgba("ffffff"))
     graphics.debug_text(410, bottom_y, "view: " .. view_mode, rgba("ffffff"))
     graphics.debug_text(540, bottom_y, "target cost=" .. tostring(cost_v) .. "  dist=" .. tostring(dist_v), rgba("ffffff"))
+    graphics.debug_text(760, bottom_y, "budget: " .. tostring(agent_move_budget), rgba("9fd0ff"))
 
     if same then
         graphics.debug_text(20, bottom_y + 18, "exact path == downhill path", rgba(120, 255, 160))

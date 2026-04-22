@@ -2,20 +2,8 @@ package main
 
 import "base:runtime"
 import "core:c"
+import "core:math"
 import lua "luajit"
-
-
-// grid.compute_regions(cost) -> region_map, region_count
-// -- dead source loud
-
-// grid.find_nearest_cell(grid, x, y, value, radius?) -> nx, ny | nil
-// -- dead grid nil, no match nil, bad setup loud
-
-// grid.count_cells(grid, value) -> cell_count | nil
-// -- dead grid nil, no matches 0
-
-// grid.get_region_bounds(region_map, region_id) -> x, y, w, h | nil
-// -- dead map nil, missing region nil, region_id <= 0 loud
 
 // ============================================================================
 // Grid State
@@ -28,6 +16,8 @@ Datagrid :: struct {
     height: int,
     cells:  []i32,
 }
+
+// -- Movement and Vision Rules --
 
 GridCornerMode :: enum {
     Allow,
@@ -48,6 +38,16 @@ Active_Movement_Rules: struct {
     corner_mode        = .No_Squeeze,
     allow_blocked_goal = false,
 }
+
+Active_Vision_Rules: struct {
+    walls_visible:    bool,
+    diagonal_gaps: bool, // reserved for later stricter corner policy
+} = {
+    walls_visible    = true,
+    diagonal_gaps = false,
+}
+
+// -- Scratch Buffers --
 
 DistanceCandidate :: struct {
     cell_idx:   int,
@@ -75,6 +75,29 @@ Path_Find_Buf: struct {
 }
 
 Region_Pending_Buf: [dynamic]int
+
+// -- FOV System Types --
+
+FovSlope :: struct {
+    num: int,
+    den: int,
+}
+
+FovRow :: struct {
+    origin_x:   int,
+    origin_y:   int,
+    quadrant:   int,
+    depth:      int,
+    slope_low:  FovSlope,
+    slope_high: FovSlope,
+}
+
+// ============================================================================
+// Traversal Helpers
+// ============================================================================
+
+// -- A* Helpers --
+
 
 // push_path_candidate inserts a path candidate into the min-heap.
 // Ordering is:
@@ -225,6 +248,9 @@ estimate_path_heuristic :: proc(x, y: int, goal_x, goal_y: [8]int, goal_count: i
     return best
 }
 
+// -- Distance Field Helpers --
+
+
 // push_dist_candidate inserts a candidate cell into the min-heap.
 push_dist_candidate :: proc(candidates: ^[dynamic]DistanceCandidate, cell_idx: int, total_cost: i32) {
     append(candidates, DistanceCandidate{cell_idx = cell_idx, total_cost = total_cost})
@@ -285,6 +311,8 @@ pop_dist_candidate :: proc(candidates: ^[dynamic]DistanceCandidate) -> (Distance
 
     return lowest, true
 }
+
+// -- Movement Rules Helper --
 
 // get_step_cost returns the movement step cost from (x, y) to (nx, ny)
 // under the current active movement rules.
@@ -352,6 +380,219 @@ get_step_cost :: proc(cost: ^Datagrid, x, y, nx, ny: int) -> i32 {
 }
 
 // ============================================================================
+// FOV Helpers
+// ============================================================================
+
+scan_fov_row :: proc(transparent, visible: ^Datagrid, row0: FovRow, max_depth: int) {
+    row := row0
+
+    if row.depth > max_depth {
+        return
+    }
+
+    // compute visible column range for this row
+    column_min_p := row.depth * row.slope_low.num
+    column_min_q := row.slope_low.den
+    column_min_n := 2 * column_min_p + column_min_q
+    column_min_d := 2 * column_min_q
+    column_min := column_min_n / column_min_d
+    column_min_r := column_min_n % column_min_d
+    if column_min_r != 0 && column_min_r < 0 {
+        column_min -= 1
+    }
+
+    column_max_p := row.depth * row.slope_high.num
+    column_max_q := row.slope_high.den
+    column_max_n := 2 * column_max_p - column_max_q
+    column_max_d := 2 * column_max_q
+    column_max := column_max_n / column_max_d
+    column_max_r := column_max_n % column_max_d
+    if column_max_r != 0 && column_max_r > 0 {
+        column_max += 1
+    }
+
+    prev_tile_is_wall := false
+    saw_any_in_bounds := false
+
+    for column := column_min; column <= column_max; column += 1 {
+        // map row-local (depth, column) into absolute grid coords
+        x, y: int
+        switch row.quadrant {
+        case 0:
+            x, y = row.origin_x + column, row.origin_y - row.depth // north
+        case 1:
+            x, y = row.origin_x + row.depth, row.origin_y + column // east
+        case 2:
+            x, y = row.origin_x + column, row.origin_y + row.depth // south
+        case 3:
+            x, y = row.origin_x - row.depth, row.origin_y + column // west
+        case:
+            x, y = row.origin_x, row.origin_y
+        }
+
+        if !cell_in_bounds(transparent, x, y) {
+            continue
+        }
+
+        saw_any_in_bounds = true
+
+        is_wall := get_datagrid_cell(transparent, x, y) == 0
+
+        // reveal walls if walls_visible is enabled, otherwise reveal floors whose
+        // center lies inside the current symmetric sector
+        if is_wall {
+            if Active_Vision_Rules.walls_visible {
+                set_datagrid_cell(visible, x, y, 1)
+            }
+        } else {
+            is_symmetric :=
+                column * row.slope_low.den  >= row.depth * row.slope_low.num &&
+                column * row.slope_high.den <= row.depth * row.slope_high.num
+
+            if is_symmetric {
+                set_datagrid_cell(visible, x, y, 1)
+            }
+        }
+
+        // wall -> floor transition: shrink the near bound
+        if prev_tile_is_wall && !is_wall {
+            row.slope_low = FovSlope{
+                num = 2 * column - 1,
+                den = 2 * row.depth,
+            }
+        }
+
+        // floor -> wall transition: recurse into previous open sector
+        if column != column_min && !prev_tile_is_wall && is_wall {
+            next_row := row
+            next_row.depth += 1
+            next_row.slope_high = FovSlope{
+                num = 2 * column - 1,
+                den = 2 * row.depth,
+            }
+            scan_fov_row(transparent, visible, next_row, max_depth)
+        }
+
+        prev_tile_is_wall = is_wall
+    }
+
+    if !saw_any_in_bounds {
+        return
+    }
+
+    if !prev_tile_is_wall {
+        row.depth += 1
+        scan_fov_row(transparent, visible, row, max_depth)
+    }
+}
+
+compute_fov_symmetric :: proc(transparent: ^Datagrid, ox, oy, radius: int) -> Datagrid {
+    visible := new_datagrid(transparent.width, transparent.height)
+    set_datagrid_cell(&visible, ox, oy, 1)
+
+    if radius == 0 {
+        return visible
+    }
+
+    max_depth := transparent.width
+    if transparent.height > max_depth {
+        max_depth = transparent.height
+    }
+    if radius < max_depth {
+        max_depth = radius
+    }
+
+    for quadrant := 0; quadrant < 4; quadrant += 1 {
+        row := FovRow{
+            origin_x   = ox,
+            origin_y   = oy,
+            quadrant   = quadrant,
+            depth      = 1,
+            slope_low  = FovSlope{num = -1, den = 1},
+            slope_high = FovSlope{num = 1, den = 1},
+        }
+        scan_fov_row(transparent, &visible, row, max_depth)
+    }
+
+    radius_sq := radius * radius
+
+    for y := 0; y < visible.height; y += 1 {
+        for x := 0; x < visible.width; x += 1 {
+            if x == ox && y == oy {
+                continue
+            }
+
+            idx := cell_idx(&visible, x, y)
+            if visible.cells[idx] == 0 {
+                continue
+            }
+
+            dx := x - ox
+            dy := y - oy
+            if dx * dx + dy * dy > radius_sq {
+                visible.cells[idx] = 0
+            }
+        }
+    }
+
+    return visible
+}
+
+apply_fov_cone_mask :: proc(visible: ^Datagrid, ox, oy, radius: int, view_dir, view_angle: f32) {
+    if view_angle >= 360 {
+        return
+    }
+
+    radians_per_degree := f32(0.017453292519943295)
+
+    half_angle_radians := (view_angle * 0.5) * radians_per_degree
+    half_angle_cos := f32(math.cos(f64(half_angle_radians)))
+
+    dir_radians := view_dir * radians_per_degree
+    dir_x := f32(math.cos(f64(dir_radians)))
+    dir_y := f32(math.sin(f64(dir_radians)))
+
+    radius_sq := radius * radius
+
+    for y := 0; y < visible.height; y += 1 {
+        for x := 0; x < visible.width; x += 1 {
+            if x == ox && y == oy {
+                continue
+            }
+
+            idx := cell_idx(visible, x, y)
+            if visible.cells[idx] == 0 {
+                continue
+            }
+
+            dx_i := x - ox
+            dy_i := y - oy
+
+            if dx_i * dx_i + dy_i * dy_i > radius_sq {
+                visible.cells[idx] = 0
+                continue
+            }
+
+            dx := f32(dx_i)
+            dy := f32(dy_i)
+            len_sq := dx * dx + dy * dy
+            if len_sq <= 0 {
+                continue
+            }
+
+            inv_len := 1.0 / f32(math.sqrt(f64(len_sq)))
+            nx := dx * inv_len
+            ny := dy * inv_len
+
+            dot := nx * dir_x + ny * dir_y
+            if dot < half_angle_cos {
+                visible.cells[idx] = 0
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Substrate Helpers
 // ============================================================================
 
@@ -410,7 +651,9 @@ fill_datagrid :: proc(g: ^Datagrid, value: i32) {
 // Datagrid Lua Bindings
 // ============================================================================
 
-// grid.new_datagrid(w, h) -> datagrid
+// -- Datagrid Basics --
+
+// grid.new_datagrid(width, height) -> datagrid
 lua_grid_new_datagrid :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -432,8 +675,6 @@ lua_grid_new_datagrid :: proc "c" (L: ^lua.State) -> c.int {
 }
 
 // grid.get_cell(g, x, y) -> value | nil
-// Returns nil if the datagrid has been freed.
-// Returns nil for out-of-bounds reads.
 lua_grid_get_cell :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -457,8 +698,6 @@ lua_grid_get_cell :: proc "c" (L: ^lua.State) -> c.int {
 }
 
 // grid.set_cell(g, x, y, value)
-// Dead datagrid writes are no-ops.
-// Out-of-bounds writes are no-ops.
 lua_grid_set_cell :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -480,7 +719,6 @@ lua_grid_set_cell :: proc "c" (L: ^lua.State) -> c.int {
 }
 
 // grid.fill_datagrid(g, value)
-// Filling a freed datagrid is a no-op.
 lua_grid_fill_datagrid :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -495,7 +733,6 @@ lua_grid_fill_datagrid :: proc "c" (L: ^lua.State) -> c.int {
 }
 
 // grid.clear_datagrid(g)
-// Clearing a freed datagrid is a no-op.
 lua_grid_clear_datagrid :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -527,28 +764,10 @@ lua_grid_clone_datagrid :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// -- Pathfinding and Traversal --
+// -- Movement Rules --
 
 
-// grid.set_movement_rules()
-// grid.set_movement_rules(nil)
-// grid.set_movement_rules(rules)
-//
-// Sets the active movement rules used by grid traversal/path solves.
-//
-// Accepted table fields:
-// - neighbors           = 4 | 8
-// - cardinal_cost       = integer > 0
-// - diagonal_cost       = integer > 0
-// - corner_mode         = "allow" | "no_squeeze" | "no_cut"
-// - allow_blocked_goal  = boolean
-//
-// Behavior:
-// - no args resets to defaults
-// - nil resets to defaults
-// - table input merges into the current active rules
-// - unknown fields throw
-// - wrong types or invalid values throw
+// grid.set_movement_rules(rules?)
 lua_grid_set_movement_rules :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -641,18 +860,7 @@ lua_grid_set_movement_rules :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
-// ----------------------------------------------------------------------------
 // grid.get_movement_rules() -> rules
-//
-// Returns the current active module-wide movement rules as a Lua table.
-//
-// Returned fields:
-// - neighbors
-// - cardinal_cost
-// - diagonal_cost
-// - corner_mode
-// - allow_blocked_goal
-// ----------------------------------------------------------------------------
 lua_grid_get_movement_rules :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -683,29 +891,10 @@ lua_grid_get_movement_rules :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// ----------------------------------------------------------------------------
+// -- Traversal and Pathfinding --
+
+
 // grid.find_path(cost, sx, sy, gx, gy) -> path | nil
-//
-// Finds one exact shortest-cost path from start to goal under the current
-// active movement rules.
-//
-// Cost grid semantics:
-// - 0   = blocked
-// - > 0 = cost to enter that cell
-// - < 0 = invalid input
-//
-// Path semantics:
-// - returns flat coordinates {x1, y1, x2, y2, ...}
-// - excludes the start cell
-// - includes the final reached cell
-// - returns {} if the start already satisfies the goal
-// - returns nil if no path exists
-//
-// Goal semantics:
-// - if allow_blocked_goal is false, a blocked goal returns nil
-// - if allow_blocked_goal is true, a blocked goal resolves to the cheapest
-//   reachable adjacent approach cell under the current movement rules
-// ----------------------------------------------------------------------------
 lua_grid_find_path :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -752,7 +941,15 @@ lua_grid_find_path :: proc "c" (L: ^lua.State) -> c.int {
         return 1
     }
 
+    
     rules := Active_Movement_Rules
+
+    neighbor_dx := [8]int{0, 1, 0, -1, 1, 1, -1, -1}
+    neighbor_dy := [8]int{-1, 0, 1, 0, -1, 1, 1, -1}
+    neighbor_count := 4
+    if rules.neighbors == 8 {
+        neighbor_count = 8
+    }
 
     goal_idx: [8]int
     goal_x: [8]int
@@ -771,25 +968,23 @@ lua_grid_find_path :: proc "c" (L: ^lua.State) -> c.int {
             return 1
         }
 
-        for dy := -1; dy <= 1; dy += 1 {
-            for dx := -1; dx <= 1; dx += 1 {
-                if dx == 0 && dy == 0 {
-                    continue
-                }
+        for i in 0..<neighbor_count {
+            nx := gx + neighbor_dx[i]
+            ny := gy + neighbor_dy[i]
 
-                nx := gx + dx
-                ny := gy + dy
-
-                if get_step_cost(cost, gx, gy, nx, ny) == 0 {
-                    continue
-                }
-
-                neighbor_idx := cell_idx(cost, nx, ny)
-                goal_idx[goal_count] = neighbor_idx
-                goal_x[goal_count] = nx
-                goal_y[goal_count] = ny
-                goal_count += 1
+            if !cell_in_bounds(cost, nx, ny) {
+                continue
             }
+
+            if get_step_cost(cost, gx, gy, nx, ny) == 0 {
+                continue
+            }
+
+            neighbor_idx := cell_idx(cost, nx, ny)
+            goal_idx[goal_count] = neighbor_idx
+            goal_x[goal_count] = nx
+            goal_y[goal_count] = ny
+            goal_count += 1
         }
 
         if goal_count == 0 {
@@ -832,13 +1027,6 @@ lua_grid_find_path :: proc "c" (L: ^lua.State) -> c.int {
 
     reached_goal_idx := -1
 
-    neighbor_dx := [8]int{0, 1, 0, -1, 1, 1, -1, -1}
-    neighbor_dy := [8]int{-1, 0, 1, 0, -1, 1, 1, -1}
-    neighbor_count := 4
-    if rules.neighbors == 8 {
-        neighbor_count = 8
-    }
-
     for len(candidates^) > 0 {
         candidate, ok := pop_path_candidate(candidates)
         if !ok {
@@ -855,56 +1043,48 @@ lua_grid_find_path :: proc "c" (L: ^lua.State) -> c.int {
 
         closed[candidate.cell_idx] = true
 
-        is_goal := false
         for i in 0..<goal_count {
             if candidate.cell_idx == goal_idx[i] {
-                is_goal = true
+                reached_goal_idx = candidate.cell_idx
                 break
             }
         }
 
-        if is_goal {
-            reached_goal_idx = candidate.cell_idx
+        if reached_goal_idx >= 0 {
             break
         }
 
         x := candidate.cell_idx % cost.width
         y := candidate.cell_idx / cost.width
 
-        for dy := -1; dy <= 1; dy += 1 {
-            for dx := -1; dx <= 1; dx += 1 {
-                if dx == 0 && dy == 0 {
-                    continue
-                }
+        for i in 0..<neighbor_count {
+            nx := x + neighbor_dx[i]
+            ny := y + neighbor_dy[i]
 
-                nx := x + dx
-                ny := y + dy
-
-                step_cost := get_step_cost(cost, x, y, nx, ny)
-                if step_cost == 0 {
-                    continue
-                }
-
-                neighbor_idx := cell_idx(cost, nx, ny)
-                if closed[neighbor_idx] {
-                    continue
-                }
-
-                enter_cost := cost.cells[neighbor_idx]
-                tentative_g := candidate.g_cost + step_cost * enter_cost
-                if g_costs[neighbor_idx] >= 0 && tentative_g >= g_costs[neighbor_idx] {
-                    continue
-                }
-
-                g_costs[neighbor_idx] = tentative_g
-                parents[neighbor_idx] = candidate.cell_idx
-
-                h_cost := estimate_path_heuristic(nx, ny, goal_x, goal_y, goal_count, min_enter_cost)
-                f_cost := tentative_g + h_cost
-
-                insert_order += 1
-                push_path_candidate(candidates, neighbor_idx, tentative_g, h_cost, f_cost, insert_order)
+            step_cost := get_step_cost(cost, x, y, nx, ny)
+            if step_cost == 0 {
+                continue
             }
+
+            neighbor_idx := cell_idx(cost, nx, ny)
+            if closed[neighbor_idx] {
+                continue
+            }
+
+            enter_cost := cost.cells[neighbor_idx]
+            tentative_g := candidate.g_cost + step_cost * enter_cost
+            if g_costs[neighbor_idx] >= 0 && tentative_g >= g_costs[neighbor_idx] {
+                continue
+            }
+
+            g_costs[neighbor_idx] = tentative_g
+            parents[neighbor_idx] = candidate.cell_idx
+
+            h_cost := estimate_path_heuristic(nx, ny, goal_x, goal_y, goal_count, min_enter_cost)
+            f_cost := tentative_g + h_cost
+
+            insert_order += 1
+            push_path_candidate(candidates, neighbor_idx, tentative_g, h_cost, f_cost, insert_order)
         }
     }
 
@@ -952,34 +1132,9 @@ lua_grid_find_path :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// ----------------------------------------------------------------------------
-
 // grid.compute_distance(cost, x, y, dist_cap?) -> dist
 // grid.compute_distance(cost, {x1, y1, x2, y2, ...}, dist_cap?) -> dist
 // grid.compute_distance(cost, source_grid, dist_cap?) -> dist
-//
-// Computes a shortest-cost distance field from one or more source cells.
-//
-// Uses the current active movement rules.
-//
-// Cost grid semantics:
-// - 0   = blocked
-// - > 0 = cost to enter that cell
-// - < 0 = invalid input
-//
-// Distance grid semantics:
-// - source cells = 0
-// - reachable    = accumulated total cost
-// - no path      = -1
-//
-// Source forms:
-// - x, y
-// - flat coordinate list table {x1, y1, x2, y2, ...}
-// - source datagrid where every nonzero cell is a source
-//
-// Notes:
-// - blocked cells, unreachable open cells, and over-cap cells all appear as -1
-// ----------------------------------------------------------------------------
 lua_grid_compute_distance :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -1196,30 +1351,7 @@ lua_grid_compute_distance :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// ----------------------------------------------------------------------------
 // grid.extract_path(cost, dist, x, y) -> path | nil
-//
-// Extracts an exact path from a solved weighted distance field back to a
-// zero-cost source cell.
-//
-// Uses the current active movement rules.
-//
-// Cost grid semantics:
-// - 0   = blocked
-// - > 0 = cost to enter that cell
-//
-// Distance grid semantics:
-// - 0   = source cell
-// - > 0 = accumulated total cost
-// - -1  = no path
-//
-// Path semantics:
-// - returns flat coordinates {x1, y1, x2, y2, ...}
-// - excludes the start cell
-// - includes the terminal source cell
-// - returns {} if the start cell already has distance 0
-// - returns nil if the start cell has no path or no exact predecessor exists
-// ----------------------------------------------------------------------------
 lua_grid_extract_path :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -1352,26 +1484,7 @@ lua_grid_extract_path :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// ----------------------------------------------------------------------------
 // grid.extract_downhill_path(dist, x, y) -> path | nil
-//
-// Extracts a downhill path from a solved distance field back to a zero-cost
-// source cell.
-//
-// Uses the current active movement rules for neighbor topology only.
-//
-// Distance grid semantics:
-// - 0   = source cell
-// - > 0 = accumulated total cost
-// - -1  = no path
-//
-// Path semantics:
-// - returns flat coordinates {x1, y1, x2, y2, ...}
-// - excludes the start cell
-// - includes the terminal source cell
-// - returns {} if the start cell already has distance 0
-// - returns nil if the start cell has no path or no downhill step exists
-// ----------------------------------------------------------------------------
 lua_grid_extract_downhill_path :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -1481,26 +1594,10 @@ lua_grid_extract_downhill_path :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// ----------------------------------------------------------------------------
+// -- Query and Procgen --
+
+
 // grid.compute_regions(cost) -> region_map, region_count
-//
-// Computes connected passable regions from a cost datagrid.
-//
-// Uses the current active movement rules for connectivity.
-//
-// Cost grid semantics:
-// - 0   = blocked / excluded
-// - > 0 = passable / participates
-// - < 0 = invalid input
-//
-// Region map semantics:
-// - 0   = blocked / no region
-// - > 0 = region id
-//
-// Notes:
-// - region ids are assigned in scan order starting from 1
-// - dead source datagrid is loud
-// ----------------------------------------------------------------------------
 lua_grid_compute_regions :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
 
@@ -1584,6 +1681,366 @@ lua_grid_compute_regions :: proc "c" (L: ^lua.State) -> c.int {
     return 2
 }
 
+// grid.get_region_bounds(region_map, region_id) -> x, y, w, h | nil
+lua_grid_get_region_bounds :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    region_map := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if region_map == nil || region_map.cells == nil {
+        lua.pushnil(L)
+        lua.pushnil(L)
+        lua.pushnil(L)
+        lua.pushnil(L)
+        return 4
+    }
+
+    region_id := cast(i32)lua.L_checkinteger(L, 2)
+    if region_id <= 0 {
+        lua.L_error(L, "grid.get_region_bounds: region_id must be greater than 0")
+        return 0
+    }
+
+    found := false
+    min_x := 0
+    min_y := 0
+    max_x := 0
+    max_y := 0
+
+    for i in 0..<len(region_map.cells) {
+        if region_map.cells[i] != region_id {
+            continue
+        }
+
+        x := i % region_map.width
+        y := i / region_map.width
+
+        if !found {
+            min_x = x
+            min_y = y
+            max_x = x
+            max_y = y
+            found = true
+            continue
+        }
+
+        if x < min_x {
+            min_x = x
+        }
+        if y < min_y {
+            min_y = y
+        }
+        if x > max_x {
+            max_x = x
+        }
+        if y > max_y {
+            max_y = y
+        }
+    }
+
+    if !found {
+        lua.pushnil(L)
+        lua.pushnil(L)
+        lua.pushnil(L)
+        lua.pushnil(L)
+        return 4
+    }
+
+    lua.pushinteger(L, cast(lua.Integer)min_x)
+    lua.pushinteger(L, cast(lua.Integer)min_y)
+    lua.pushinteger(L, cast(lua.Integer)(max_x - min_x + 1))
+    lua.pushinteger(L, cast(lua.Integer)(max_y - min_y + 1))
+    return 4
+}
+
+// grid.find_nearest_cell(grid, x, y, value, radius?) -> nx, ny | nil
+lua_grid_find_nearest_cell :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    nargs := lua.gettop(L)
+    if nargs != 4 && nargs != 5 {
+        lua.L_error(L, "grid.find_nearest_cell: expected (grid, x, y, value) or (grid, x, y, value, radius)")
+        return 0
+    }
+
+    g := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if g == nil || g.cells == nil {
+        lua.pushnil(L)
+        lua.pushnil(L)
+        return 2
+    }
+
+    x := cast(int)lua.L_checkinteger(L, 2)
+    y := cast(int)lua.L_checkinteger(L, 3)
+    value := cast(i32)lua.L_checkinteger(L, 4)
+
+    if !cell_in_bounds(g, x, y) {
+        lua.L_error(L, "grid.find_nearest_cell: start (%d, %d) is out of bounds", x, y)
+        return 0
+    }
+
+    max_radius := 0
+
+    if nargs == 5 {
+        max_radius = cast(int)lua.L_checkinteger(L, 5)
+        if max_radius < 0 {
+            lua.L_error(L, "grid.find_nearest_cell: radius must be greater than or equal to 0")
+            return 0
+        }
+    } else {
+        max_radius = x
+        if g.width - 1 - x > max_radius {
+            max_radius = g.width - 1 - x
+        }
+        if y > max_radius {
+            max_radius = y
+        }
+        if g.height - 1 - y > max_radius {
+            max_radius = g.height - 1 - y
+        }
+    }
+
+    if get_datagrid_cell(g, x, y) == value {
+        lua.pushinteger(L, cast(lua.Integer)x)
+        lua.pushinteger(L, cast(lua.Integer)y)
+        return 2
+    }
+
+    for ring := 1; ring <= max_radius; ring += 1 {
+        top := y - ring
+        bottom := y + ring
+        left := x - ring
+        right := x + ring
+
+        // top row
+        for nx := left; nx <= right; nx += 1 {
+            if cell_in_bounds(g, nx, top) && get_datagrid_cell(g, nx, top) == value {
+                lua.pushinteger(L, cast(lua.Integer)nx)
+                lua.pushinteger(L, cast(lua.Integer)top)
+                return 2
+            }
+        }
+
+        // right column
+        for ny := top + 1; ny <= bottom - 1; ny += 1 {
+            if cell_in_bounds(g, right, ny) && get_datagrid_cell(g, right, ny) == value {
+                lua.pushinteger(L, cast(lua.Integer)right)
+                lua.pushinteger(L, cast(lua.Integer)ny)
+                return 2
+            }
+        }
+
+        // bottom row
+        if bottom != top {
+            for nx := right; nx >= left; nx -= 1 {
+                if cell_in_bounds(g, nx, bottom) && get_datagrid_cell(g, nx, bottom) == value {
+                    lua.pushinteger(L, cast(lua.Integer)nx)
+                    lua.pushinteger(L, cast(lua.Integer)bottom)
+                    return 2
+                }
+            }
+        }
+
+        // left column
+        if left != right {
+            for ny := bottom - 1; ny >= top + 1; ny -= 1 {
+                if cell_in_bounds(g, left, ny) && get_datagrid_cell(g, left, ny) == value {
+                    lua.pushinteger(L, cast(lua.Integer)left)
+                    lua.pushinteger(L, cast(lua.Integer)ny)
+                    return 2
+                }
+            }
+        }
+    }
+
+    lua.pushnil(L)
+    lua.pushnil(L)
+    return 2
+}
+
+// grid.count_cells(grid, value) -> cell_count | nil
+lua_grid_count_cells :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    g := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if g == nil || g.cells == nil {
+        lua.pushnil(L)
+        return 1
+    }
+
+    value := cast(i32)lua.L_checkinteger(L, 2)
+
+    count := 0
+    for i in 0..<len(g.cells) {
+        if g.cells[i] == value {
+            count += 1
+        }
+    }
+
+    lua.pushinteger(L, cast(lua.Integer)count)
+    return 1
+}
+
+// -- Vision Rules --
+
+
+// grid.set_vision_rules(rules?)
+lua_grid_set_vision_rules :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    nargs := lua.gettop(L)
+    if nargs > 1 {
+        lua.L_error(L, "grid.set_vision_rules: expected 0 or 1 arguments")
+        return 0
+    }
+
+    if nargs == 0 || lua.isnil(L, 1) {
+        Active_Vision_Rules = {
+            walls_visible = true,
+            diagonal_gaps = true,
+        }
+        return 0
+    }
+
+    lua.L_checktype(L, 1, .TABLE)
+
+    rules := Active_Vision_Rules
+
+    lua.pushnil(L)
+    for lua.next(L, 1) {
+        if lua.type(L, -2) != .STRING {
+            lua.L_error(L, "grid.set_vision_rules: table keys must be strings")
+            return 0
+        }
+
+        key := lua.tostring(L, -2)
+
+        switch string(key) {
+        case "walls_visible":
+            lua.L_checktype(L, -1, .BOOLEAN)
+            rules.walls_visible = bool(lua.toboolean(L, -1))
+
+        case "diagonal_gaps":
+            lua.L_checktype(L, -1, .BOOLEAN)
+            rules.diagonal_gaps = bool(lua.toboolean(L, -1))
+
+        case:
+            lua.L_error(L, "grid.set_vision_rules: unknown field '%s'", key)
+            return 0
+        }
+
+        lua.pop(L, 1)
+    }
+
+    Active_Vision_Rules = rules
+    return 0
+}
+
+lua_grid_get_vision_rules :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    lua.createtable(L, 0, 2)
+
+    lua.pushboolean(L, b32(Active_Vision_Rules.walls_visible))
+    lua.setfield(L, -2, "walls_visible")
+
+    lua.pushboolean(L, b32(Active_Vision_Rules.diagonal_gaps))
+    lua.setfield(L, -2, "diagonal_gaps")
+
+    return 1
+}
+
+
+// -- Vision --
+
+
+// grid.compute_fov(transparent, ox, oy, radius) -> visible
+lua_grid_compute_fov :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    transparent := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if transparent == nil || transparent.cells == nil {
+        lua.L_error(L, "grid.compute_fov: Occlusion datagrid has been freed")
+        return 0
+    }
+
+    ox := cast(int)lua.L_checkinteger(L, 2)
+    oy := cast(int)lua.L_checkinteger(L, 3)
+    radius := cast(int)lua.L_checkinteger(L, 4)
+
+    if !cell_in_bounds(transparent, ox, oy) {
+        lua.L_error(L, "grid.compute_fov: origin (%d, %d) is out of bounds", ox, oy)
+        return 0
+    }
+
+    if radius < 0 {
+        lua.L_error(L, "grid.compute_fov: radius must be greater than or equal to 0")
+        return 0
+    }
+
+    visible := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    visible^ = compute_fov_symmetric(transparent, ox, oy, radius)
+
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    return 1
+}
+
+// grid.compute_fov_cone(transparent, ox, oy, radius, view_dir, view_angle?) -> visible
+lua_grid_compute_fov_cone :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    nargs := lua.gettop(L)
+    if nargs != 5 && nargs != 6 {
+        lua.L_error(L, "grid.compute_fov_cone: expected (transparent, ox, oy, radius, view_dir) or (transparent, ox, oy, radius, view_dir, view_angle)")
+        return 0
+    }
+
+    transparent := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if transparent == nil || transparent.cells == nil {
+        lua.L_error(L, "grid.compute_fov_cone: Occlusion datagrid has been freed")
+        return 0
+    }
+
+    ox := cast(int)lua.L_checkinteger(L, 2)
+    oy := cast(int)lua.L_checkinteger(L, 3)
+    radius := cast(int)lua.L_checkinteger(L, 4)
+    view_dir := f32(lua.L_checknumber(L, 5))
+
+    view_angle := f32(90)
+    if nargs == 6 {
+        view_angle = f32(lua.L_checknumber(L, 6))
+    }
+
+    if !cell_in_bounds(transparent, ox, oy) {
+        lua.L_error(L, "grid.compute_fov_cone: origin (%d, %d) is out of bounds", ox, oy)
+        return 0
+    }
+
+    if radius < 0 {
+        lua.L_error(L, "grid.compute_fov_cone: radius must be greater than or equal to 0")
+        return 0
+    }
+
+    if view_angle <= 0 || view_angle > 360 {
+        lua.L_error(L, "grid.compute_fov_cone: view_angle must be greater than 0 and less than or equal to 360")
+        return 0
+    }
+
+    visible := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    visible^ = compute_fov_symmetric(transparent, ox, oy, radius)
+    apply_fov_cone_mask(visible, ox, oy, radius, view_dir, view_angle)
+
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    return 1
+}
+
+// -- Datagrid Math Ops --
+
+//TODO
+
 // ============================================================================
 // Datagrid Lua GC And Metatable
 // ============================================================================
@@ -1610,7 +2067,6 @@ setup_grid_metatables :: proc() {
     lua.setfield(Lua, -2, "__gc")
     lua.pop(Lua, 1)
 }
-
 // ============================================================================
 // Lua Registration
 // ============================================================================
@@ -1620,19 +2076,50 @@ register_grid_api :: proc() {
 
     lua.newtable(Lua) // [grid]
 
-    lua_bind_function(lua_grid_new_datagrid,          "new_datagrid")
-    lua_bind_function(lua_grid_get_cell,              "get_cell")
-    lua_bind_function(lua_grid_set_cell,              "set_cell")
-    lua_bind_function(lua_grid_fill_datagrid,         "fill_datagrid")
-    lua_bind_function(lua_grid_clear_datagrid,        "clear_datagrid")
-    lua_bind_function(lua_grid_clone_datagrid,        "clone_datagrid")
-    lua_bind_function(lua_grid_set_movement_rules,    "set_movement_rules")
-    lua_bind_function(lua_grid_get_movement_rules,    "get_movement_rules")
+    // -- Datagrid Basics --
+    lua_bind_function(lua_grid_new_datagrid,  "new_datagrid")
+    lua_bind_function(lua_grid_get_cell,      "get_cell")
+    lua_bind_function(lua_grid_set_cell,      "set_cell")
+    lua_bind_function(lua_grid_fill_datagrid, "fill_datagrid")
+    lua_bind_function(lua_grid_clear_datagrid,"clear_datagrid")
+    lua_bind_function(lua_grid_clone_datagrid,"clone_datagrid")
+
+    // -- Movement Rules --
+    lua_bind_function(lua_grid_set_movement_rules, "set_movement_rules")
+    lua_bind_function(lua_grid_get_movement_rules, "get_movement_rules")
+
+    // -- Traversal and Pathfinding --
     lua_bind_function(lua_grid_find_path,             "find_path")
     lua_bind_function(lua_grid_compute_distance,      "compute_distance")
     lua_bind_function(lua_grid_extract_path,          "extract_path")
     lua_bind_function(lua_grid_extract_downhill_path, "extract_downhill_path")
-    lua_bind_function(lua_grid_compute_regions,       "compute_regions")
+
+    // -- Query and Procgen --
+    lua_bind_function(lua_grid_compute_regions,   "compute_regions")
+    lua_bind_function(lua_grid_get_region_bounds, "get_region_bounds")
+    lua_bind_function(lua_grid_find_nearest_cell, "find_nearest_cell")
+    lua_bind_function(lua_grid_count_cells,       "count_cells")
+
+    // -- Vision Rules --
+    lua_bind_function(lua_grid_set_vision_rules, "set_vision_rules")
+    lua_bind_function(lua_grid_get_vision_rules, "get_vision_rules")
+
+    // -- Vision --
+    lua_bind_function(lua_grid_compute_fov,      "compute_fov")
+    lua_bind_function(lua_grid_compute_fov_cone, "compute_fov_cone")
+    // lua_bind_function(lua_grid_has_los,       "has_los")
+
+    // -- Datagrid Math Ops --
+    // lua_bind_function(lua_grid_add,   "add")
+    // lua_bind_function(lua_grid_min,   "min")
+    // lua_bind_function(lua_grid_max,   "max")
+    // lua_bind_function(lua_grid_clamp, "clamp")
 
     lua.setglobal(Lua, "grid")
 }
+
+
+
+
+
+
