@@ -41,10 +41,10 @@ Active_Movement_Rules: struct {
 
 Active_Vision_Rules: struct {
     walls_visible:    bool,
-    diagonal_gaps: bool, // reserved for later stricter corner policy
+    diagonal_gaps: bool, 
 } = {
     walls_visible    = true,
-    diagonal_gaps = false,
+    diagonal_gaps = true,
 }
 
 // -- Scratch Buffers --
@@ -129,9 +129,7 @@ push_path_candidate :: proc(candidates: ^[dynamic]PathCandidate, cell_idx: int, 
             break
         }
 
-        tmp := candidates^[i]
-        candidates^[i] = candidates^[parent]
-        candidates^[parent] = tmp
+        candidates^[i], candidates^[parent] = candidates^[parent], candidates^[i]
         i = parent
     }
 }
@@ -146,7 +144,7 @@ pop_path_candidate :: proc(candidates: ^[dynamic]PathCandidate) -> (PathCandidat
     last_idx := len(candidates^) - 1
     last := candidates^[last_idx]
 
-    _ = resize(candidates, last_idx)
+    resize(candidates, last_idx)
     if len(candidates^) == 0 {
         return lowest, true
     }
@@ -189,9 +187,7 @@ pop_path_candidate :: proc(candidates: ^[dynamic]PathCandidate) -> (PathCandidat
             break
         }
 
-        tmp := candidates^[i]
-        candidates^[i] = candidates^[smallest]
-        candidates^[smallest] = tmp
+        candidates^[i], candidates^[smallest] = candidates^[smallest], candidates^[i]
         i = smallest
     }
 
@@ -250,8 +246,8 @@ estimate_path_heuristic :: proc(x, y: int, goal_x, goal_y: [8]int, goal_count: i
 
 // -- Distance Field Helpers --
 
-
-// push_dist_candidate inserts a candidate cell into the min-heap.
+// push_dist_candidate inserts a distance candidate into the min-heap.
+// Lower total_cost wins.
 push_dist_candidate :: proc(candidates: ^[dynamic]DistanceCandidate, cell_idx: int, total_cost: i32) {
     append(candidates, DistanceCandidate{cell_idx = cell_idx, total_cost = total_cost})
 
@@ -262,14 +258,12 @@ push_dist_candidate :: proc(candidates: ^[dynamic]DistanceCandidate, cell_idx: i
             break
         }
 
-        tmp := candidates^[i]
-        candidates^[i] = candidates^[parent]
-        candidates^[parent] = tmp
+        candidates^[i], candidates^[parent] = candidates^[parent], candidates^[i]
         i = parent
     }
 }
 
-// pop_dist_candidate removes and returns the cheapest candidate cell.
+// pop_dist_candidate removes and returns the cheapest distance candidate.
 pop_dist_candidate :: proc(candidates: ^[dynamic]DistanceCandidate) -> (DistanceCandidate, bool) {
     if len(candidates^) == 0 {
         return DistanceCandidate{}, false
@@ -279,7 +273,7 @@ pop_dist_candidate :: proc(candidates: ^[dynamic]DistanceCandidate) -> (Distance
     last_idx := len(candidates^) - 1
     last := candidates^[last_idx]
 
-    _ = resize(candidates, last_idx)
+    resize(candidates, last_idx)
     if len(candidates^) == 0 {
         return lowest, true
     }
@@ -303,9 +297,7 @@ pop_dist_candidate :: proc(candidates: ^[dynamic]DistanceCandidate) -> (Distance
             break
         }
 
-        tmp := candidates^[i]
-        candidates^[i] = candidates^[smallest]
-        candidates^[smallest] = tmp
+        candidates^[i], candidates^[smallest] = candidates^[smallest], candidates^[i]
         i = smallest
     }
 
@@ -383,31 +375,27 @@ get_step_cost :: proc(cost: ^Datagrid, x, y, nx, ny: int) -> i32 {
 // FOV Helpers
 // ============================================================================
 
-scan_fov_row :: proc(transparent, visible: ^Datagrid, row0: FovRow, max_depth: int) {
-    row := row0
-
+// scan_fov_row recursively scans one symmetric shadowcasting row for a quadrant.
+// Uses the standard permissive diagonal-gap behavior.
+scan_fov_row :: proc(transparent, visible: ^Datagrid, init_row: FovRow, max_depth: int) {
+    row := init_row
     if row.depth > max_depth {
         return
     }
 
-    // compute visible column range for this row
-    column_min_p := row.depth * row.slope_low.num
-    column_min_q := row.slope_low.den
-    column_min_n := 2 * column_min_p + column_min_q
-    column_min_d := 2 * column_min_q
-    column_min := column_min_n / column_min_d
-    column_min_r := column_min_n % column_min_d
-    if column_min_r != 0 && column_min_r < 0 {
+    n := 2 * row.depth * row.slope_low.num + row.slope_low.den
+    d := 2 * row.slope_low.den
+    column_min := n / d
+    r := n % d
+    if r != 0 && r < 0 {
         column_min -= 1
     }
 
-    column_max_p := row.depth * row.slope_high.num
-    column_max_q := row.slope_high.den
-    column_max_n := 2 * column_max_p - column_max_q
-    column_max_d := 2 * column_max_q
-    column_max := column_max_n / column_max_d
-    column_max_r := column_max_n % column_max_d
-    if column_max_r != 0 && column_max_r > 0 {
+    n = 2 * row.depth * row.slope_high.num - row.slope_high.den
+    d = 2 * row.slope_high.den
+    column_max := n / d
+    r = n % d
+    if r != 0 && r > 0 {
         column_max += 1
     }
 
@@ -415,19 +403,12 @@ scan_fov_row :: proc(transparent, visible: ^Datagrid, row0: FovRow, max_depth: i
     saw_any_in_bounds := false
 
     for column := column_min; column <= column_max; column += 1 {
-        // map row-local (depth, column) into absolute grid coords
         x, y: int
         switch row.quadrant {
-        case 0:
-            x, y = row.origin_x + column, row.origin_y - row.depth // north
-        case 1:
-            x, y = row.origin_x + row.depth, row.origin_y + column // east
-        case 2:
-            x, y = row.origin_x + column, row.origin_y + row.depth // south
-        case 3:
-            x, y = row.origin_x - row.depth, row.origin_y + column // west
-        case:
-            x, y = row.origin_x, row.origin_y
+        case 0: x, y = row.origin_x + column, row.origin_y - row.depth
+        case 1: x, y = row.origin_x + row.depth, row.origin_y + column
+        case 2: x, y = row.origin_x + column, row.origin_y + row.depth
+        case 3: x, y = row.origin_x - row.depth, row.origin_y + column
         }
 
         if !cell_in_bounds(transparent, x, y) {
@@ -438,38 +419,24 @@ scan_fov_row :: proc(transparent, visible: ^Datagrid, row0: FovRow, max_depth: i
 
         is_wall := get_datagrid_cell(transparent, x, y) == 0
 
-        // reveal walls if walls_visible is enabled, otherwise reveal floors whose
-        // center lies inside the current symmetric sector
         if is_wall {
             if Active_Vision_Rules.walls_visible {
                 set_datagrid_cell(visible, x, y, 1)
             }
-        } else {
-            is_symmetric :=
-                column * row.slope_low.den  >= row.depth * row.slope_low.num &&
-                column * row.slope_high.den <= row.depth * row.slope_high.num
-
-            if is_symmetric {
-                set_datagrid_cell(visible, x, y, 1)
-            }
+        } else if
+            column * row.slope_low.den  >= row.depth * row.slope_low.num &&
+            column * row.slope_high.den <= row.depth * row.slope_high.num {
+            set_datagrid_cell(visible, x, y, 1)
         }
 
-        // wall -> floor transition: shrink the near bound
         if prev_tile_is_wall && !is_wall {
-            row.slope_low = FovSlope{
-                num = 2 * column - 1,
-                den = 2 * row.depth,
-            }
+            row.slope_low = FovSlope{num = 2 * column - 1, den = 2 * row.depth}
         }
 
-        // floor -> wall transition: recurse into previous open sector
         if column != column_min && !prev_tile_is_wall && is_wall {
             next_row := row
             next_row.depth += 1
-            next_row.slope_high = FovSlope{
-                num = 2 * column - 1,
-                den = 2 * row.depth,
-            }
+            next_row.slope_high = FovSlope{num = 2 * column - 1,den = 2 * row.depth}
             scan_fov_row(transparent, visible, next_row, max_depth)
         }
 
@@ -486,6 +453,119 @@ scan_fov_row :: proc(transparent, visible: ^Datagrid, row0: FovRow, max_depth: i
     }
 }
 
+// scan_fov_row_diag_solid recursively scans one symmetric shadowcasting row for
+// a quadrant, but treats touching diagonal corners as sight-blocking.
+scan_fov_row_diag_solid :: proc(transparent, visible: ^Datagrid, init_row: FovRow, max_depth: int) {
+    row := init_row
+    if row.depth > max_depth {
+        return
+    }
+
+    n := 2 * row.depth * row.slope_low.num + row.slope_low.den
+    d := 2 * row.slope_low.den
+    column_min := n / d
+    r := n % d
+    if r != 0 && r < 0 {
+        column_min -= 1
+    }
+
+    n = 2 * row.depth * row.slope_high.num - row.slope_high.den
+    d = 2 * row.slope_high.den
+    column_max := n / d
+    r = n % d
+    if r != 0 && r > 0 {
+        column_max += 1
+    }
+
+    prev_tile_blocks_visibility := false
+    saw_any_in_bounds := false
+
+    for column := column_min; column <= column_max; column += 1 {
+        x, y: int
+        switch row.quadrant {
+        case 0: x, y = row.origin_x + column, row.origin_y - row.depth
+        case 1: x, y = row.origin_x + row.depth, row.origin_y + column
+        case 2: x, y = row.origin_x + column, row.origin_y + row.depth
+        case 3: x, y = row.origin_x - row.depth, row.origin_y + column
+        }
+
+        if !cell_in_bounds(transparent, x, y) {
+            continue
+        }
+
+        saw_any_in_bounds = true
+
+        tile_is_wall := get_datagrid_cell(transparent, x, y) == 0
+        tile_blocks_visibility := tile_is_wall
+
+        if !tile_is_wall && column != 0 {
+            sx := 1
+            if column < 0 {
+                sx = -1
+            }
+
+            flank_ax, flank_ay, flank_bx, flank_by: int
+            switch row.quadrant {
+            case 0:
+                flank_ax, flank_ay = x, y + 1
+                flank_bx, flank_by = x - sx, y
+            case 1:
+                flank_ax, flank_ay = x - 1, y
+                flank_bx, flank_by = x, y - sx
+            case 2:
+                flank_ax, flank_ay = x, y - 1
+                flank_bx, flank_by = x - sx, y
+            case 3:
+                flank_ax, flank_ay = x + 1, y
+                flank_bx, flank_by = x, y - sx
+            }
+
+            if
+                cell_in_bounds(transparent, flank_ax, flank_ay) &&
+                get_datagrid_cell(transparent, flank_ax, flank_ay) == 0 &&
+                cell_in_bounds(transparent, flank_bx, flank_by) &&
+                get_datagrid_cell(transparent, flank_bx, flank_by) == 0 {
+                tile_blocks_visibility = true
+            }
+        }
+
+        if tile_is_wall {
+            if Active_Vision_Rules.walls_visible {
+                set_datagrid_cell(visible, x, y, 1)
+            }
+        } else if
+            !tile_blocks_visibility &&
+            column * row.slope_low.den  >= row.depth * row.slope_low.num &&
+            column * row.slope_high.den <= row.depth * row.slope_high.num {
+            set_datagrid_cell(visible, x, y, 1)
+        }
+
+        if prev_tile_blocks_visibility && !tile_blocks_visibility {
+            row.slope_low = FovSlope{num = 2 * column - 1,den = 2 * row.depth}
+        }
+
+        if column != column_min && !prev_tile_blocks_visibility && tile_blocks_visibility {
+            next_row := row
+            next_row.depth += 1
+            next_row.slope_high = FovSlope{num = 2 * column - 1,den = 2 * row.depth}
+            scan_fov_row_diag_solid(transparent, visible, next_row, max_depth)
+        }
+
+        prev_tile_blocks_visibility = tile_blocks_visibility
+    }
+
+    if !saw_any_in_bounds {
+        return
+    }
+
+    if !prev_tile_blocks_visibility {
+        row.depth += 1
+        scan_fov_row_diag_solid(transparent, visible, row, max_depth)
+    }
+}
+
+// compute_fov_symmetric solves a visibility grid from one origin under the
+// current vision rules. The origin cell is always visible.
 compute_fov_symmetric :: proc(transparent: ^Datagrid, ox, oy, radius: int) -> Datagrid {
     visible := new_datagrid(transparent.width, transparent.height)
     set_datagrid_cell(&visible, ox, oy, 1)
@@ -511,7 +591,12 @@ compute_fov_symmetric :: proc(transparent: ^Datagrid, ox, oy, radius: int) -> Da
             slope_low  = FovSlope{num = -1, den = 1},
             slope_high = FovSlope{num = 1, den = 1},
         }
-        scan_fov_row(transparent, &visible, row, max_depth)
+
+        if Active_Vision_Rules.diagonal_gaps {
+            scan_fov_row(transparent, &visible, row, max_depth)
+        } else {
+            scan_fov_row_diag_solid(transparent, &visible, row, max_depth)
+        }
     }
 
     radius_sq := radius * radius
@@ -538,21 +623,18 @@ compute_fov_symmetric :: proc(transparent: ^Datagrid, ox, oy, radius: int) -> Da
     return visible
 }
 
-apply_fov_cone_mask :: proc(visible: ^Datagrid, ox, oy, radius: int, view_dir, view_angle: f32) {
+// apply_fov_cone_mask masks a visibility grid to a directional cone in-place.
+apply_fov_cone_mask :: proc(visible: ^Datagrid, ox, oy: int, view_dir, view_angle: f32) {
     if view_angle >= 360 {
         return
     }
 
-    radians_per_degree := f32(0.017453292519943295)
-
-    half_angle_radians := (view_angle * 0.5) * radians_per_degree
+    half_angle_radians := view_angle * 0.5 * f32(math.RAD_PER_DEG)
     half_angle_cos := f32(math.cos(f64(half_angle_radians)))
-
-    dir_radians := view_dir * radians_per_degree
+    
+    dir_radians := view_dir * f32(math.RAD_PER_DEG)
     dir_x := f32(math.cos(f64(dir_radians)))
     dir_y := f32(math.sin(f64(dir_radians)))
-
-    radius_sq := radius * radius
 
     for y := 0; y < visible.height; y += 1 {
         for x := 0; x < visible.width; x += 1 {
@@ -565,16 +647,8 @@ apply_fov_cone_mask :: proc(visible: ^Datagrid, ox, oy, radius: int, view_dir, v
                 continue
             }
 
-            dx_i := x - ox
-            dy_i := y - oy
-
-            if dx_i * dx_i + dy_i * dy_i > radius_sq {
-                visible.cells[idx] = 0
-                continue
-            }
-
-            dx := f32(dx_i)
-            dy := f32(dy_i)
+            dx := f32(x - ox)
+            dy := f32(y - oy)
             len_sq := dx * dx + dy * dy
             if len_sq <= 0 {
                 continue
@@ -609,11 +683,7 @@ new_datagrid :: proc(width, height: int) -> Datagrid {
 // clone_datagrid duplicates a datagrid and all of its cell values.
 clone_datagrid :: proc(src: ^Datagrid) -> Datagrid {
     dst := new_datagrid(src.width, src.height)
-
-    for i in 0..<len(src.cells) {
-        dst.cells[i] = src.cells[i]
-    }
-
+    copy(dst.cells, src.cells)
     return dst
 }
 
@@ -1002,9 +1072,9 @@ lua_grid_find_path :: proc "c" (L: ^lua.State) -> c.int {
 
     cell_count := len(cost.cells)
 
-    _ = resize(&Path_Find_Buf.closed, cell_count)
-    _ = resize(&Path_Find_Buf.g_costs, cell_count)
-    _ = resize(&Path_Find_Buf.parents, cell_count)
+    resize(&Path_Find_Buf.closed, cell_count)
+    resize(&Path_Find_Buf.g_costs, cell_count)
+    resize(&Path_Find_Buf.parents, cell_count)
 
     for i in 0..<cell_count {
         Path_Find_Buf.closed[i] = false
@@ -1188,7 +1258,7 @@ lua_grid_compute_distance :: proc "c" (L: ^lua.State) -> c.int {
 
     cell_count := len(cost.cells)
 
-    _ = resize(&Dist_Compute_Buf.visited, cell_count)
+    resize(&Dist_Compute_Buf.visited, cell_count)
     for i in 0..<cell_count {
         Dist_Compute_Buf.visited[i] = false
     }
@@ -1214,8 +1284,10 @@ lua_grid_compute_distance :: proc "c" (L: ^lua.State) -> c.int {
         }
 
         source_idx := cell_idx(cost, sx, sy)
-        dist.cells[source_idx] = 0
-        push_dist_candidate(candidates, source_idx, 0)
+        if dist.cells[source_idx] < 0 {
+            dist.cells[source_idx] = 0
+            push_dist_candidate(candidates, source_idx, 0)
+        }
 
     } else if lua.istable(L, 2) {
         count := int(lua.objlen(L, 2))
@@ -1647,7 +1719,7 @@ lua_grid_compute_regions :: proc "c" (L: ^lua.State) -> c.int {
         for len(pending^) > 0 {
             last_idx := len(pending^) - 1
             current_idx := pending^[last_idx]
-            _ = resize(pending, last_idx)
+            resize(pending, last_idx)
 
             x := current_idx % cost.width
             y := current_idx / cost.width
@@ -2029,7 +2101,7 @@ lua_grid_compute_fov_cone :: proc "c" (L: ^lua.State) -> c.int {
 
     visible := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
     visible^ = compute_fov_symmetric(transparent, ox, oy, radius)
-    apply_fov_cone_mask(visible, ox, oy, radius, view_dir, view_angle)
+    apply_fov_cone_mask(visible, ox, oy, view_dir, view_angle)
 
     lua.L_getmetatable(L, "Datagrid")
     lua.setmetatable(L, -2)
@@ -2037,9 +2109,474 @@ lua_grid_compute_fov_cone :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
+// grid.has_line_of_sight(occlusion, ax, ay, bx, by) -> bool
+lua_grid_has_line_of_sight :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    occlusion := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if occlusion == nil || occlusion.cells == nil {
+        lua.L_error(L, "grid.has_line_of_sight: occlusion datagrid has been freed")
+        return 0
+    }
+
+    ax := cast(int)lua.L_checkinteger(L, 2)
+    ay := cast(int)lua.L_checkinteger(L, 3)
+    bx := cast(int)lua.L_checkinteger(L, 4)
+    by := cast(int)lua.L_checkinteger(L, 5)
+
+    if !cell_in_bounds(occlusion, ax, ay) {
+        lua.L_error(L, "grid.has_line_of_sight: start (%d, %d) is out of bounds", ax, ay)
+        return 0
+    }
+
+    if !cell_in_bounds(occlusion, bx, by) {
+        lua.L_error(L, "grid.has_line_of_sight: target (%d, %d) is out of bounds", bx, by)
+        return 0
+    }
+
+    // same-cell LOS always succeeds
+    if ax == bx && ay == by {
+        lua.pushboolean(L, b32(true))
+        return 1
+    }
+
+    x := ax
+    y := ay
+
+    dx := bx - ax
+    sx := 1
+    if dx < 0 {
+        dx = -dx
+        sx = -1
+    }
+
+    dy := by - ay
+    sy := 1
+    if dy < 0 {
+        dy = -dy
+        sy = -1
+    }
+
+    err := dx - dy
+
+    for {
+        prev_x := x
+        prev_y := y
+
+        e2 := err * 2
+        stepped_x := false
+        stepped_y := false
+
+        if e2 > -dy {
+            err -= dy
+            x += sx
+            stepped_x = true
+        }
+
+        if e2 < dx {
+            err += dx
+            y += sy
+            stepped_y = true
+        }
+
+        // if diagonal gaps are closed, block sight through touching corners
+        if !Active_Vision_Rules.diagonal_gaps && stepped_x && stepped_y {
+            side_ax := prev_x + sx
+            side_ay := prev_y
+            side_bx := prev_x
+            side_by := prev_y + sy
+
+            side_a_blocked :=
+                cell_in_bounds(occlusion, side_ax, side_ay) &&
+                get_datagrid_cell(occlusion, side_ax, side_ay) == 0
+
+            side_b_blocked :=
+                cell_in_bounds(occlusion, side_bx, side_by) &&
+                get_datagrid_cell(occlusion, side_bx, side_by) == 0
+
+            if side_a_blocked && side_b_blocked {
+                lua.pushboolean(L, b32(false))
+                return 1
+            }
+        }
+
+        // start cell does not block, but every stepped-into cell does, including target
+        if get_datagrid_cell(occlusion, x, y) == 0 {
+            lua.pushboolean(L, b32(false))
+            return 1
+        }
+
+        if x == bx && y == by {
+            lua.pushboolean(L, b32(true))
+            return 1
+        }
+    }
+}
+
+// grid.get_sight_line(occlusion, ax, ay, bx, by) -> line | nil
+lua_grid_get_sight_line :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    occlusion := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if occlusion == nil || occlusion.cells == nil {
+        lua.L_error(L, "grid.get_sight_line: occlusion datagrid has been freed")
+        return 0
+    }
+
+    ax := cast(int)lua.L_checkinteger(L, 2)
+    ay := cast(int)lua.L_checkinteger(L, 3)
+    bx := cast(int)lua.L_checkinteger(L, 4)
+    by := cast(int)lua.L_checkinteger(L, 5)
+
+    if !cell_in_bounds(occlusion, ax, ay) {
+        lua.L_error(L, "grid.get_sight_line: start (%d, %d) is out of bounds", ax, ay)
+        return 0
+    }
+
+    if !cell_in_bounds(occlusion, bx, by) {
+        lua.L_error(L, "grid.get_sight_line: target (%d, %d) is out of bounds", bx, by)
+        return 0
+    }
+
+    x := ax
+    y := ay
+
+    dx := bx - ax
+    sx := 1
+    if dx < 0 {
+        dx = -dx
+        sx = -1
+    }
+
+    dy := by - ay
+    sy := 1
+    if dy < 0 {
+        dy = -dy
+        sy = -1
+    }
+
+    steps := dx
+    if dy > steps {
+        steps = dy
+    }
+
+    lua.createtable(L, i32(steps + 1) * 2, 0)
+
+    out_i := 1
+    lua.pushinteger(L, cast(lua.Integer)x)
+    lua.rawseti(L, -2, i32(out_i))
+    out_i += 1
+
+    lua.pushinteger(L, cast(lua.Integer)y)
+    lua.rawseti(L, -2, i32(out_i))
+    out_i += 1
+
+    if x == bx && y == by {
+        return 1
+    }
+
+    err := dx - dy
+
+    for {
+        prev_x := x
+        prev_y := y
+
+        e2 := err * 2
+        stepped_x := false
+        stepped_y := false
+
+        if e2 > -dy {
+            err -= dy
+            x += sx
+            stepped_x = true
+        }
+
+        if e2 < dx {
+            err += dx
+            y += sy
+            stepped_y = true
+        }
+
+        if !Active_Vision_Rules.diagonal_gaps && stepped_x && stepped_y {
+            side_ax := prev_x + sx
+            side_ay := prev_y
+            side_bx := prev_x
+            side_by := prev_y + sy
+
+            side_a_blocked :=
+                cell_in_bounds(occlusion, side_ax, side_ay) &&
+                get_datagrid_cell(occlusion, side_ax, side_ay) == 0
+
+            side_b_blocked :=
+                cell_in_bounds(occlusion, side_bx, side_by) &&
+                get_datagrid_cell(occlusion, side_bx, side_by) == 0
+
+            if side_a_blocked && side_b_blocked {
+                lua.pop(L, 1)
+                lua.pushnil(L)
+                return 1
+            }
+        }
+
+        if get_datagrid_cell(occlusion, x, y) == 0 {
+            lua.pop(L, 1)
+            lua.pushnil(L)
+            return 1
+        }
+
+        lua.pushinteger(L, cast(lua.Integer)x)
+        lua.rawseti(L, -2, i32(out_i))
+        out_i += 1
+
+        lua.pushinteger(L, cast(lua.Integer)y)
+        lua.rawseti(L, -2, i32(out_i))
+        out_i += 1
+
+        if x == bx && y == by {
+            return 1
+        }
+    }
+}
+
 // -- Datagrid Math Ops --
 
-//TODO
+// grid.add(a, b) -> grid
+// grid.add(a, value) -> grid
+lua_grid_add :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    a := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if a == nil || a.cells == nil {
+        lua.L_error(L, "grid.add: input datagrid has been freed")
+        return 0
+    }
+
+    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    out^ = new_datagrid(a.width, a.height)
+
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    if lua.type(L, 2) == .NUMBER {
+        value := cast(i32)lua.L_checkinteger(L, 2)
+
+        for i in 0..<len(a.cells) {
+            out.cells[i] = a.cells[i] + value
+        }
+
+        return 1
+    }
+
+    b := cast(^Datagrid)lua.L_checkudata(L, 2, "Datagrid")
+    if b == nil || b.cells == nil {
+        lua.L_error(L, "grid.add: other datagrid has been freed")
+        return 0
+    }
+
+    if b.width != a.width || b.height != a.height {
+        lua.L_error(L, "grid.add: datagrid dimensions must match")
+        return 0
+    }
+
+    for i in 0..<len(a.cells) {
+        out.cells[i] = a.cells[i] + b.cells[i]
+    }
+
+    return 1
+}
+
+// grid.min(a, b) -> grid
+// grid.min(a, value) -> grid
+lua_grid_min :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    a := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if a == nil || a.cells == nil {
+        lua.L_error(L, "grid.min: input datagrid has been freed")
+        return 0
+    }
+
+    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    out^ = new_datagrid(a.width, a.height)
+
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    if lua.type(L, 2) == .NUMBER {
+        value := cast(i32)lua.L_checkinteger(L, 2)
+
+        for i in 0..<len(a.cells) {
+            cell := a.cells[i]
+            if cell < value {
+                out.cells[i] = cell
+            } else {
+                out.cells[i] = value
+            }
+        }
+
+        return 1
+    }
+
+    b := cast(^Datagrid)lua.L_checkudata(L, 2, "Datagrid")
+    if b == nil || b.cells == nil {
+        lua.L_error(L, "grid.min: other datagrid has been freed")
+        return 0
+    }
+
+    if b.width != a.width || b.height != a.height {
+        lua.L_error(L, "grid.min: datagrid dimensions must match")
+        return 0
+    }
+
+    for i in 0..<len(a.cells) {
+        av := a.cells[i]
+        bv := b.cells[i]
+
+        if av < bv {
+            out.cells[i] = av
+        } else {
+            out.cells[i] = bv
+        }
+    }
+
+    return 1
+}
+
+// grid.max(a, b) -> grid
+// grid.max(a, value) -> grid
+lua_grid_max :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    a := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if a == nil || a.cells == nil {
+        lua.L_error(L, "grid.max: input datagrid has been freed")
+        return 0
+    }
+
+    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    out^ = new_datagrid(a.width, a.height)
+
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    if lua.type(L, 2) == .NUMBER {
+        value := cast(i32)lua.L_checkinteger(L, 2)
+
+        for i in 0..<len(a.cells) {
+            cell := a.cells[i]
+            if cell > value {
+                out.cells[i] = cell
+            } else {
+                out.cells[i] = value
+            }
+        }
+
+        return 1
+    }
+
+    b := cast(^Datagrid)lua.L_checkudata(L, 2, "Datagrid")
+    if b == nil || b.cells == nil {
+        lua.L_error(L, "grid.max: other datagrid has been freed")
+        return 0
+    }
+
+    if b.width != a.width || b.height != a.height {
+        lua.L_error(L, "grid.max: datagrid dimensions must match")
+        return 0
+    }
+
+    for i in 0..<len(a.cells) {
+        av := a.cells[i]
+        bv := b.cells[i]
+
+        if av > bv {
+            out.cells[i] = av
+        } else {
+            out.cells[i] = bv
+        }
+    }
+
+    return 1
+}
+
+// grid.clamp(g, min_value, max_value) -> grid
+lua_grid_clamp :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    g := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if g == nil || g.cells == nil {
+        lua.L_error(L, "grid.clamp: input datagrid has been freed")
+        return 0
+    }
+
+    min_value := cast(i32)lua.L_checkinteger(L, 2)
+    max_value := cast(i32)lua.L_checkinteger(L, 3)
+
+    if min_value > max_value {
+        lua.L_error(L, "grid.clamp: min_value must be less than or equal to max_value")
+        return 0
+    }
+
+    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    out^ = new_datagrid(g.width, g.height)
+
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    for i in 0..<len(g.cells) {
+        value := g.cells[i]
+
+        if value < min_value {
+            out.cells[i] = min_value
+        } else if value > max_value {
+            out.cells[i] = max_value
+        } else {
+            out.cells[i] = value
+        }
+    }
+
+    return 1
+}
+
+// grid.crop(g, x, y, w, h) -> grid
+lua_grid_crop :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    g := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if g == nil || g.cells == nil {
+        lua.L_error(L, "grid.crop: input datagrid has been freed")
+        return 0
+    }
+
+    x := cast(int)lua.L_checkinteger(L, 2)
+    y := cast(int)lua.L_checkinteger(L, 3)
+    w := cast(int)lua.L_checkinteger(L, 4)
+    h := cast(int)lua.L_checkinteger(L, 5)
+
+    if w <= 0 || h <= 0 {
+        lua.L_error(L, "grid.crop: width and height must be positive")
+        return 0
+    }
+
+    if x < 0 || y < 0 || x + w > g.width || y + h > g.height {
+        lua.L_error(L, "grid.crop: crop rectangle is out of bounds")
+        return 0
+    }
+
+    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    out^ = new_datagrid(w, h)
+
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    for py := 0; py < h; py += 1 {
+        src_row := (y + py) * g.width + x
+        dst_row := py * w
+        copy(out.cells[dst_row:dst_row+w], g.cells[src_row:src_row+w])
+    }
+
+    return 1
+}
 
 // ============================================================================
 // Datagrid Lua GC And Metatable
@@ -2107,13 +2644,15 @@ register_grid_api :: proc() {
     // -- Vision --
     lua_bind_function(lua_grid_compute_fov,      "compute_fov")
     lua_bind_function(lua_grid_compute_fov_cone, "compute_fov_cone")
-    // lua_bind_function(lua_grid_has_los,       "has_los")
+    lua_bind_function(lua_grid_has_line_of_sight,"has_line_of_sight")
+    lua_bind_function(lua_grid_get_sight_line, "get_sight_line")
 
     // -- Datagrid Math Ops --
-    // lua_bind_function(lua_grid_add,   "add")
-    // lua_bind_function(lua_grid_min,   "min")
-    // lua_bind_function(lua_grid_max,   "max")
-    // lua_bind_function(lua_grid_clamp, "clamp")
+    lua_bind_function(lua_grid_add,   "add")
+    lua_bind_function(lua_grid_min,   "min")
+    lua_bind_function(lua_grid_max,   "max")
+    lua_bind_function(lua_grid_clamp, "clamp")
+    lua_bind_function(lua_grid_crop,  "crop")
 
     lua.setglobal(Lua, "grid")
 }

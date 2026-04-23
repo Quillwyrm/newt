@@ -4,7 +4,7 @@ Functions in this module operate on the `Datagrid` type, a fixed-size 2D array o
 
 The module provides pathfinding, distance fields, region queries, visibility functions, and datagrid math.
 
-Functions in this module error on wrong arity, wrong argument types, and invalid string keys in rules tables.
+Functions in this module error on wrong arity, wrong argument types, and invalid string keys. On dead datagrids, queries return nil for each output, mutations no-op, and functions that construct or solve new datagrids will error.
 
 Module-wide movement and vision rules affect pathfinding, region connectivity, and visibility.
 
@@ -44,10 +44,12 @@ A region map is returned by `compute_regions` and used by region-query functions
 
 ### Occlusion
 
-An occlusion grid is used by `compute_fov` and `compute_fov_cone` to describe which cells block sight.
+An occlusion grid is used by `compute_fov`, `compute_fov_cone`, `has_line_of_sight`, and `get_sight_line` to describe which cells block sight.
 
 - `0` = opaque
 - nonzero = transparent
+
+A **Region** map is also a good candidate for deriving an occlusion grid, because blocked cells are already `0` and region ids are already nonzero.
 
 ### Visibility
 
@@ -89,6 +91,15 @@ A visibility grid is returned by `compute_fov` and `compute_fov_cone` and marks 
 **Visibility**
 * [`compute_fov`](#compute_fov)
 * [`compute_fov_cone`](#compute_fov_cone)
+* [`has_line_of_sight`](#has_line_of_sight)
+* [`get_sight_line`](#get_sight_line)
+
+**Datagrid Math**
+* [`add`](#add)
+* [`min`](#min)
+* [`max`](#max)
+* [`clamp`](#clamp)
+* [`crop`](#crop)
 
 ## Datagrids
 
@@ -450,7 +461,7 @@ rules = {
 ```
 
 - `walls_visible` controls whether wall cells are marked visible.
-- `diagonal_gaps` is part of the current vision rule state.
+- `diagonal_gaps` controls whether sight may pass through touching diagonal corners.
 
 ### set_vision_rules
 
@@ -476,19 +487,21 @@ grid.get_vision_rules() -> rules
 
 ## Visibility
 
-These functions solve visibility from one origin, use the current vision rules, and require a live **Occlusion** grid.
+These functions use the current vision rules and require a live **Occlusion** grid.
 
 They take an **Occlusion** grid as input.
 
 - `0` means opaque.
 - Any nonzero value means transparent.
 
-They return a **Visibility** grid.
+`compute_fov` and `compute_fov_cone` return a **Visibility** grid.
 
 - `0` means not visible.
 - `1` means visible.
 
 The origin cell is always marked visible.
+
+`has_line_of_sight` and `get_sight_line` use the same occlusion and diagonal-gap rules.
 
 ### compute_fov
 
@@ -535,3 +548,121 @@ grid.compute_fov_cone(transparent, ox, oy, radius, view_dir, view_angle?) -> vis
 - `radius < 0`.
 - `view_angle <= 0`.
 - `view_angle > 360`.
+
+---
+
+### has_line_of_sight
+
+Returns whether one cell has line of sight to another under the current vision rules.
+
+```lua
+grid.has_line_of_sight(occlusion, ax, ay, bx, by) -> bool
+```
+
+#### Error Cases
+
+- Start is out of bounds.
+- Target is out of bounds.
+
+---
+
+### get_sight_line
+
+Returns the stepped sight line from start to target under the current vision rules.
+
+```lua
+grid.get_sight_line(occlusion, ax, ay, bx, by) -> line | nil
+```
+
+#### Returns
+
+- A flat coordinate list including the start cell and target cell if line of sight succeeds.
+- `nil` if line of sight fails.
+
+#### Error Cases
+
+- Start is out of bounds.
+- Target is out of bounds.
+
+---
+
+### add
+
+Returns a new datagrid with per-cell addition.
+
+```lua
+grid.add(a, b) -> grid
+grid.add(a, value) -> grid
+```
+
+#### Error Cases
+
+- Input datagrid is dead.
+- Other datagrid is dead.
+- Datagrid dimensions do not match.
+
+---
+
+### min
+
+Returns a new datagrid with the per-cell minimum.
+
+```lua
+grid.min(a, b) -> grid
+grid.min(a, value) -> grid
+```
+
+#### Error Cases
+
+- Input datagrid is dead.
+- Other datagrid is dead.
+- Datagrid dimensions do not match.
+
+---
+
+### max
+
+Returns a new datagrid with the per-cell maximum.
+
+```lua
+grid.max(a, b) -> grid
+grid.max(a, value) -> grid
+```
+
+#### Error Cases
+
+- Input datagrid is dead.
+- Other datagrid is dead.
+- Datagrid dimensions do not match.
+
+---
+
+### clamp
+
+Returns a new datagrid with every cell clamped to the given range.
+
+```lua
+grid.clamp(g, min_value, max_value) -> grid
+```
+
+#### Error Cases
+
+- Input datagrid is dead.
+- `min_value > max_value`.
+
+---
+
+### crop
+
+Returns a rectangular copy of one part of a datagrid.
+
+```lua
+grid.crop(g, x, y, w, h) -> grid
+```
+
+#### Error Cases
+
+- Input datagrid is dead.
+- `w <= 0`.
+- `h <= 0`.
+- Crop rectangle is out of bounds.
