@@ -10,12 +10,12 @@ import sdl "vendor:sdl3"
 // Curated Key Tokens
 // ============================================================================
 
-Key_Def :: struct {
+KeyDef :: struct {
 	token: string,
 	key:   sdl.Keycode,
 }
 
-KEYS := [?]Key_Def {
+KEYS := [?]KeyDef {
 	// Letters
 	{"a", sdl.K_A},
 	{"b", sdl.K_B},
@@ -361,7 +361,7 @@ input_handle_event :: proc(event: ^sdl.Event) {
 }
 
 // input_end_frame samples final live mouse state for this frame.
-input_end_frame :: proc() {
+input_poll_state :: proc() {
 	if !Input_Initialized {
 		return
 	}

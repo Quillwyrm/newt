@@ -129,8 +129,10 @@ fatal_engine_error :: proc(error_text: cstring) {
     fmt.eprintln(err_text)
 
     // Shut down live subsystems so the error screen owns the process cleanly.
+    // fatal_engine_error cleanup
     audio_shutdown()
     input_shutdown()
+    gamepad_shutdown()
     window_shutdown()
 
     window_flags: sdl.WindowFlags = {}
@@ -237,6 +239,7 @@ register_lua_api :: proc() {
     register_graphics_api()
     register_window_api()
     register_input_api()
+    register_gamepad_api()
     register_audio_api()
     register_grid_api()
 
@@ -349,7 +352,7 @@ main :: proc() {
 
 // == SDL ==
 
-    if !sdl.Init({.VIDEO}) {
+    if !sdl.Init({.VIDEO, .GAMEPAD}) {
         fmt.eprintln("SDL_Init failed:", sdl.GetError())
         return
     }
@@ -372,6 +375,7 @@ main :: proc() {
     // Fatal path exits inside fatal_engine_error().
     defer audio_shutdown()
     defer input_shutdown()
+    defer gamepad_shutdown()
     defer window_shutdown()
     defer graphics_shutdown()
     defer lua.close(Lua)
@@ -477,16 +481,17 @@ main :: proc() {
         }
 
         input_begin_frame()
-
+        //SDL events
         for sdl.PollEvent(&event) {
             if event.type == .QUIT || event.type == .WINDOW_CLOSE_REQUESTED {
                 Quit_Requested = true
             }
             input_handle_event(&event)
+            gamepad_handle_event(&event)
         }
-
-        input_end_frame()
-
+        input_poll_state()
+        gamepad_poll_state()
+        
         audio_update()
         call_lua_number("update", dt)
 

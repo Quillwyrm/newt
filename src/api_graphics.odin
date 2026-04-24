@@ -329,7 +329,7 @@ parse_blend_mode_checked :: #force_inline proc(
 
 blend_memory_colors :: #force_inline proc(dst, src: u32, mode: PixelmapBlendMode) -> u32 {
     sa := (src >> 24) & 0xFF
-    if sa == 0 && mode != .Replace do return dst // Fast path
+    if sa == 0 && mode != .Replace && mode != .Mask do return dst
 
     sr := src & 0xFF
     sg := (src >> 8) & 0xFF
@@ -352,9 +352,9 @@ blend_memory_colors :: #force_inline proc(dst, src: u32, mode: PixelmapBlendMode
         nb = (sb * sa + db * inv_alpha) / 255
         na = sa + da - (sa * da) / 255
     case .Add:
-        nr = min(255, dr + sr)
-        ng = min(255, dg + sg)
-        nb = min(255, db + sb)
+        nr = min(255, dr + (sr * sa) / 255)
+        ng = min(255, dg + (sg * sa) / 255)
+        nb = min(255, db + (sb * sa) / 255)
         na = min(255, da + sa)
     case .Multiply:
         nr = (dr * sr) / 255
