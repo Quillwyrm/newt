@@ -4,13 +4,15 @@ Newt, a nimble 2D game framework for Lua!
 
 Newt is a native script-driven runtime built in Odin. It exposes a clear, composable API to LuaJIT for building 2D games, tools, and interactive apps without drowning in giant engine workflows.
 
-## What you get
+## What you get!
 
-- 2D graphics with images, text, fonts, render targets, transforms, and CPU pixel read/write and utilities
-- Audio playback with mixing, 2D spatialization, and effects
-- Keyboard, mouse, text input, clipboard, cursor, and window control
-- Filesystem access, working directory control, and file operations
-- Grid utilities for pathfinding, distance maps, visibility, and 2d array logic
+- **2D Rendering** - images, shapes, text, fonts, render targets, transforms, clipping, blend modes, and debug drawing
+- **Audio** - static sounds, streamed audio, playback, voice control, 2D spatial audio, panning, mixing, filters, and delay
+- **Input** - keyboard, mouse, text input, gamepads, sticks, triggers, rumble, and button-edge queries
+- **Windowing** - window sizing, positioning, flags, cursor control, clipboard access, and close handling
+- **Filesystem access** - resource paths, working paths, file I/O, directory queries, and basic path operations
+- **Raster tools** - CPU image data, raster drawing, pixel read/write and query operations, Pixelmap loading/saving, and GPU upload
+- **Grid tools** - datagrids, pathfinding, distance fields, field of view, line of sight, region queries, and 2D array logic
 
 ## Example
 

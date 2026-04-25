@@ -1,6 +1,8 @@
 # graphics
 
-The `graphics` module provides hardware rendering, transform control, text rendering, and CPU pixel-buffer operations.
+The `graphics` module provides GPU drawing, images, canvases, render state, transforms, text rendering, and debug drawing.
+
+For CPU-side Pixelmaps, software raster operations, and per-pixel access, see [`raster`](raster.md).
 
 Unless noted otherwise, functions in this module throw on wrong arity or wrong argument types. Query functions on freed resources return nil-shaped results where documented.
 
@@ -58,32 +60,7 @@ Unless noted otherwise, functions in this module throw on wrong arity or wrong a
 * [`debug_line`](#debug_line)
 * [`debug_rect`](#debug_rect)
 
-**Pixelmaps**
-* [`new_pixelmap`](#new_pixelmap)
-* [`load_pixelmap`](#load_pixelmap)
-* [`save_pixelmap`](#save_pixelmap)
-* [`get_pixelmap_size`](#get_pixelmap_size)
-
-**Pixelmap Drawing**
-* [`blit`](#blit)
-* [`blit_region`](#blit_region)
-* [`blit_rect`](#blit_rect)
-* [`blit_line`](#blit_line)
-* [`blit_triangle`](#blit_triangle)
-* [`blit_circle`](#blit_circle)
-* [`blit_circle_outline`](#blit_circle_outline)
-* [`blit_circle_pixel_outline`](#blit_circle_pixel_outline)
-* [`blit_capsule`](#blit_capsule)
-
-**Pixelmap Queries & Memory**
-* [`pixelmap_set_pixel`](#pixelmap_set_pixel)
-* [`pixelmap_get_pixel`](#pixelmap_get_pixel)
-* [`pixelmap_flood_fill`](#pixelmap_flood_fill)
-* [`pixelmap_raycast`](#pixelmap_raycast)
-* [`pixelmap_clone`](#pixelmap_clone)
-* [`pixelmap_get_cptr`](#pixelmap_get_cptr)
-
-**CPU to GPU Sync**
+**Images From Pixelmaps**
 * [`new_image_from_pixelmap`](#new_image_from_pixelmap)
 * [`update_image_from_pixelmap`](#update_image_from_pixelmap)
 * [`update_image_region_from_pixelmap`](#update_image_region_from_pixelmap)
@@ -577,289 +554,27 @@ Draws a 1-pixel hollow rectangle.
 graphics.debug_rect(x, y, w, h, color?)
 ```
 
-## Pixelmaps
+## Images From Pixelmaps
 
-Pixelmaps are CPU-side pixel buffers for software drawing and per-pixel access.
-
-### new_pixelmap
-
-Creates a blank pixelmap initialized to transparent black.
-
-```lua
-graphics.new_pixelmap(width, height) -> pixelmap
-```
-
-#### Returns
-`Pixelmap` resource.
-
-#### Error Cases
-- `width` and `height` must be positive.
-
----
-
-### load_pixelmap
-
-Loads an image into a pixelmap.
-
-```lua
-graphics.load_pixelmap(path) -> pixelmap, width, height | nil, err
-```
-
----
-
-### save_pixelmap
-
-Saves a pixelmap to a PNG file.
-
-```lua
-graphics.save_pixelmap(pixelmap, path) -> true | false, err
-```
-
-#### Returns
-
-true on success, or false, err if the PNG could not be written.
-
-#### Error Cases
-- Throws if `pixelmap` has been freed.
-
----
-
-### get_pixelmap_size
-
-Returns the pixel dimensions of a pixelmap.
-
-```lua
-graphics.get_pixelmap_size(pixelmap) -> width, height | nil, nil
-```
-
-#### Returns
-
-`width, height` for a live pixelmap.  
-`nil, nil` if `pixelmap` has been freed.
-
-## Pixelmap Drawing
-
-These functions use software blend modes. Valid modes are `"blend"`, `"replace"`, `"add"`, `"multiply"`, `"erase"`, and `"mask"`.
-
-### blit
-
-Copies one pixelmap into another.
-
-```lua
-graphics.blit(dst, src, dx, dy, mode?)
-```
-
-#### Error Cases
-
-- `mode` must be a valid pixelmap blend mode.
-
----
-
-### blit_region
-
-Copies a region of one pixelmap into another.
-
-```lua
-graphics.blit_region(dst, src, sx, sy, w, h, dx, dy, mode?)
-```
-
-#### Error Cases
-
-- `mode` must be a valid pixelmap blend mode.
-
----
-
-### blit_rect
-
-Draws a filled rectangle into a pixelmap.
-
-```lua
-graphics.blit_rect(pixelmap, x, y, w, h, color?, mode?)
-```
-
-#### Error Cases
-
-- `mode` must be a valid pixelmap blend mode. See [Pixelmap Drawing](#pixelmap-drawing).
-
----
-
-### blit_line
-
-Draws a 1-pixel line into a pixelmap.
-
-```lua
-graphics.blit_line(pixelmap, x1, y1, x2, y2, color?, mode?)
-```
-
-#### Error Cases
-- `mode` must be a valid pixelmap blend mode.
-
----
-
-### blit_triangle
-
-Draws a filled triangle into a pixelmap.
-
-```lua
-graphics.blit_triangle(pixelmap, x1, y1, x2, y2, x3, y3, color?, mode?)
-```
-
-#### Error Cases
-
-- `mode` must be a valid pixelmap blend mode.
-
----
-
-### blit_circle
-
-Draws a filled circle into a pixelmap.
-
-```lua
-graphics.blit_circle(pixelmap, cx, cy, radius, color?, mode?)
-```
-
-#### Error Cases
-
-- `mode` must be a valid pixelmap blend mode.
-
----
-
-### blit_circle_outline
-
-Draws a circle outline into a pixelmap.
-
-```lua
-graphics.blit_circle_outline(pixelmap, cx, cy, radius, thickness, color?, mode?)
-```
-
-#### Error Cases
-- `mode` must be a valid pixelmap blend mode.
-
----
-
-### blit_circle_pixel_outline
-
-Draws a 1-pixel circle outline into a pixelmap.
-
-```lua
-graphics.blit_circle_pixel_outline(pixelmap, cx, cy, radius, color?, mode?)
-```
-
-#### Error Cases
-
-- `mode` must be a valid pixelmap blend mode.
-
----
-
-### blit_capsule
-
-Draws a thick rounded line into a pixelmap.
-
-```lua
-graphics.blit_capsule(pixelmap, x1, y1, x2, y2, radius, color?, mode?)
-```
-
-#### Error Cases
-
-- `mode` must be a valid pixelmap blend mode.
-
-## Pixelmap Queries & Memory
-
-### pixelmap_set_pixel
-
-Writes a pixel directly without blending. Out-of-bounds writes are ignored.
-
-```lua
-graphics.pixelmap_set_pixel(pixelmap, x, y, color)
-```
-
----
-
-### pixelmap_get_pixel
-
-Returns the raw pixel color.
-
-```lua
-graphics.pixelmap_get_pixel(pixelmap, x, y) -> color | nil
-```
-
-#### Returns
-
-`color` for an in-bounds read.  
-`nil` for an out-of-bounds read.  
-`nil` if `pixelmap` has been freed.
-
----
-
-### pixelmap_flood_fill
-
-Flood-fills from a starting point using the target color under that point. Out-of-bounds starts are ignored.
-
-```lua
-graphics.pixelmap_flood_fill(pixelmap, x, y, color)
-```
-
----
-
-### pixelmap_raycast
-
-Traces a line and returns the first non-transparent pixel it hits.
-
-```lua
-graphics.pixelmap_raycast(pixelmap, x1, y1, x2, y2) -> true, x, y, color | false
-```
-
-#### Returns
-
-`true, x, y, color` on hit.  
-`false` on miss, or if `pixelmap` has been freed.
-
----
-
-### pixelmap_clone
-
-Creates a deep copy of a pixelmap.
-
-```lua
-graphics.pixelmap_clone(pixelmap) -> pixelmap
-```
-
-#### Error Cases
-
-- `pixelmap` must be a live pixelmap.
----
-
-### pixelmap_get_cptr
-
-Returns a raw C pointer to the pixel buffer for LuaJIT FFI.
-
-```lua
-graphics.pixelmap_get_cptr(pixelmap) -> ptr | nil
-```
-
-#### Returns
-
-A `lightuserdata` pointer for a live pixelmap.  
-`nil` if `pixelmap` has been freed.
-
-## CPU to GPU Sync
+Pixelmaps are editable CPU-side image data from [`raster`](raster.md). These functions create or update GPU `Image` resources from Pixelmap data so they can be drawn with `graphics`.
 
 ### new_image_from_pixelmap
 
-Creates an `Image` resource from a pixelmap. The new image uses the current default filter.
+Creates an `Image` from a Pixelmap. The new image uses the current default filter.
 
 ```lua
 graphics.new_image_from_pixelmap(pixelmap) -> image
 ```
 
 #### Error Cases
+
 - Throws if `pixelmap` has been freed.
 
 ---
 
 ### update_image_from_pixelmap
 
-Copies an entire pixelmap into an existing image at an optional destination offset. Freed resources are ignored.
+Copies an entire Pixelmap into an existing image at an optional destination offset. Freed resources are ignored.
 
 ```lua
 graphics.update_image_from_pixelmap(image, pixelmap, dx?, dy?)
@@ -869,7 +584,7 @@ graphics.update_image_from_pixelmap(image, pixelmap, dx?, dy?)
 
 ### update_image_region_from_pixelmap
 
-Copies a region of a pixelmap into an existing image. Invalid regions and freed resources are ignored.
+Copies a region of a Pixelmap into an existing image. Invalid regions and freed resources are ignored.
 
 ```lua
 graphics.update_image_region_from_pixelmap(image, pixelmap, sx, sy, w, h, dx, dy)
