@@ -11,7 +11,7 @@ Newt is a native script-driven runtime built in Odin. It exposes a clear, compos
 - **Input** - keyboard, mouse, text input, gamepads, sticks, triggers, rumble, and button-edge queries
 - **Windowing** - window sizing, positioning, flags, cursor control, clipboard access, and close handling
 - **Filesystem access** - resource paths, working paths, file I/O, directory queries, and basic path operations
-- **Raster tools** - CPU image data, raster drawing, pixel read/write and query operations, Pixelmap loading/saving, and GPU upload
+- **Raster tools** - CPU image data, raster drawing, pixel read/write and query operations, Pixelmap I/O, and GPU upload
 - **Grid tools** - datagrids, pathfinding, distance fields, field of view, line of sight, region queries, and 2D array logic
 
 ## Example
