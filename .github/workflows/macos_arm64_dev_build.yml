@@ -185,24 +185,13 @@ jobs:
       - name: Replace main.lua with hello world
         run: |
           cat > "deploy/macos/$APP_NAME.app/Contents/MacOS/lua/main.lua" <<'EOF'
-          local px, py = 16, 16
-          local pw, ph
-
           runtime.init = function()
-              window.set_title("Hello World!")
-              pw, ph = graphics.measure_text("@")
+              window.set_title("Welcome to Newt!")
           end
-
-          runtime.update = function(dt)
-              if input.pressed("left")  then px = px - pw end
-              if input.pressed("right") then px = px + pw end
-              if input.pressed("up")    then py = py - ph end
-              if input.pressed("down")  then py = py + ph end
-          end
-
+          
           runtime.draw = function()
-              graphics.clear(rgba(20, 20, 24))
-              graphics.draw_text("@", px, py)
+              graphics.clear(rgba(25, 20, 20))
+              graphics.draw_text("Hello from Newt!", 16, 16, rgba("#E35100"))
           end
           EOF
 
