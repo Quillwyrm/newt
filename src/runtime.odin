@@ -247,16 +247,19 @@ register_lua_api :: proc() {
     register_engine_global_api()
 
     register_filesystem_api()
+    register_raster_api()
     register_graphics_api()
     register_window_api()
     register_input_api()
     register_gamepad_api()
     register_audio_api()
     register_grid_api()
+    register_random_api()
 
     lua.newtable(Lua)
     lua.setglobal(Lua, "runtime")
 }
+
 
 // lua_traceback is the error handler for lua.pcall; it converts an error into a traceback string.
 lua_traceback :: proc "c" (L: ^lua.State) -> c.int {
@@ -393,7 +396,7 @@ main :: proc() {
 
     lua.L_openlibs(Lua)
     register_lua_api()
-    init_graphics_state()
+    //init_graphics_state()
 
     err: os.Error
     Resource_Directory_Path, err = os.get_executable_directory(context.allocator)
@@ -403,6 +406,18 @@ main :: proc() {
     defer delete(Resource_Directory_Path)
     
     configure_lua_package_path()
+
+    font_err, font_ok := graphics_init_default_font()
+    if !font_ok {
+        sdl.DestroyRenderer(Renderer)
+        Renderer = nil
+        sdl.DestroyWindow(Window)
+        Window = nil
+        fatal_engine_error(fmt.caprintf(
+            "engine.boot: failed to initialize built-in default font: %s",
+            font_err,
+        ))
+    }
 
 // == script Boot ==
 
@@ -427,6 +442,7 @@ main :: proc() {
     // Host Boot
     audio_init()
     input_init()
+    gamepad_init()
 
     default_window_flags: sdl.WindowFlags = {.HIDDEN}
 
@@ -450,19 +466,6 @@ main :: proc() {
         sdl.DestroyWindow(Window)
         Window = nil
         fatal_engine_error(fmt.caprintf("engine.boot: SDL_SetRenderVSync failed: %s", sdl.GetError()))
-    }
-
-    
-    font_err, font_ok := graphics_init_default_font()
-    if !font_ok {
-        sdl.DestroyRenderer(Renderer)
-        Renderer = nil
-        sdl.DestroyWindow(Window)
-        Window = nil
-        fatal_engine_error(fmt.caprintf(
-            "engine.boot: failed to initialize built-in default font: %s",
-            font_err,
-        ))
     }
 
 // == User Init ==
@@ -511,6 +514,14 @@ main :: proc() {
         Gfx_Ctx.active_sdl_color = u32rgba(0x000000FF)
 
         call_lua_noargs("draw")
+
+        if Gfx_Ctx.transform.group_depth != 0 {
+            Gfx_Ctx.transform.group_depth = 0
+            Gfx_Ctx.transform.matrix_stack[0] = 1
+            fatal_engine_error("graphics: unclosed transform block at end of runtime.draw; missing graphics.end_transform()")
+        }
+        
         sdl.RenderPresent(Renderer)
+        
     }
 }

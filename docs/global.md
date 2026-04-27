@@ -4,8 +4,11 @@ These functions are global and do not require a module prefix.
 
 ### free
 
-Immediately releases an engine userdata resource instead of waiting for garbage collection. This is used for values such as `Image`, `Sound`, `Font`, or `Pixelmap`.  
-Passing a non-userdata value does nothing.
+Immediately calls a userdata resource value's `__gc` metamethod. This is used to release Newt engine resources such as `Image`, `Sound`, `Font`, `Pixelmap`, and `Datagrid` before Lua's garbage collector runs.
+
+Passing a non-userdata value, or userdata without a `__gc` metamethod, does nothing.
+
+Calling `free` more than once on a Newt resource is safe; resource finalizers clear their owned handles after releasing them.
 
 ```lua
 free(resource)

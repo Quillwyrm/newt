@@ -14,6 +14,10 @@ BUILTIN_DEFAULT_FONT_SIZE :: f32(16)
 FATAL_FONT_SIZE           :: f32(14)
 BUILTIN_DEFAULT_FONT_BYTES :: #load("../res/iAWriterQuattroS-Regular.ttf")
 
+TEXT_CACHE_MAX_BYTES   :: 16 * 1024 * 1024
+TEXT_CACHE_MAX_ENTRIES :: 512
+
+
 // ============================================================================
 // Graphics State
 // ============================================================================
@@ -30,10 +34,12 @@ Image :: struct {
 }
 
 TextCacheEntry :: struct {
-    texture: ^sdl.Texture,
-    width:   f32,
-    height:  f32,
+    texture:   ^sdl.Texture,
+    width:     f32,
+    height:    f32,
+    last_used: u64,
 }
+
 
 WrapTextKey :: struct {
     text:  string,
@@ -58,12 +64,22 @@ Gfx_Ctx: struct {
 
     active_font: ^Font,
     default_font: Font,
+    text_cache_counter: u64,
 
     transform: struct {
         matrix_stack: [32]matrix[3, 3]f32,
         group_depth:  int,
     },
+} = {
+    active_sdl_color = u32rgba(0xFFFFFFFF),
+    default_scale_mode = .LINEAR,
+    active_blend_mode = sdl.BLENDMODE_BLEND,
+    active_text_alignment = .LEFT,
+    transform = {
+        matrix_stack = [32]matrix[3, 3]f32{0 = 1}
+    }    
 }
+
 
 // ============================================================================
 // Graphics System Helpers
@@ -75,20 +91,6 @@ check_render_safety :: proc "contextless"(L: ^lua.State, fn_name: cstring) {
     if Renderer == nil {
         lua.L_error(L, "%s: graphics system not initialized yet", fn_name)
     }
-}
-
-// CPU state only. Safe to call at boot.
-init_graphics_state :: proc() {
-    Gfx_Ctx.active_sdl_color = u32rgba(0xFFFFFFFF)
-    Gfx_Ctx.default_scale_mode = .LINEAR
-    Gfx_Ctx.active_blend_mode = sdl.BLENDMODE_BLEND
-    Gfx_Ctx.active_font = nil
-    Gfx_Ctx.default_font = {}
-    Gfx_Ctx.active_text_alignment = ttf.HorizontalAlignment.LEFT
-
-    // '1' is the Odin literal for an Identity Matrix
-    Gfx_Ctx.transform.matrix_stack[0] = 1
-    Gfx_Ctx.transform.group_depth = 0
 }
 
 graphics_shutdown :: proc() {
@@ -144,7 +146,14 @@ load_image_from_path :: proc(path: cstring) -> (Image, cstring, bool) {
         return {}, reason, false
     }
 
-    sdl.UpdateTexture(texture, nil, pixels, w * 4)
+    if !sdl.UpdateTexture(texture, nil, pixels, w * 4) {
+        reason := sdl.GetError()
+        if reason == nil do reason = "failed to upload texture pixels"
+    
+        sdl.DestroyTexture(texture)
+        return {}, reason, false
+    }
+    
     sdl.SetTextureBlendMode(texture, {.BLEND})
     sdl.SetTextureScaleMode(texture, Gfx_Ctx.default_scale_mode)
 
@@ -238,11 +247,6 @@ graphics_init_default_font :: proc() -> (cstring, bool) {
         return "built-in default font bytes are empty", false
     }
 
-    // NOTE:
-    // I could verify TTF_OpenFontIO from your uploaded SDL_ttf binding.
-    // I could not verify the exact SDL core binding symbol because that file was not in the upload.
-    // This is very likely `sdl.IOFromConstMem`. If your compiler says otherwise,
-    // grep your vendor:sdl3 binding for `IOFromConstMem` and swap the symbol name here.
     stream := sdl.IOFromConstMem(raw_data(BUILTIN_DEFAULT_FONT_BYTES),uint(len(BUILTIN_DEFAULT_FONT_BYTES)))
     if stream == nil {
         err := sdl.GetError()
@@ -287,27 +291,78 @@ load_text_texture_from_surface :: proc(surf: ^sdl.Surface) -> (TextCacheEntry, c
     }, nil, true
 }
 
-// Parses wrapped text alignment for graphics.draw_text_wrap.
-parse_text_align_checked :: #force_inline proc(
-    L: ^lua.State,
-    align_str: cstring,
-    fn_name: cstring,
-) -> ttf.HorizontalAlignment {
-    if align_str == nil do return .LEFT
+trim_font_text_cache :: proc(font: ^Font) {
+    if font == nil do return
 
-    switch string(align_str) {
-    case "left":
-        return .LEFT
-    case "center":
-        return .CENTER
-    case "right":
-        return .RIGHT
-    case:
-        lua.L_error(L, "%s: unknown alignment '%s'", fn_name, align_str)
-        return .LEFT
+    for {
+        total_entries := 0
+        total_bytes := 0
+
+        found_oldest := false
+        oldest_used: u64
+        oldest_is_wrap := false
+        oldest_text_key: string
+        oldest_wrap_key: WrapTextKey
+
+        for key, entry in font.text_cache {
+            total_entries += 1
+
+            // Approximate RGBA texture memory for cache budgeting.
+            total_bytes += int(entry.width) * int(entry.height) * 4
+
+            if !found_oldest || entry.last_used < oldest_used {
+                found_oldest = true
+                oldest_used = entry.last_used
+                oldest_is_wrap = false
+                oldest_text_key = key
+            }
+        }
+
+        for key, entry in font.wrap_cache {
+            total_entries += 1
+
+            // Approximate RGBA texture memory for cache budgeting.
+            total_bytes += int(entry.width) * int(entry.height) * 4
+
+            if !found_oldest || entry.last_used < oldest_used {
+                found_oldest = true
+                oldest_used = entry.last_used
+                oldest_is_wrap = true
+                oldest_wrap_key = key
+            }
+        }
+
+        if total_entries <= TEXT_CACHE_MAX_ENTRIES && total_bytes <= TEXT_CACHE_MAX_BYTES {
+            break
+        }
+
+        if !found_oldest {
+            break
+        }
+
+        if oldest_is_wrap {
+            deleted_key, deleted_entry := delete_key(&font.wrap_cache, oldest_wrap_key)
+
+            if deleted_entry.texture != nil {
+                sdl.DestroyTexture(deleted_entry.texture)
+            }
+
+            if len(deleted_key.text) > 0 {
+                delete(deleted_key.text)
+            }
+        } else {
+            deleted_key, deleted_entry := delete_key(&font.text_cache, oldest_text_key)
+
+            if deleted_entry.texture != nil {
+                sdl.DestroyTexture(deleted_entry.texture)
+            }
+
+            if len(deleted_key) > 0 {
+                delete(deleted_key)
+            }
+        }
     }
 }
-
 
 
 // ============================================================================
@@ -679,15 +734,12 @@ lua_graphics_set_default_filter :: proc "c" (L: ^lua.State) -> c.int {
 
     mode_str := lua.L_checkstring(L, 1)
 
-    if mode_str == "nearest" {
-        Gfx_Ctx.default_scale_mode = .NEAREST
-    } else if mode_str == "linear" {
-        Gfx_Ctx.default_scale_mode = .LINEAR
-    } else {
-        lua.L_error(L, "graphics.set_default_filter: expected 'nearest' or 'linear'")
+    switch string(mode_str) {
+    case "nearest": Gfx_Ctx.default_scale_mode = .NEAREST
+    case "linear": Gfx_Ctx.default_scale_mode = .LINEAR
+    case: lua.L_error(L, "graphics.set_default_filter: expected 'nearest' or 'linear'")
         return 0
     }
-
     return 0
 }
 
@@ -946,8 +998,15 @@ lua_graphics_draw_text :: proc "c" (L: ^lua.State) -> c.int {
 
     probe_key := strings.string_from_ptr(cast(^u8)text_c, int(text_len))
 
+    cache_inserted := false
     entry, ok := font.text_cache[probe_key]
-    if !ok {
+    if ok {
+        Gfx_Ctx.text_cache_counter += 1
+        entry.last_used = Gfx_Ctx.text_cache_counter
+        font.text_cache[probe_key] = entry
+    }
+    
+    if !ok {    
         owned_key, err := strings.clone_from_ptr(cast(^u8)text_c, int(text_len))
         if err != nil {
             lua.L_error(L, "graphics.draw_text: failed to allocate cache key")
@@ -983,14 +1042,23 @@ lua_graphics_draw_text :: proc "c" (L: ^lua.State) -> c.int {
             return 0
         }
 
+        Gfx_Ctx.text_cache_counter += 1
+        new_entry.last_used = Gfx_Ctx.text_cache_counter
+        
         font.text_cache[owned_key] = new_entry
         entry = new_entry
+        cache_inserted = true
+        
     }
 
     world_m := Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth]
     draw_geometry(entry.texture, x, y, entry.width, entry.height, 0.0, 0.0, 1.0, 1.0, u32rgba(raw_color), world_m)
-
-    return 0
+    
+    if cache_inserted {
+        trim_font_text_cache(font)
+    }
+    
+    return 0    
 }
 
 // graphics.draw_text_wrap(text, x, y, width, color?)
@@ -1036,8 +1104,15 @@ lua_graphics_draw_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
         align = align,
     }
 
+    cache_inserted := false
     entry, ok := font.wrap_cache[probe_key]
-    if !ok {
+    if ok {
+        Gfx_Ctx.text_cache_counter += 1
+        entry.last_used = Gfx_Ctx.text_cache_counter
+        font.wrap_cache[probe_key] = entry
+    }
+    
+    if !ok {    
         owned_text, err := strings.clone_from_ptr(cast(^u8)text_c, int(text_len))
         if err != nil {
             lua.L_error(L, "graphics.draw_text_wrap: failed to allocate cache key")
@@ -1078,14 +1153,22 @@ lua_graphics_draw_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
             return 0
         }
 
+        Gfx_Ctx.text_cache_counter += 1
+        new_entry.last_used = Gfx_Ctx.text_cache_counter
+        
         font.wrap_cache[owned_key] = new_entry
         entry = new_entry
+        cache_inserted = true        
     }
 
     world_m := Gfx_Ctx.transform.matrix_stack[Gfx_Ctx.transform.group_depth]
     draw_geometry(entry.texture, x, y, entry.width, entry.height, 0.0, 0.0, 1.0, 1.0, u32rgba(raw_color), world_m)
-
-    return 0
+    
+    if cache_inserted {
+        trim_font_text_cache(font)
+    }
+    
+    return 0    
 }
 
 // graphics.set_text_alignment(mode)
@@ -1557,11 +1640,18 @@ lua_graphics_update_image_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
 
     dx := c.int(lua.L_optinteger(L, 3, 0))
     dy := c.int(lua.L_optinteger(L, 4, 0))
-
+    
+    if dx < 0 || dy < 0 || dx + surf.w > c.int(img.width) || dy + surf.h > c.int(img.height) {
+        lua.L_error(L, "graphics.update_image_from_pixelmap: destination region is out of bounds")
+        return 0
+    }
+    
     dst_rect := sdl.Rect{dx, dy, surf.w, surf.h}
-
-    sdl.UpdateTexture(img.texture, &dst_rect, surf.pixels, surf.pitch)
-
+    
+    if !sdl.UpdateTexture(img.texture, &dst_rect, surf.pixels, surf.pitch) {
+        lua.L_error(L, "graphics.update_image_from_pixelmap: SDL_UpdateTexture failed: %s", sdl.GetError())
+        return 0
+    }
     return 0
 }
 
@@ -1581,16 +1671,31 @@ lua_graphics_update_image_region_from_pixelmap :: proc "c" (L: ^lua.State) -> c.
     dx := c.int(lua.L_checkinteger(L, 7))
     dy := c.int(lua.L_checkinteger(L, 8))
 
-    if w <= 0 || h <= 0 || sx < 0 || sy < 0 || sx + w > surf.w || sy + h > surf.h { return 0 }
-
+    if w <= 0 || h <= 0 {
+        lua.L_error(L, "graphics.update_image_region_from_pixelmap: width and height must be positive")
+        return 0
+    }
+    
+    if sx < 0 || sy < 0 || sx + w > surf.w || sy + h > surf.h {
+        lua.L_error(L, "graphics.update_image_region_from_pixelmap: source region is out of bounds")
+        return 0
+    }
+    
+    if dx < 0 || dy < 0 || dx + w > c.int(img.width) || dy + h > c.int(img.height) {
+        lua.L_error(L, "graphics.update_image_region_from_pixelmap: destination region is out of bounds")
+        return 0
+    }
+    
     dst_rect := sdl.Rect{dx, dy, w, h}
-
     byte_offset := (int(sy) * int(surf.pitch)) + (int(sx) * 4)
     src_ptr := rawptr(uintptr(surf.pixels) + uintptr(byte_offset))
-
-    sdl.UpdateTexture(img.texture, &dst_rect, src_ptr, surf.pitch)
-
+    
+    if !sdl.UpdateTexture(img.texture, &dst_rect, src_ptr, surf.pitch) {
+        lua.L_error(L, "graphics.update_image_region_from_pixelmap: SDL_UpdateTexture failed: %s", sdl.GetError())
+        return 0
+    }
     return 0
+    
 }
 
 // ============================================================================

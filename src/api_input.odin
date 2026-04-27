@@ -2,7 +2,7 @@ package main
 
 import "base:runtime"
 import "core:c"
-import "core:strings"
+import "core:mem"
 import lua "luajit"
 import sdl "vendor:sdl3"
 
@@ -175,10 +175,10 @@ KEYS := [?]KeyDef {
 // Input State
 // ============================================================================
 
-Key_Down: [dynamic]bool
-Key_Pressed: [dynamic]bool
-Key_Repeat: [dynamic]bool
-Key_Released: [dynamic]bool
+Key_Down: []bool
+Key_Pressed: []bool
+Key_Repeat: []bool
+Key_Released: []bool
 
 Token_To_Index: map[string]int
 Keycode_To_Index: map[sdl.Keycode]int
@@ -196,7 +196,7 @@ Text_Active: bool
 Text_Len: int
 Text_Buffer: [TEXT_BUF_CAP]u8
 
-Input_Initialized: bool = false
+Input_Initialized: bool
 
 // mouse_token_to_index maps "mouse1/2/3" to 0..2.
 mouse_token_to_index :: proc "contextless"(token: string) -> (idx: int, ok: bool) {
@@ -243,10 +243,10 @@ input_init :: proc() {
 
 	n := len(KEYS)
 
-	Key_Down = make([dynamic]bool, n)
-	Key_Pressed = make([dynamic]bool, n)
-	Key_Repeat = make([dynamic]bool, n)
-	Key_Released = make([dynamic]bool, n)
+	Key_Down = make([]bool, n)
+	Key_Pressed = make([]bool, n)
+	Key_Repeat = make([]bool, n)
+	Key_Released = make([]bool, n)
 
 	Token_To_Index = make(map[string]int)
 	Keycode_To_Index = make(map[sdl.Keycode]int)
@@ -414,7 +414,6 @@ input_shutdown :: proc() {
 
 // down(name) -> bool
 lua_input_down :: proc "c" (L: ^lua.State) -> c.int {
-	context = runtime.default_context()
 
 	if !Input_Initialized {
 		lua.L_error(L, "input.down: input system not initialized")
@@ -427,7 +426,8 @@ lua_input_down :: proc "c" (L: ^lua.State) -> c.int {
 
 	name_len: c.size_t
 	name_c := lua.L_checklstring(L, 1, &name_len)
-	name := strings.string_from_ptr(cast(^byte)(name_c), int(name_len))
+	name := transmute(string)mem.Raw_String{data = cast([^]byte)(name_c), len  = int(name_len) }
+	
 
 	if mouse_idx, is_mouse := mouse_token_to_index(name); is_mouse {
 		lua.pushboolean(L, b32(mouse_down(mouse_idx)))
@@ -446,7 +446,6 @@ lua_input_down :: proc "c" (L: ^lua.State) -> c.int {
 
 // pressed(name) -> bool
 lua_input_pressed :: proc "c" (L: ^lua.State) -> c.int {
-	context = runtime.default_context()
 
 	if !Input_Initialized {
 		lua.L_error(L, "input.pressed: input system not initialized")
@@ -459,7 +458,7 @@ lua_input_pressed :: proc "c" (L: ^lua.State) -> c.int {
 
 	name_len: c.size_t
 	name_c := lua.L_checklstring(L, 1, &name_len)
-	name := strings.string_from_ptr(cast(^byte)(name_c), int(name_len))
+	name := transmute(string)mem.Raw_String{data = cast([^]byte)(name_c), len  = int(name_len) }
 
 	if mouse_idx, is_mouse := mouse_token_to_index(name); is_mouse {
 		lua.pushboolean(L, b32(Mouse_Pressed[mouse_idx]))
@@ -478,7 +477,6 @@ lua_input_pressed :: proc "c" (L: ^lua.State) -> c.int {
 
 // repeated(name) -> bool (repeat-only; does not include initial press)
 lua_input_repeated :: proc "c" (L: ^lua.State) -> c.int {
-	context = runtime.default_context()
 
 	if !Input_Initialized {
 		lua.L_error(L, "input.repeated: input system not initialized")
@@ -491,7 +489,7 @@ lua_input_repeated :: proc "c" (L: ^lua.State) -> c.int {
 
 	name_len: c.size_t
 	name_c := lua.L_checklstring(L, 1, &name_len)
-	name := strings.string_from_ptr(cast(^byte)(name_c), int(name_len))
+	name := transmute(string)mem.Raw_String{data = cast([^]byte)(name_c), len  = int(name_len) }
 
 	if _, is_mouse := mouse_token_to_index(name); is_mouse {
 		lua.L_error(L, "input.repeated: '%.*s' is a mouse token", c.int(name_len), name_c)
@@ -510,7 +508,6 @@ lua_input_repeated :: proc "c" (L: ^lua.State) -> c.int {
 
 // released(name) -> bool
 lua_input_released :: proc "c" (L: ^lua.State) -> c.int {
-	context = runtime.default_context()
 
 	if !Input_Initialized {
 		lua.L_error(L, "input.released: input system not initialized")
@@ -523,7 +520,7 @@ lua_input_released :: proc "c" (L: ^lua.State) -> c.int {
 
 	name_len: c.size_t
 	name_c := lua.L_checklstring(L, 1, &name_len)
-	name := strings.string_from_ptr(cast(^byte)(name_c), int(name_len))
+	name := transmute(string)mem.Raw_String{data = cast([^]byte)(name_c), len  = int(name_len) }
 
 	if mouse_idx, is_mouse := mouse_token_to_index(name); is_mouse {
 		lua.pushboolean(L, b32(Mouse_Released[mouse_idx]))

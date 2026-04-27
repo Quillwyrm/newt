@@ -23,6 +23,7 @@ VOICE_GENERATION_MASK  :: u64(0x03FF_FFFF)
 // Pixels to Meters scaling for 3D spatialization.
 // 100 pixels = 1.0 unit (meter) in Miniaudio.
 AUDIO_SCALE :: 0.01
+LISTENER_Z_OFFSET :: -1
 
 // Sound represents a loadable audio asset.
 Sound :: struct {
@@ -95,6 +96,7 @@ audio_init :: proc() {
     if result != .SUCCESS {
         fatal_engine_error(fmt.caprintf("audio.init: failed to initialize audio engine: %v", result))
     }
+    ma.engine_listener_set_world_up(&audio_ctx.engine, 0, 0, 0, -1)
 
     // Initialize master bus and shared graph info.
     channels := ma.engine_get_channels(&audio_ctx.engine)
@@ -370,7 +372,7 @@ lua_audio_set_listener_position :: proc "c" (L: ^lua.State) -> c.int {
     check_audio_safety(L, "audio.set_listener_position")
     x := f32(lua.L_checknumber(L, 1))
     y := f32(lua.L_checknumber(L, 2))
-    ma.engine_listener_set_position(&audio_ctx.engine, 0, x * AUDIO_SCALE, y * AUDIO_SCALE, -1)
+    ma.engine_listener_set_position(&audio_ctx.engine, 0, x * AUDIO_SCALE, y * AUDIO_SCALE, LISTENER_Z_OFFSET)
     return 0
 }
 
@@ -645,6 +647,7 @@ lua_audio_set_voice_looping :: proc "c" (L: ^lua.State) -> c.int {
     voice := get_voice(u32(lua.L_checkinteger(L, 1)))
     if voice == nil do return 0
 
+    lua.L_checktype(L, 2, lua.TBOOLEAN)
     ma.sound_set_looping(&voice.node, b32(lua.toboolean(L, 2)))
     return 0
 }
@@ -1118,28 +1121,30 @@ lua_audio_resume_bus :: proc "c" (L: ^lua.State) -> c.int {
 // lua_audio_stop_bus: audio.stop_bus(bus_idx: int)
 lua_audio_stop_bus :: proc "c" (L: ^lua.State) -> c.int {
     check_audio_safety(L, "audio.stop_bus")
+
     idx := lua.L_checkinteger(L, 1)
     if idx < 0 || idx >= MAX_AUDIO_BUSES {
         lua.L_error(L, "audio.stop_bus: invalid bus index %d", idx)
         return 0
     }
 
-    // 1. Pause the bus DSP immediately to stop audio output
-    ma.sound_group_stop(&audio_ctx.mixer[idx].group)
-
-    // 2. Destroy all active voices assigned to this bus to reclaim their pool slots
     for i in 0 ..< MAX_VOICES {
         voice := &audio_ctx.voices[i]
         if voice.active && voice.bus_idx == int(idx) {
             ma.sound_stop(&voice.node)
             ma.sound_uninit(&voice.node)
+
+            voice.node = {}
             voice.active = false
-            voice.source_sound = nil // <--- Clear the dangling pointer
+            voice.generation = 0
+            voice.bus_idx = 0
+            voice.source_sound = nil
         }
     }
 
     return 0
 }
+
 
 
 // lua_audio_get_voice_info: audio.get_voice_info(handle) -> time, duration

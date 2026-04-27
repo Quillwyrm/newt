@@ -579,6 +579,9 @@ Copies an entire Pixelmap into an existing image at an optional destination offs
 ```lua
 graphics.update_image_from_pixelmap(image, pixelmap, dx?, dy?)
 ```
+##### Error Cases
+- If the destination region is out of bounds.
+- If the GPU texture upload fails.
 
 ---
 
@@ -589,3 +592,9 @@ Copies a region of a Pixelmap into an existing image. Invalid regions and freed 
 ```lua
 graphics.update_image_region_from_pixelmap(image, pixelmap, sx, sy, w, h, dx, dy)
 ```
+
+#### Error Cases
+- if w or h is not positive.
+- if the source region is out of bounds.
+- if the destination region is out of bounds.
+- if the GPU texture upload fails.
