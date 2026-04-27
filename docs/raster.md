@@ -25,6 +25,7 @@ To show a Pixelmap on screen, create a GPU `Image` from it with the related func
 * [`load_pixelmap`](#load_pixelmap)
 * [`save_pixelmap`](#save_pixelmap)
 * [`get_pixelmap_size`](#get_pixelmap_size)
+* [`new_pixelmap_from_datagrid`](#new_pixelmap_from_datagrid)
 
 **Raster Drawing**
 * [`blit`](#blit)
@@ -111,6 +112,41 @@ raster.get_pixelmap_size(pixelmap) -> width, height | nil, nil
 
 `width, height` for a live Pixelmap.  
 `nil, nil` if `pixelmap` has been freed.
+
+---
+
+### new_pixelmap_from_datagrid
+
+Creates a new Pixelmap from a [`Datagrid`](grid.md) by mapping integer cell values to exact pixel colors.
+
+This is useful for debug views, minimaps, masks, terrain previews, and turning grid data into editable image data. The returned pixelmap has the same dimensions as the datagrid, and grid coordinates map directly to pixel coordinates.
+
+`color_map` is a table where keys are integer cell values and values are packed `0xRRGGBBAA` colors.
+
+If `default_color` is provided, cell values not found in `color_map` are written as `default_color`. If `default_color` is omitted, unknown cell values error.
+
+```lua
+raster.new_pixelmap_from_datagrid(datagrid, color_map, default_color?) -> pixelmap
+
+--example usage
+pmap = raster.new_pixelmap_from_datagrid(terrain, {
+    [0] = rgba("#000000"),
+    [1] = rgba("#FFFFFF"),
+    [2] = rgba("#3366FF"),
+}, rgba("#FF00FF"))
+```
+
+#### Returns
+
+`pixelmap` with the same width and height as `datagrid`.
+
+#### Error Cases
+
+- Datagrid has been freed.
+- `color_map` keys must be integers.
+- `color_map` values must be color integers.
+- `default_color` must be a color integer.
+- A cell value is not present in `color_map` and `default_color` is omitted.
 
 ## Raster Drawing
 

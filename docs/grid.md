@@ -62,6 +62,7 @@ A visibility grid is returned by `compute_fov` and `compute_fov_cone` and marks 
 
 **Datagrids**
 * [`new_datagrid`](#new_datagrid)
+* [`new_datagrid_from_pixelmap`](#new_datagrid_from_pixelmap)
 * [`get_cell`](#get_cell)
 * [`set_cell`](#set_cell)
 * [`fill_datagrid`](#fill_datagrid)
@@ -121,6 +122,40 @@ grid.new_datagrid(width, height) -> datagrid
 
 - `width <= 0`.
 - `height <= 0`.
+
+---
+
+### new_datagrid_from_pixelmap
+
+Creates a new datagrid from a [`Pixelmap`](raster.md) by mapping exact pixel colors to integer cell values.
+
+This is useful for loading masks, collision maps, terrain maps, region maps, and other palette-style image data into grid form. The returned datagrid has the same dimensions as the pixelmap, and pixel coordinates map directly to datagrid coordinates.
+
+`color_map` is a table where keys are packed `0xRRGGBBAA` colors and values are integer cell values.
+
+If `default_value` is provided, colors not found in `color_map` are written as `default_value`. If `default_value` is omitted, unknown colors error.
+
+```lua
+grid.new_datagrid_from_pixelmap(pixelmap, color_map, default_value?) -> datagrid
+
+--usage example
+terrain = grid.new_datagrid_from_pixelmap(pmap, {
+    [rgba("#000000")] = 0,
+    [rgba("#FFFFFF")] = 1,
+    [rgba("#3366FF")] = 2,
+}, 0)
+```
+
+#### Returns
+
+- A new datagrid with the same width and height as `pixelmap`.
+
+#### Error Cases
+
+- Pixelmap has been freed.
+- `color_map` keys must be color integers.
+- `color_map` values must be integers.
+- A pixel color is not present in `color_map` and `default_value` is omitted.
 
 ---
 

@@ -744,6 +744,88 @@ lua_grid_new_datagrid :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
+// grid.new_datagrid_from_pixelmap(pixelmap, color_map, default_value?) -> datagrid
+lua_grid_new_datagrid_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    surf := (cast(^Pixelmap)lua.L_checkudata(L, 1, "Pixelmap"))^
+    if surf == nil {
+        lua.L_error(L, "grid.new_datagrid_from_pixelmap: pixelmap has been freed")
+        return 0
+    }
+
+    lua.L_checktype(L, 2, lua.Type.TABLE)
+
+    has_default := lua.type(L, 3) != lua.Type.NONE && lua.type(L, 3) != lua.Type.NIL
+    default_value: i32
+    if has_default {
+        default_value = i32(lua.L_checkinteger(L, 3))
+    }
+
+    color_values := make(map[u32]i32)
+    defer delete(color_values)
+
+    lua.pushnil(L)
+    for bool(lua.next(L, 2)) {
+        if !bool(lua.isnumber(L, -2)) {
+            lua.L_error(L, "grid.new_datagrid_from_pixelmap: color_map keys must be color integers")
+            return 0
+        }
+
+        if !bool(lua.isnumber(L, -1)) {
+            lua.L_error(L, "grid.new_datagrid_from_pixelmap: color_map values must be integers")
+            return 0
+        }
+
+        color_key := i64(lua.tointeger(L, -2))
+        if color_key < 0 || color_key > i64(max(u32)) {
+            lua.L_error(L, "grid.new_datagrid_from_pixelmap: color_map keys must be color integers")
+            return 0
+        }
+
+        color_values[u32(color_key)] = i32(lua.tointeger(L, -1))
+
+        lua.pop(L, 1)
+    }
+
+    width := int(surf.w)
+    height := int(surf.h)
+
+    g := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    g^ = new_datagrid(width, height)
+
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    pixels := cast([^]u32)surf.pixels
+    stride := int(surf.pitch) / 4
+
+    for y := 0; y < height; y += 1 {
+        src_row := y * stride
+        dst_row := y * width
+
+        for x := 0; x < width; x += 1 {
+            logical_color := u32_rgba_to_abgr(pixels[src_row + x])
+
+            if value, ok := color_values[logical_color]; ok {
+                g.cells[dst_row + x] = value
+            } else if has_default {
+                g.cells[dst_row + x] = default_value
+            } else {
+                lua.L_error(
+                    L,
+                    "grid.new_datagrid_from_pixelmap: pixel color 0x%08x has no mapped value",
+                    logical_color,
+                )
+                return 0
+            }
+        }
+    }
+
+    return 1
+}
+
+
 // grid.get_cell(g, x, y) -> value | nil
 lua_grid_get_cell :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
@@ -2615,6 +2697,7 @@ register_grid_api :: proc() {
 
     // -- Datagrid Basics --
     lua_bind_function(lua_grid_new_datagrid,  "new_datagrid")
+    lua_bind_function(lua_grid_new_datagrid_from_pixelmap, "new_datagrid_from_pixelmap")
     lua_bind_function(lua_grid_get_cell,      "get_cell")
     lua_bind_function(lua_grid_set_cell,      "set_cell")
     lua_bind_function(lua_grid_fill_datagrid, "fill_datagrid")

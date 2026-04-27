@@ -274,6 +274,103 @@ lua_raster_save_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
+// == Pixelmap Bridges ==
+
+// raster.new_pixelmap_from_datagrid(datagrid, color_map, default_color?) -> pixelmap
+lua_raster_new_pixelmap_from_datagrid :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    g := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if g == nil || g.cells == nil {
+        lua.L_error(L, "raster.new_pixelmap_from_datagrid: datagrid has been freed")
+        return 0
+    }
+
+    lua.L_checktype(L, 2, lua.Type.TABLE)
+
+    has_default := lua.type(L, 3) != lua.Type.NONE && lua.type(L, 3) != lua.Type.NIL
+    default_color: u32
+    if has_default {
+        raw_default := i64(lua.L_checkinteger(L, 3))
+        if raw_default < 0 || raw_default > i64(max(u32)) {
+            lua.L_error(L, "raster.new_pixelmap_from_datagrid: default_color must be a color integer")
+            return 0
+        }
+        default_color = u32(raw_default)
+    }
+
+    value_colors := make(map[i32]u32)
+    defer delete(value_colors)
+
+    lua.pushnil(L)
+    for bool(lua.next(L, 2)) {
+        if !bool(lua.isnumber(L, -2)) {
+            lua.L_error(L, "raster.new_pixelmap_from_datagrid: color_map keys must be integers")
+            return 0
+        }
+
+        if !bool(lua.isnumber(L, -1)) {
+            lua.L_error(L, "raster.new_pixelmap_from_datagrid: color_map values must be color integers")
+            return 0
+        }
+
+        raw_color := i64(lua.tointeger(L, -1))
+        if raw_color < 0 || raw_color > i64(max(u32)) {
+            lua.L_error(L, "raster.new_pixelmap_from_datagrid: color_map values must be color integers")
+            return 0
+        }
+
+        value_colors[i32(lua.tointeger(L, -2))] = u32(raw_color)
+
+        lua.pop(L, 1)
+    }
+
+    surface := sdl.CreateSurface(c.int(g.width), c.int(g.height), sdl.PixelFormat.RGBA32)
+    if surface == nil {
+        err := sdl.GetError()
+        if err != nil {
+            lua.L_error(L, "raster.new_pixelmap_from_datagrid: failed to create pixelmap surface: %s", err)
+        } else {
+            lua.L_error(L, "raster.new_pixelmap_from_datagrid: failed to create pixelmap surface")
+        }
+        return 0
+    }
+
+    pixels := cast([^]u32)surface.pixels
+    stride := int(surface.pitch) / 4
+
+    for y := 0; y < g.height; y += 1 {
+        src_row := y * g.width
+        dst_row := y * stride
+
+        for x := 0; x < g.width; x += 1 {
+            cell_value := g.cells[src_row + x]
+
+            if logical_color, ok := value_colors[cell_value]; ok {
+                pixels[dst_row + x] = u32_rgba_to_abgr(logical_color)
+            } else if has_default {
+                pixels[dst_row + x] = u32_rgba_to_abgr(default_color)
+            } else {
+                sdl.DestroySurface(surface)
+                lua.L_error(
+                    L,
+                    "raster.new_pixelmap_from_datagrid: cell value %d has no mapped color",
+                    cell_value,
+                )
+                return 0
+            }
+        }
+    }
+
+    (cast(^Pixelmap)lua.newuserdata(L, size_of(Pixelmap)))^ = surface
+
+    lua.L_getmetatable(L, "Pixelmap")
+    lua.setmetatable(L, -2)
+
+    return 1
+}
+
+
 // == Pixel Access And Analysis ==
 
 // raster.set_pixel(pixelmap, x, y, color)
@@ -887,6 +984,9 @@ register_raster_api :: proc() {
     lua_bind_function(lua_raster_load_pixelmap, "load_pixelmap")
     lua_bind_function(lua_raster_save_pixelmap, "save_pixelmap")
     lua_bind_function(lua_raster_get_pixelmap_size, "get_pixelmap_size")
+
+    // Pixelmap Bridges
+    lua_bind_function(lua_raster_new_pixelmap_from_datagrid, "new_pixelmap_from_datagrid")
 
     // Software Drawing
     lua_bind_function(lua_raster_blit, "blit")
