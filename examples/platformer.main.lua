@@ -1,207 +1,208 @@
--- =============================================================================
--- CONFIGURATION & COLORS
--- =============================================================================
+-- Newt tile platformer example --
+
+-- Configuration --
 
 local SCREEN_WIDTH = 1280
 local SCREEN_HEIGHT = 720
 local TILE_SIZE = 40
 
+local PLAYER_START_X = 100
+local PLAYER_START_Y = 500
+local PLAYER_WIDTH = 32
+local PLAYER_HEIGHT = 32
+
 local GRAVITY = 2200
-local RUN_ACCELERATION = 3200
-local RUN_FRICTION = 2800
-local MAX_RUN_SPEED = 420
-local JUMP_VELOCITY = -800
-local COYOTE_TIME_LIMIT = 0.15 
+local ACCELERATION = 3200
+local FRICTION = 2800
+local MAX_SPEED = 420
+local JUMP_FORCE = -800
+local JUMP_GRACE = 0.1
 
-local COLOR_BACKGROUND = rgba(16, 14, 28, 255)
-local COLOR_TILE       = rgba(70, 70, 85, 255)
-local COLOR_PLAYER     = rgba(90, 235, 255, 255)
-local COLOR_TEXT       = rgba(255, 255, 255, 255)
+local COLORS = {
+  background = rgba("#141A16"),
+  tile = rgba("#3F4A3C"),
+  player = rgba("#8FD7FF"),
+  text = rgba("#EAF2E3"),
+}
 
--- =============================================================================
--- MATH & COLLISION HELPERS
--- =============================================================================
+-- Level data --
 
--- Standard Axis-Aligned Bounding Box (AABB) intersection test
-local function is_overlapping(x1, y1, w1, h1, x2, y2, w2, h2)
-    return x1 < x2 + w2 and x1 + w1 > x2 and y1 < y2 + h2 and y1 + h1 > y2
-end
-
--- =============================================================================
--- LEVEL DATA (TILEMAP)
--- =============================================================================
--- 1 = Solid Wall/Floor, 0 = Empty Space
--- 32 columns x 18 rows (1280x720 at 40px tiles)
-
-local ASCII_MAP = {
-    "11111111111111111111111111111111",
-    "11111000000000000000000000000111",
-    "11000000000000000000000000000011",
-    "11111101000111110000000000000001",
-    "10000000000000000000111100000001",
-    "10000000000000000000000110000001",
-    "10000000000000000000000000111001",
-    "10011100000000000000000000000001",
-    "10000000001111111100000000000011",
-    "10000000000000000000000000000001",
-    "10000000000001000000000111110001",
-    "10000111100000000000000000000001",
-    "10000000000000000000000000000001",
-    "10000000000000010000000100000001",
-    "11000000000000010000001100000001",
-    "11100000000010000000001100000001",
-    "11111111111111111111111111111111",
-    "11111111111111111111111111111111"
+local LEVEL_ROWS = {
+  "11111111111111111111111111111111",
+  "11111000000000000000000000000111",
+  "11000000000000000000000000000011",
+  "11111101000111110000000000000001",
+  "10000000000000000000111100000001",
+  "10000000000000000000000110000001",
+  "10000000000000000000000000111001",
+  "10011100000000000000001000000001",
+  "10000000001111111100000000000011",
+  "10000000000000000000000000000001",
+  "10000000000001000000000011110001",
+  "10000111100000000000000000000001",
+  "10000000000000000000000000000001",
+  "10000000000000000000000100000001",
+  "11000000000000001000001100000001",
+  "11100000000010011100001100000001",
+  "11111111111111111111111111111111",
+  "11111111111111111111111111111111",
 }
 
 local solid_tiles = {}
 
--- =============================================================================
--- PLAYER STATE & LOGIC
--- =============================================================================
+-- State --
 
 local player = {
-    x = 100, y = 500,
-    width = 32, height = 32, -- slightly smaller than tiles to fit through gaps
-    velocity_x = 0,
-    velocity_y = 0,
-    is_grounded = false,
-    coyote_timer = 0
+  x = PLAYER_START_X,
+  y = PLAYER_START_Y,
+  w = PLAYER_WIDTH,
+  h = PLAYER_HEIGHT,
+  vx = 0,
+  vy = 0,
+  grounded = false,
+  jump_grace = 0,
 }
 
+-- Helpers --
+
+local function rects_overlap(ax, ay, aw, ah, bx, by, bw, bh)
+  return ax < bx + bw and
+    ax + aw > bx and
+    ay < by + bh and
+    ay + ah > by
+end
+
 local function reset_player()
-    player.x = 100
-    player.y = 500
-    player.velocity_x = 0
-    player.velocity_y = 0
-    player.is_grounded = false
-    player.coyote_timer = 0
+  player.x = PLAYER_START_X
+  player.y = PLAYER_START_Y
+  player.vx = 0
+  player.vy = 0
+  player.grounded = false
+  player.jump_grace = 0
 end
 
-local function update_player_input(dt)
-    -- 1. Gather Intent
-    local move_direction = 0
-    if input.down("a") or input.down("left") then move_direction = move_direction - 1 end
-    if input.down("d") or input.down("right") then move_direction = move_direction + 1 end
-    local jump_pressed = input.pressed("space") or input.pressed("w") or input.pressed("up")
+local function build_solid_tiles()
+  solid_tiles = {}
 
-    -- 2. Process Horizontal Acceleration & Friction
-    if move_direction ~= 0 then
-        player.velocity_x = player.velocity_x + move_direction * RUN_ACCELERATION * dt
-    else
-        if player.velocity_x > 0 then
-            player.velocity_x = math.max(player.velocity_x - RUN_FRICTION * dt, 0)
-        elseif player.velocity_x < 0 then
-            player.velocity_x = math.min(player.velocity_x + RUN_FRICTION * dt, 0)
-        end
-    end
-    player.velocity_x = math.max(-MAX_RUN_SPEED, math.min(MAX_RUN_SPEED, player.velocity_x))
+  for row = 1, #LEVEL_ROWS do
+    local row_text = LEVEL_ROWS[row]
 
-    -- 3. Manage Coyote Time
-    if player.is_grounded then
-        player.coyote_timer = COYOTE_TIME_LIMIT
-    else
-        player.coyote_timer = math.max(player.coyote_timer - dt, 0)
+    for col = 1, #row_text do
+      if row_text:sub(col, col) == "1" then
+        solid_tiles[#solid_tiles + 1] = {
+          x = (col - 1) * TILE_SIZE,
+          y = (row - 1) * TILE_SIZE,
+        }
+      end
     end
-
-    -- 4. Execute Jump
-    if jump_pressed and player.coyote_timer > 0 then
-        player.velocity_y = JUMP_VELOCITY
-        player.is_grounded = false
-        player.coyote_timer = 0
-    end
+  end
 end
 
-local function update_player_physics(dt)
-    -- =========================================================================
-    -- X-AXIS COLLISION
-    -- Move horizontally, check for overlaps, push out if hitting a wall.
-    -- =========================================================================
-    player.x = player.x + player.velocity_x * dt
+-- Runtime callbacks --
 
-    for i = 1, #solid_tiles do
-        local tile = solid_tiles[i]
-        if is_overlapping(player.x, player.y, player.width, player.height, tile.x, tile.y, TILE_SIZE, TILE_SIZE) then
-            if player.velocity_x > 0 then     -- Moving Right, hit left wall of tile
-                player.x = tile.x - player.width
-            elseif player.velocity_x < 0 then -- Moving Left, hit right wall of tile
-                player.x = tile.x + TILE_SIZE
-            end
-            player.velocity_x = 0
-        end
-    end
+runtime.init = function()
+  window.set_title("Newt Platformer Example")
+  window.set_size(SCREEN_WIDTH, SCREEN_HEIGHT)
 
-    -- =========================================================================
-    -- Y-AXIS COLLISION
-    -- Move vertically, check overlaps, push out if hitting floor or ceiling.
-    -- =========================================================================
-    player.velocity_y = player.velocity_y + GRAVITY * dt
-    player.y = player.y + player.velocity_y * dt
-    player.is_grounded = false
-
-    for i = 1, #solid_tiles do
-        local tile = solid_tiles[i]
-        if is_overlapping(player.x, player.y, player.width, player.height, tile.x, tile.y, TILE_SIZE, TILE_SIZE) then
-            if player.velocity_y > 0 then     -- Falling down, hit floor of tile
-                player.y = tile.y - player.height
-                player.is_grounded = true
-            elseif player.velocity_y < 0 then -- Jumping up, hit ceiling of tile
-                player.y = tile.y + TILE_SIZE
-            end
-            player.velocity_y = 0
-        end
-    end
+  build_solid_tiles()
+  reset_player()
 end
 
--- =============================================================================
--- ENGINE HOOKS
--- =============================================================================
+runtime.update = function(dt)
 
-function runtime.init()
-    window.set_size(SCREEN_WIDTH, SCREEN_HEIGHT)
-    
-    -- Parse the ASCII map into physical rectangles
-    for row_idx = 1, #ASCII_MAP do
-        local row_string = ASCII_MAP[row_idx]
-        for col_idx = 1, #row_string do
-            local char = string.sub(row_string, col_idx, col_idx)
-            if char == "1" then
-                table.insert(solid_tiles, {
-                    x = (col_idx - 1) * TILE_SIZE,
-                    y = (row_idx - 1) * TILE_SIZE
-                })
-            end
-        end
-    end
+  -- Player Input --
+  local move = 0
+  if input.down("a") or input.down("left") then move = move - 1 end
+  if input.down("d") or input.down("right") then move = move + 1 end
 
+  local jump_pressed = input.pressed("space") or
+    input.pressed("w") or
+    input.pressed("up")
+
+  if input.pressed("r") then
     reset_player()
+  end
+
+  -- Horizontal movement --
+  if move ~= 0 then
+    player.vx = player.vx + move * ACCELERATION * dt
+  elseif player.vx > 0 then
+    player.vx = math.max(player.vx - FRICTION * dt, 0)
+  elseif player.vx < 0 then
+    player.vx = math.min(player.vx + FRICTION * dt, 0)
+  end
+
+  player.vx = math.max(-MAX_SPEED, math.min(MAX_SPEED, player.vx))
+
+  -- Jump grace --
+  if player.grounded then
+    player.jump_grace = JUMP_GRACE
+  else
+    player.jump_grace = math.max(player.jump_grace - dt, 0)
+  end
+
+  if jump_pressed and player.jump_grace > 0 then
+    player.vy = JUMP_FORCE
+    player.grounded = false
+    player.jump_grace = 0
+  end
+
+  -- Horizontal collision --
+  player.x = player.x + player.vx * dt
+
+  for i = 1, #solid_tiles do
+    local tile = solid_tiles[i]
+
+    if rects_overlap(player.x, player.y, player.w, player.h, tile.x, tile.y, TILE_SIZE, TILE_SIZE) then
+      if player.vx > 0 then
+        player.x = tile.x - player.w
+      elseif player.vx < 0 then
+        player.x = tile.x + TILE_SIZE
+      end
+
+      player.vx = 0
+    end
+  end
+
+  -- Vertical collision --
+  player.vy = player.vy + GRAVITY * dt
+  player.y = player.y + player.vy * dt
+  player.grounded = false
+
+  for i = 1, #solid_tiles do
+    local tile = solid_tiles[i]
+
+    if rects_overlap(player.x, player.y, player.w, player.h, tile.x, tile.y, TILE_SIZE, TILE_SIZE) then
+      if player.vy > 0 then
+        player.y = tile.y - player.h
+        player.grounded = true
+      elseif player.vy < 0 then
+        player.y = tile.y + TILE_SIZE
+      end
+
+      player.vy = 0
+    end
+  end
+
+  if player.y > SCREEN_HEIGHT + 200 then
+    reset_player()
+  end
 end
 
-function runtime.update(dt)
-    dt = math.min(dt, 0.05) -- Prevent physics tunneling on huge lag spikes
+runtime.draw = function()
+  graphics.clear(COLORS.background)
 
-    if input.pressed("r") then
-        reset_player()
-    end
+  -- Draw level
+  for i = 1, #solid_tiles do
+    local tile = solid_tiles[i]
+    graphics.draw_rect(tile.x, tile.y, TILE_SIZE, TILE_SIZE, COLORS.tile)
+  end
 
-    update_player_input(dt)
-    update_player_physics(dt)
-end
+  -- Draw Player
+  graphics.draw_rect(player.x, player.y, player.w, player.h, COLORS.player)
 
-function runtime.draw()
-    graphics.clear(COLOR_BACKGROUND)
-
-    -- Draw Map
-    for i = 1, #solid_tiles do
-        local tile = solid_tiles[i]
-        graphics.draw_rect(tile.x, tile.y, TILE_SIZE, TILE_SIZE, COLOR_TILE)
-    end
-
-    -- Draw Player
-    graphics.draw_rect(player.x, player.y, player.width, player.height, COLOR_PLAYER)
-
-    -- UI Instructions
-    graphics.draw_text("A/D or LEFT/RIGHT: move", 20, SCREEN_HEIGHT - 72, COLOR_TEXT)
-    graphics.draw_text("SPACE / W / UP: jump", 20, SCREEN_HEIGHT - 52, COLOR_TEXT)
-    graphics.draw_text("R: reset", 20, SCREEN_HEIGHT - 32, COLOR_TEXT)
+  -- Draw UI
+  graphics.draw_text("A/D or LEFT/RIGHT: move", 20, SCREEN_HEIGHT - 72, COLORS.text)
+  graphics.draw_text("SPACE / W / UP: jump", 20, SCREEN_HEIGHT - 52, COLORS.text)
+  graphics.draw_text("R: reset", 20, SCREEN_HEIGHT - 32, COLORS.text)
 end

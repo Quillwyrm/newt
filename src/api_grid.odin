@@ -41,7 +41,7 @@ Active_Movement_Rules: struct {
 
 Active_Vision_Rules: struct {
     walls_visible:    bool,
-    diagonal_gaps: bool, 
+    diagonal_gaps: bool,
 } = {
     walls_visible    = true,
     diagonal_gaps = true,
@@ -631,7 +631,7 @@ apply_fov_cone_mask :: proc(visible: ^Datagrid, ox, oy: int, view_dir, view_angl
 
     half_angle_radians := view_angle * 0.5 * f32(math.RAD_PER_DEG)
     half_angle_cos := f32(math.cos(f64(half_angle_radians)))
-    
+
     dir_radians := view_dir * f32(math.RAD_PER_DEG)
     dir_x := f32(math.cos(f64(dir_radians)))
     dir_y := f32(math.sin(f64(dir_radians)))
@@ -717,6 +717,29 @@ fill_datagrid :: proc(g: ^Datagrid, value: i32) {
     }
 }
 
+lua_check_datagrid_cell :: proc(L: ^lua.State, arg_idx: c.int, fn_name: cstring) -> i32 {
+    value := i64(lua.L_checkinteger(L, arg_idx))
+
+    if value < i64(min(i32)) || value > i64(max(i32)) {
+        lua.L_error(L, "grid.%s: argument %d is outside datagrid cell range", fn_name, arg_idx)
+        return 0
+    }
+
+    return i32(value)
+}
+
+datagrid_placement_valid :: proc(a, b: ^Datagrid, x, y: int) -> bool {
+    if x < 0 || y < 0 {
+        return false
+    }
+
+    if b.width > a.width || b.height > a.height {
+        return false
+    }
+
+    return x <= a.width - b.width && y <= a.height - b.height
+}
+
 // ============================================================================
 // Datagrid Lua Bindings
 // ============================================================================
@@ -759,7 +782,7 @@ lua_grid_new_datagrid_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
     has_default := lua.type(L, 3) != lua.Type.NONE && lua.type(L, 3) != lua.Type.NIL
     default_value: i32
     if has_default {
-        default_value = i32(lua.L_checkinteger(L, 3))
+        default_value = lua_check_datagrid_cell(L, 3, "new_datagrid_from_pixelmap")
     }
 
     color_values := make(map[u32]i32)
@@ -783,8 +806,13 @@ lua_grid_new_datagrid_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
             return 0
         }
 
-        color_values[u32(color_key)] = i32(lua.tointeger(L, -1))
+        cell_value := i64(lua.L_checkinteger(L, -1))
+        if cell_value < i64(min(i32)) || cell_value > i64(max(i32)) {
+            lua.L_error(L, "grid.new_datagrid_from_pixelmap: color_map values are outside datagrid cell range")
+            return 0
+        }
 
+        color_values[u32(color_key)] = i32(cell_value)
         lua.pop(L, 1)
     }
 
@@ -812,11 +840,7 @@ lua_grid_new_datagrid_from_pixelmap :: proc "c" (L: ^lua.State) -> c.int {
             } else if has_default {
                 g.cells[dst_row + x] = default_value
             } else {
-                lua.L_error(
-                    L,
-                    "grid.new_datagrid_from_pixelmap: pixel color 0x%08x has no mapped value",
-                    logical_color,
-                )
+                lua.L_error(L, "grid.new_datagrid_from_pixelmap: pixel color 0x%08x has no mapped value", logical_color)
                 return 0
             }
         }
@@ -860,7 +884,7 @@ lua_grid_set_cell :: proc "c" (L: ^lua.State) -> c.int {
 
     x := cast(int)lua.L_checkinteger(L, 2)
     y := cast(int)lua.L_checkinteger(L, 3)
-    value := cast(i32)lua.L_checkinteger(L, 4)
+    value := lua_check_datagrid_cell(L, 4, "set_cell")
 
     if !cell_in_bounds(g, x, y) {
         return 0
@@ -869,6 +893,22 @@ lua_grid_set_cell :: proc "c" (L: ^lua.State) -> c.int {
     g.cells[cell_idx(g, x, y)] = value
     return 0
 }
+
+// grid.get_datagrid_size(g) -> width, height | nil, nil
+lua_grid_get_datagrid_size :: proc "c" (L: ^lua.State) -> c.int {
+    g := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+
+    if g == nil || g.cells == nil {
+        lua.pushnil(L)
+        lua.pushnil(L)
+        return 2
+    }
+
+    lua.pushinteger(L, cast(lua.Integer)g.width)
+    lua.pushinteger(L, cast(lua.Integer)g.height)
+    return 2
+}
+
 
 // grid.fill_datagrid(g, value)
 lua_grid_fill_datagrid :: proc "c" (L: ^lua.State) -> c.int {
@@ -879,7 +919,7 @@ lua_grid_fill_datagrid :: proc "c" (L: ^lua.State) -> c.int {
         return 0
     }
 
-    value := cast(i32)lua.L_checkinteger(L, 2)
+    value := lua_check_datagrid_cell(L, 2, "fill_datagrid")
     fill_datagrid(g, value)
     return 0
 }
@@ -1093,7 +1133,7 @@ lua_grid_find_path :: proc "c" (L: ^lua.State) -> c.int {
         return 1
     }
 
-    
+
     rules := Active_Movement_Rules
 
     neighbor_dx := [8]int{0, 1, 0, -1, 1, 1, -1, -1}
@@ -1925,7 +1965,7 @@ lua_grid_find_nearest_cell :: proc "c" (L: ^lua.State) -> c.int {
 
     x := cast(int)lua.L_checkinteger(L, 2)
     y := cast(int)lua.L_checkinteger(L, 3)
-    value := cast(i32)lua.L_checkinteger(L, 4)
+    value := lua_check_datagrid_cell(L, 4, "find_nearest_cell")
 
     if !cell_in_bounds(g, x, y) {
         lua.L_error(L, "grid.find_nearest_cell: start (%d, %d) is out of bounds", x, y)
@@ -2021,7 +2061,7 @@ lua_grid_count_cells :: proc "c" (L: ^lua.State) -> c.int {
         return 1
     }
 
-    value := cast(i32)lua.L_checkinteger(L, 2)
+    value := lua_check_datagrid_cell(L, 2, "count_cells")
 
     count := 0
     for i in 0..<len(g.cells) {
@@ -2422,7 +2462,7 @@ lua_grid_get_sight_line :: proc "c" (L: ^lua.State) -> c.int {
 
 // -- Datagrid Math Ops --
 
-// grid.add(a, b) -> grid
+// grid.add(a, b, x?, y?) -> grid
 // grid.add(a, value) -> grid
 lua_grid_add :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
@@ -2433,14 +2473,25 @@ lua_grid_add :: proc "c" (L: ^lua.State) -> c.int {
         return 0
     }
 
-    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
-    out^ = new_datagrid(a.width, a.height)
-
-    lua.L_getmetatable(L, "Datagrid")
-    lua.setmetatable(L, -2)
+    nargs := lua.gettop(L)
+    if nargs != 2 && nargs != 4 {
+        lua.L_error(L, "grid.add: expected 2 or 4 arguments")
+        return 0
+    }
 
     if lua.type(L, 2) == .NUMBER {
-        value := cast(i32)lua.L_checkinteger(L, 2)
+        if nargs != 2 {
+            lua.L_error(L, "grid.add: scalar form expects 2 arguments")
+            return 0
+        }
+
+        value := lua_check_datagrid_cell(L, 2, "add")
+
+        out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+        out^ = new_datagrid(a.width, a.height)
+
+        lua.L_getmetatable(L, "Datagrid")
+        lua.setmetatable(L, -2)
 
         for i in 0..<len(a.cells) {
             out.cells[i] = a.cells[i] + value
@@ -2455,19 +2506,53 @@ lua_grid_add :: proc "c" (L: ^lua.State) -> c.int {
         return 0
     }
 
-    if b.width != a.width || b.height != a.height {
-        lua.L_error(L, "grid.add: datagrid dimensions must match")
+    if nargs == 2 {
+        if b.width != a.width || b.height != a.height {
+            lua.L_error(L, "grid.add: datagrid dimensions must match")
+            return 0
+        }
+
+        out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+        out^ = new_datagrid(a.width, a.height)
+
+        lua.L_getmetatable(L, "Datagrid")
+        lua.setmetatable(L, -2)
+
+        for i in 0..<len(a.cells) {
+            out.cells[i] = a.cells[i] + b.cells[i]
+        }
+
+        return 1
+    }
+
+    x := int(lua.L_checkinteger(L, 3))
+    y := int(lua.L_checkinteger(L, 4))
+
+    if !datagrid_placement_valid(a, b, x, y) {
+        lua.L_error(L, "grid.add: placed datagrid is out of bounds")
         return 0
     }
 
-    for i in 0..<len(a.cells) {
-        out.cells[i] = a.cells[i] + b.cells[i]
+    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    out^ = new_datagrid(a.width, a.height)
+    copy(out.cells, a.cells)
+
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    for by := 0; by < b.height; by += 1 {
+        dst_row := (y + by) * a.width + x
+        src_row := by * b.width
+
+        for bx := 0; bx < b.width; bx += 1 {
+            out.cells[dst_row + bx] = out.cells[dst_row + bx] + b.cells[src_row + bx]
+        }
     }
 
     return 1
 }
 
-// grid.min(a, b) -> grid
+// grid.min(a, b, x?, y?) -> grid
 // grid.min(a, value) -> grid
 lua_grid_min :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
@@ -2478,14 +2563,25 @@ lua_grid_min :: proc "c" (L: ^lua.State) -> c.int {
         return 0
     }
 
-    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
-    out^ = new_datagrid(a.width, a.height)
-
-    lua.L_getmetatable(L, "Datagrid")
-    lua.setmetatable(L, -2)
+    nargs := lua.gettop(L)
+    if nargs != 2 && nargs != 4 {
+        lua.L_error(L, "grid.min: expected 2 or 4 arguments")
+        return 0
+    }
 
     if lua.type(L, 2) == .NUMBER {
-        value := cast(i32)lua.L_checkinteger(L, 2)
+        if nargs != 2 {
+            lua.L_error(L, "grid.min: scalar form expects 2 arguments")
+            return 0
+        }
+
+        value := lua_check_datagrid_cell(L, 2, "min")
+
+        out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+        out^ = new_datagrid(a.width, a.height)
+
+        lua.L_getmetatable(L, "Datagrid")
+        lua.setmetatable(L, -2)
 
         for i in 0..<len(a.cells) {
             cell := a.cells[i]
@@ -2505,26 +2601,65 @@ lua_grid_min :: proc "c" (L: ^lua.State) -> c.int {
         return 0
     }
 
-    if b.width != a.width || b.height != a.height {
-        lua.L_error(L, "grid.min: datagrid dimensions must match")
+    if nargs == 2 {
+        if b.width != a.width || b.height != a.height {
+            lua.L_error(L, "grid.min: datagrid dimensions must match")
+            return 0
+        }
+
+        out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+        out^ = new_datagrid(a.width, a.height)
+
+        lua.L_getmetatable(L, "Datagrid")
+        lua.setmetatable(L, -2)
+
+        for i in 0..<len(a.cells) {
+            av := a.cells[i]
+            bv := b.cells[i]
+
+            if av < bv {
+                out.cells[i] = av
+            } else {
+                out.cells[i] = bv
+            }
+        }
+
+        return 1
+    }
+
+    x := int(lua.L_checkinteger(L, 3))
+    y := int(lua.L_checkinteger(L, 4))
+
+    if !datagrid_placement_valid(a, b, x, y) {
+        lua.L_error(L, "grid.min: placed datagrid is out of bounds")
         return 0
     }
 
-    for i in 0..<len(a.cells) {
-        av := a.cells[i]
-        bv := b.cells[i]
+    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    out^ = new_datagrid(a.width, a.height)
+    copy(out.cells, a.cells)
 
-        if av < bv {
-            out.cells[i] = av
-        } else {
-            out.cells[i] = bv
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    for by := 0; by < b.height; by += 1 {
+        dst_row := (y + by) * a.width + x
+        src_row := by * b.width
+
+        for bx := 0; bx < b.width; bx += 1 {
+            dst := dst_row + bx
+            other := b.cells[src_row + bx]
+
+            if other < out.cells[dst] {
+                out.cells[dst] = other
+            }
         }
     }
 
     return 1
 }
 
-// grid.max(a, b) -> grid
+// grid.max(a, b, x?, y?) -> grid
 // grid.max(a, value) -> grid
 lua_grid_max :: proc "c" (L: ^lua.State) -> c.int {
     context = runtime.default_context()
@@ -2535,14 +2670,25 @@ lua_grid_max :: proc "c" (L: ^lua.State) -> c.int {
         return 0
     }
 
-    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
-    out^ = new_datagrid(a.width, a.height)
-
-    lua.L_getmetatable(L, "Datagrid")
-    lua.setmetatable(L, -2)
+    nargs := lua.gettop(L)
+    if nargs != 2 && nargs != 4 {
+        lua.L_error(L, "grid.max: expected 2 or 4 arguments")
+        return 0
+    }
 
     if lua.type(L, 2) == .NUMBER {
-        value := cast(i32)lua.L_checkinteger(L, 2)
+        if nargs != 2 {
+            lua.L_error(L, "grid.max: scalar form expects 2 arguments")
+            return 0
+        }
+
+        value := lua_check_datagrid_cell(L, 2, "max")
+
+        out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+        out^ = new_datagrid(a.width, a.height)
+
+        lua.L_getmetatable(L, "Datagrid")
+        lua.setmetatable(L, -2)
 
         for i in 0..<len(a.cells) {
             cell := a.cells[i]
@@ -2562,19 +2708,58 @@ lua_grid_max :: proc "c" (L: ^lua.State) -> c.int {
         return 0
     }
 
-    if b.width != a.width || b.height != a.height {
-        lua.L_error(L, "grid.max: datagrid dimensions must match")
+    if nargs == 2 {
+        if b.width != a.width || b.height != a.height {
+            lua.L_error(L, "grid.max: datagrid dimensions must match")
+            return 0
+        }
+
+        out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+        out^ = new_datagrid(a.width, a.height)
+
+        lua.L_getmetatable(L, "Datagrid")
+        lua.setmetatable(L, -2)
+
+        for i in 0..<len(a.cells) {
+            av := a.cells[i]
+            bv := b.cells[i]
+
+            if av > bv {
+                out.cells[i] = av
+            } else {
+                out.cells[i] = bv
+            }
+        }
+
+        return 1
+    }
+
+    x := int(lua.L_checkinteger(L, 3))
+    y := int(lua.L_checkinteger(L, 4))
+
+    if !datagrid_placement_valid(a, b, x, y) {
+        lua.L_error(L, "grid.max: placed datagrid is out of bounds")
         return 0
     }
 
-    for i in 0..<len(a.cells) {
-        av := a.cells[i]
-        bv := b.cells[i]
+    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    out^ = new_datagrid(a.width, a.height)
+    copy(out.cells, a.cells)
 
-        if av > bv {
-            out.cells[i] = av
-        } else {
-            out.cells[i] = bv
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    for by := 0; by < b.height; by += 1 {
+        dst_row := (y + by) * a.width + x
+        src_row := by * b.width
+
+        for bx := 0; bx < b.width; bx += 1 {
+            dst := dst_row + bx
+            other := b.cells[src_row + bx]
+
+            if other > out.cells[dst] {
+                out.cells[dst] = other
+            }
         }
     }
 
@@ -2591,8 +2776,8 @@ lua_grid_clamp :: proc "c" (L: ^lua.State) -> c.int {
         return 0
     }
 
-    min_value := cast(i32)lua.L_checkinteger(L, 2)
-    max_value := cast(i32)lua.L_checkinteger(L, 3)
+    min_value := lua_check_datagrid_cell(L, 2, "clamp")
+    max_value := lua_check_datagrid_cell(L, 3, "clamp")
 
     if min_value > max_value {
         lua.L_error(L, "grid.clamp: min_value must be less than or equal to max_value")
@@ -2614,6 +2799,229 @@ lua_grid_clamp :: proc "c" (L: ^lua.State) -> c.int {
             out.cells[i] = max_value
         } else {
             out.cells[i] = value
+        }
+    }
+
+    return 1
+}
+
+// grid.sub(a, b, x?, y?) -> grid
+// grid.sub(a, value) -> grid
+lua_grid_sub :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    a := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if a == nil || a.cells == nil {
+        lua.L_error(L, "grid.sub: input datagrid has been freed")
+        return 0
+    }
+
+    nargs := lua.gettop(L)
+    if nargs != 2 && nargs != 4 {
+        lua.L_error(L, "grid.sub: expected 2 or 4 arguments")
+        return 0
+    }
+
+    if lua.type(L, 2) == .NUMBER {
+        if nargs != 2 {
+            lua.L_error(L, "grid.sub: scalar form expects 2 arguments")
+            return 0
+        }
+
+        value := lua_check_datagrid_cell(L, 2, "sub")
+
+        out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+        out^ = new_datagrid(a.width, a.height)
+
+        lua.L_getmetatable(L, "Datagrid")
+        lua.setmetatable(L, -2)
+
+        for i in 0..<len(a.cells) {
+            out.cells[i] = a.cells[i] - value
+        }
+
+        return 1
+    }
+
+    b := cast(^Datagrid)lua.L_checkudata(L, 2, "Datagrid")
+    if b == nil || b.cells == nil {
+        lua.L_error(L, "grid.sub: other datagrid has been freed")
+        return 0
+    }
+
+    if nargs == 2 {
+        if b.width != a.width || b.height != a.height {
+            lua.L_error(L, "grid.sub: datagrid dimensions must match")
+            return 0
+        }
+
+        out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+        out^ = new_datagrid(a.width, a.height)
+
+        lua.L_getmetatable(L, "Datagrid")
+        lua.setmetatable(L, -2)
+
+        for i in 0..<len(a.cells) {
+            out.cells[i] = a.cells[i] - b.cells[i]
+        }
+
+        return 1
+    }
+
+    x := int(lua.L_checkinteger(L, 3))
+    y := int(lua.L_checkinteger(L, 4))
+
+    if !datagrid_placement_valid(a, b, x, y) {
+        lua.L_error(L, "grid.sub: placed datagrid is out of bounds")
+        return 0
+    }
+
+    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    out^ = new_datagrid(a.width, a.height)
+    copy(out.cells, a.cells)
+
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    for by := 0; by < b.height; by += 1 {
+        dst_row := (y + by) * a.width + x
+        src_row := by * b.width
+
+        for bx := 0; bx < b.width; bx += 1 {
+            out.cells[dst_row + bx] = out.cells[dst_row + bx] - b.cells[src_row + bx]
+        }
+    }
+
+    return 1
+}
+
+// grid.mul(a, b, x?, y?) -> grid
+// grid.mul(a, value) -> grid
+lua_grid_mul :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    a := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if a == nil || a.cells == nil {
+        lua.L_error(L, "grid.mul: input datagrid has been freed")
+        return 0
+    }
+
+    nargs := lua.gettop(L)
+    if nargs != 2 && nargs != 4 {
+        lua.L_error(L, "grid.mul: expected 2 or 4 arguments")
+        return 0
+    }
+
+    if lua.type(L, 2) == .NUMBER {
+        if nargs != 2 {
+            lua.L_error(L, "grid.mul: scalar form expects 2 arguments")
+            return 0
+        }
+
+        value := lua_check_datagrid_cell(L, 2, "mul")
+
+        out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+        out^ = new_datagrid(a.width, a.height)
+
+        lua.L_getmetatable(L, "Datagrid")
+        lua.setmetatable(L, -2)
+
+        for i in 0..<len(a.cells) {
+            out.cells[i] = a.cells[i] * value
+        }
+
+        return 1
+    }
+
+    b := cast(^Datagrid)lua.L_checkudata(L, 2, "Datagrid")
+    if b == nil || b.cells == nil {
+        lua.L_error(L, "grid.mul: other datagrid has been freed")
+        return 0
+    }
+
+    if nargs == 2 {
+        if b.width != a.width || b.height != a.height {
+            lua.L_error(L, "grid.mul: datagrid dimensions must match")
+            return 0
+        }
+
+        out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+        out^ = new_datagrid(a.width, a.height)
+
+        lua.L_getmetatable(L, "Datagrid")
+        lua.setmetatable(L, -2)
+
+        for i in 0..<len(a.cells) {
+            out.cells[i] = a.cells[i] * b.cells[i]
+        }
+
+        return 1
+    }
+
+    x := int(lua.L_checkinteger(L, 3))
+    y := int(lua.L_checkinteger(L, 4))
+
+    if !datagrid_placement_valid(a, b, x, y) {
+        lua.L_error(L, "grid.mul: placed datagrid is out of bounds")
+        return 0
+    }
+
+    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    out^ = new_datagrid(a.width, a.height)
+    copy(out.cells, a.cells)
+
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    for by := 0; by < b.height; by += 1 {
+        dst_row := (y + by) * a.width + x
+        src_row := by * b.width
+
+        for bx := 0; bx < b.width; bx += 1 {
+            out.cells[dst_row + bx] = out.cells[dst_row + bx] * b.cells[src_row + bx]
+        }
+    }
+
+    return 1
+}
+
+// grid.threshold(g, threshold) -> grid
+// grid.threshold(g, threshold, low_value, high_value) -> grid
+lua_grid_threshold :: proc "c" (L: ^lua.State) -> c.int {
+    context = runtime.default_context()
+
+    g := cast(^Datagrid)lua.L_checkudata(L, 1, "Datagrid")
+    if g == nil || g.cells == nil {
+        lua.L_error(L, "grid.threshold: input datagrid has been freed")
+        return 0
+    }
+
+    nargs := lua.gettop(L)
+    if nargs != 2 && nargs != 4 {
+        lua.L_error(L, "grid.threshold: expected 2 or 4 arguments")
+        return 0
+    }
+
+    threshold := lua_check_datagrid_cell(L, 2, "threshold")
+    low_value: i32 = 0
+    high_value: i32 = 1
+
+    if nargs == 4 {
+        low_value = lua_check_datagrid_cell(L, 3, "threshold")
+        high_value = lua_check_datagrid_cell(L, 4, "threshold")
+    }
+
+    out := cast(^Datagrid)lua.newuserdata(L, size_of(Datagrid))
+    out^ = new_datagrid(g.width, g.height)
+
+    lua.L_getmetatable(L, "Datagrid")
+    lua.setmetatable(L, -2)
+
+    for i in 0..<len(g.cells) {
+        if g.cells[i] <= threshold {
+            out.cells[i] = low_value
+        } else {
+            out.cells[i] = high_value
         }
     }
 
@@ -2700,6 +3108,7 @@ register_grid_api :: proc() {
     lua_bind_function(lua_grid_new_datagrid_from_pixelmap, "new_datagrid_from_pixelmap")
     lua_bind_function(lua_grid_get_cell,      "get_cell")
     lua_bind_function(lua_grid_set_cell,      "set_cell")
+    lua_bind_function(lua_grid_get_datagrid_size, "get_datagrid_size")
     lua_bind_function(lua_grid_fill_datagrid, "fill_datagrid")
     lua_bind_function(lua_grid_clear_datagrid,"clear_datagrid")
     lua_bind_function(lua_grid_clone_datagrid,"clone_datagrid")
@@ -2731,11 +3140,14 @@ register_grid_api :: proc() {
     lua_bind_function(lua_grid_get_sight_line, "get_sight_line")
 
     // -- Datagrid Math Ops --
-    lua_bind_function(lua_grid_add,   "add")
-    lua_bind_function(lua_grid_min,   "min")
-    lua_bind_function(lua_grid_max,   "max")
-    lua_bind_function(lua_grid_clamp, "clamp")
-    lua_bind_function(lua_grid_crop,  "crop")
+    lua_bind_function(lua_grid_add,       "add")
+    lua_bind_function(lua_grid_sub,       "sub")
+    lua_bind_function(lua_grid_mul,       "mul")
+    lua_bind_function(lua_grid_min,       "min")
+    lua_bind_function(lua_grid_max,       "max")
+    lua_bind_function(lua_grid_clamp,     "clamp")
+    lua_bind_function(lua_grid_threshold, "threshold")
+    lua_bind_function(lua_grid_crop,      "crop")
 
     lua.setglobal(Lua, "grid")
 }

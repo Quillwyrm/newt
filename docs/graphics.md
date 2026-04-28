@@ -151,6 +151,8 @@ graphics.set_default_filter(mode)
 
 Creates an `Image` resource that can be used as a render target. Canvases use the current default filter.
 
+Canvases keep their contents until they are cleared or drawn over. Call [`graphics.clear`](#clear) after setting a canvas when you want to redraw it from scratch.
+
 ```lua
 graphics.new_canvas(width, height) -> canvas
 ```
@@ -167,12 +169,11 @@ graphics.new_canvas(width, height) -> canvas
 
 ### set_canvas
 
-Sets the active render target. With no arguments or `nil`, drawing returns to the screen.
+Sets the active render target. Pass `nil` to return drawing to the screen.
 
 ```lua
-graphics.set_canvas()
-graphics.set_canvas(nil)
 graphics.set_canvas(canvas)
+graphics.set_canvas(nil)
 ```
 
 #### Error Cases
@@ -524,7 +525,7 @@ graphics.get_glyph_metrics(codepoint, font?) -> minx, maxx, miny, maxy, advance 
 
 ## Debug Drawing
 
-These functions draw in absolute screen space and ignore the current transform.
+These functions draw in absolute active-render-target coordinates and ignore the current transform.
 
 ### debug_text
 

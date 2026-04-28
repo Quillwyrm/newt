@@ -65,9 +65,11 @@ A visibility grid is returned by `compute_fov` and `compute_fov_cone` and marks 
 * [`new_datagrid_from_pixelmap`](#new_datagrid_from_pixelmap)
 * [`get_cell`](#get_cell)
 * [`set_cell`](#set_cell)
+* [`get_datagrid_size`](#get_datagrid_size)
 * [`fill_datagrid`](#fill_datagrid)
 * [`clear_datagrid`](#clear_datagrid)
 * [`clone_datagrid`](#clone_datagrid)
+
 
 **Movement Rules**
 * [`set_movement_rules`](#set_movement_rules)
@@ -97,10 +99,14 @@ A visibility grid is returned by `compute_fov` and `compute_fov_cone` and marks 
 
 **Datagrid Math**
 * [`add`](#add)
+* [`sub`](#sub)
+* [`mul`](#mul)
 * [`min`](#min)
 * [`max`](#max)
 * [`clamp`](#clamp)
+* [`threshold`](#threshold)
 * [`crop`](#crop)
+
 
 ## Datagrids
 
@@ -156,6 +162,9 @@ terrain = grid.new_datagrid_from_pixelmap(pmap, {
 - `color_map` keys must be color integers.
 - `color_map` values must be integers.
 - A pixel color is not present in `color_map` and `default_value` is omitted.
+- `color_map` values must fit in a datagrid cell.
+- `default_value` must fit in a datagrid cell.
+
 
 ---
 
@@ -183,6 +192,10 @@ Writes one value into a datagrid cell. Dead datagrid writes and out-of-bounds wr
 grid.set_cell(g, x, y, value)
 ```
 
+#### Error Cases
+
+- `value` must fit in a datagrid cell.
+
 ---
 
 ### fill_datagrid
@@ -192,6 +205,10 @@ Overwrites every cell in a datagrid with the same value. Dead datagrid writes do
 ```lua
 grid.fill_datagrid(g, value)
 ```
+
+#### Error Cases
+
+- `value` must fit in a datagrid cell.
 
 ---
 
@@ -204,6 +221,22 @@ grid.clear_datagrid(g)
 ```
 
 ---
+
+### get_datagrid_size
+
+Returns the dimensions of a datagrid. Dead datagrids return `nil, nil`.
+
+```lua
+grid.get_datagrid_size(g) -> width, height | nil, nil
+```
+
+#### Returns
+
+- `width, height` if the datagrid is live.
+- `nil, nil` if the datagrid has been freed.
+
+---
+
 
 ### clone_datagrid
 
@@ -466,6 +499,7 @@ grid.find_nearest_cell(grid, x, y, value, radius?) -> nx, ny | nil
 
 - Start is out of bounds.
 - `radius < 0`.
+- `value` must fit in a datagrid cell.
 
 ---
 
@@ -481,6 +515,9 @@ grid.count_cells(grid, value) -> cell_count | nil
 
 - The number of matching cells.
 - `nil` if the datagrid has been freed.
+
+#### Error Cases
+- `value` must fit in a datagrid cell.
 
 ## Vision Rules
 
@@ -623,10 +660,13 @@ grid.get_sight_line(occlusion, ax, ay, bx, by) -> line | nil
 
 ### add
 
-Returns a new datagrid with per-cell addition.
+Returns a new datagrid with addition applied.
+
+With two datagrids of the same size, cells are added pairwise. With a scalar value, the value is added to every cell. With `x, y`, the second datagrid is placed over the first and only the covered cells are added.
 
 ```lua
 grid.add(a, b) -> grid
+grid.add(a, b, x, y) -> grid
 grid.add(a, value) -> grid
 ```
 
@@ -635,15 +675,64 @@ grid.add(a, value) -> grid
 - Input datagrid is dead.
 - Other datagrid is dead.
 - Datagrid dimensions do not match.
+- Placed datagrid is out of bounds.
+- `value` must fit in a datagrid cell.
+
+---
+
+### sub
+
+Returns a new datagrid with subtraction applied.
+
+With two datagrids of the same size, cells are subtracted pairwise. With a scalar value, the value is subtracted from every cell. With `x, y`, the second datagrid is placed over the first and only the covered cells are subtracted.
+
+```lua
+grid.sub(a, b) -> grid
+grid.sub(a, b, x, y) -> grid
+grid.sub(a, value) -> grid
+```
+
+#### Error Cases
+
+- Input datagrid is dead.
+- Other datagrid is dead.
+- Datagrid dimensions do not match.
+- Placed datagrid is out of bounds.
+- `value` must fit in a datagrid cell.
+
+---
+
+### mul
+
+Returns a new datagrid with multiplication applied.
+
+With two datagrids of the same size, cells are multiplied pairwise. With a scalar value, every cell is multiplied by the value. With `x, y`, the second datagrid is placed over the first and only the covered cells are multiplied.
+
+```lua
+grid.mul(a, b) -> grid
+grid.mul(a, b, x, y) -> grid
+grid.mul(a, value) -> grid
+```
+
+#### Error Cases
+
+- Input datagrid is dead.
+- Other datagrid is dead.
+- Datagrid dimensions do not match.
+- Placed datagrid is out of bounds.
+- `value` must fit in a datagrid cell.
 
 ---
 
 ### min
 
-Returns a new datagrid with the per-cell minimum.
+Returns a new datagrid with the minimum value applied.
+
+With two datagrids of the same size, the output keeps the lower value from each pair of cells. With a scalar value, every cell is capped to that value. With `x, y`, the second datagrid is placed over the first and only the covered cells are compared.
 
 ```lua
 grid.min(a, b) -> grid
+grid.min(a, b, x, y) -> grid
 grid.min(a, value) -> grid
 ```
 
@@ -652,15 +741,20 @@ grid.min(a, value) -> grid
 - Input datagrid is dead.
 - Other datagrid is dead.
 - Datagrid dimensions do not match.
+- Placed datagrid is out of bounds.
+- `value` must fit in a datagrid cell.
 
 ---
 
 ### max
 
-Returns a new datagrid with the per-cell maximum.
+Returns a new datagrid with the maximum value applied.
+
+With two datagrids of the same size, the output keeps the higher value from each pair of cells. With a scalar value, every cell is raised to at least that value. With `x, y`, the second datagrid is placed over the first and only the covered cells are compared.
 
 ```lua
 grid.max(a, b) -> grid
+grid.max(a, b, x, y) -> grid
 grid.max(a, value) -> grid
 ```
 
@@ -669,6 +763,8 @@ grid.max(a, value) -> grid
 - Input datagrid is dead.
 - Other datagrid is dead.
 - Datagrid dimensions do not match.
+- Placed datagrid is out of bounds.
+- `value` must fit in a datagrid cell.
 
 ---
 
@@ -683,7 +779,29 @@ grid.clamp(g, min_value, max_value) -> grid
 #### Error Cases
 
 - Input datagrid is dead.
+- `min_value` must fit in a datagrid cell.
+- `max_value` must fit in a datagrid cell.
 - `min_value > max_value`.
+
+---
+
+### threshold
+
+Returns a new datagrid by comparing each cell against a threshold.
+
+Cells less than or equal to `threshold` become `low_value`. Cells greater than `threshold` become `high_value`. When `low_value` and `high_value` are omitted, they default to `0` and `1`.
+
+```lua
+grid.threshold(g, threshold) -> grid
+grid.threshold(g, threshold, low_value, high_value) -> grid
+```
+
+#### Error Cases
+
+- Input datagrid is dead.
+- `threshold` must fit in a datagrid cell.
+- `low_value` must fit in a datagrid cell.
+- `high_value` must fit in a datagrid cell.
 
 ---
 

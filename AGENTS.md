@@ -16,3 +16,13 @@ Abstraction discipline:
 - Helpers are good when they centralize repeated validation, error handling, resource cleanup, or tricky boundary logic.
 - Do not create "future extension" scaffolding. Add structure when the current code earns it.
 - If suggesting an abstraction, state what bug, duplication, or confusion it prevents.
+
+API grounding:
+- Before suggesting API usage, examples, or naming changes, check the actual Newt docs/source when the surface already exists.
+- Do not invent inferred APIs for implemented modules. If the surface is unknown, inspect it or say it is unknown.
+- Check symmetry with adjacent modules before adding sugar to one module.
+
+Foundational changes:
+- Do not bias toward preserving the current API when a cleaner foundational shape is available.
+- Prefer improving the engine surface over teaching users local workaround helpers when the pattern is broadly useful.
+- Keep examples aligned with real engine idioms, but let examples reveal missing API affordances when they repeatedly need the same glue.

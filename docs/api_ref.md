@@ -24,6 +24,7 @@ For setup, project layout, and your first `lua/main.lua`, see [Getting Started](
 ### Data & Tools
 
 - [grid](grid.md) - Dense integer Datagrids for pathfinding, distance fields, visibility, regions, and grid math.
+- [random](random.md) - Seeded random generators, list randomization, and noise fields.
 
 ### Built-in Functions
 
