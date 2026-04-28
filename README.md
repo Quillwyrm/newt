@@ -6,18 +6,22 @@ Newt is a native script-driven runtime built in Odin. It exposes a clear, compos
 
 ## What You Get
 
-- **2D Rendering** - images, shapes, text, fonts, render targets, transforms, clipping, blend modes, and debug drawing
-- **Audio** - static sounds, streamed audio, playback, voice control, 2D spatial audio, panning, mixing, filters, and delay
-- **Input** - keyboard, mouse, text input, gamepads, sticks, triggers, rumble, and button-edge queries
-- **Windowing** - window sizing, positioning, flags, cursor control, clipboard access, and close handling
-- **Filesystem Access** - resource paths, working paths, file I/O, directory queries, and basic path operations
-- **Raster Tools** - CPU image data, raster drawing, pixel read/write and query operations, Pixelmap I/O, and GPU upload
-- **Grid Tools** - datagrids, pathfinding, distance fields, field of view, line of sight, region queries, and 2D array logic
-- **RNG Tools** - seeded generators, scalar random values, list randomization, and noise fields
+- **`runtime`** - game loop callbacks: `init`, `update`, and `draw`
+- **`graphics`** - images, shapes, text, fonts, render targets, transforms, clipping, and blend modes
+- **`audio`** - sounds, streams, voices, 2D spatial audio, mixing, panning, filters, and delay
+- **`input`** - keyboard, mouse, cursor, scroll wheel, and text input
+- **`gamepad`** - buttons, sticks, triggers, trigger edges, and rumble
+- **`window`** - size, position, flags, cursor control, clipboard, and close handling
+- **`filesystem`** - resource paths, working paths, file I/O, directory queries, and path operations
+- **`raster`** - CPU pixelmaps, raster drawing, pixel read/write, image queries, Pixelmap I/O, and GPU upload
+- **`grid`** - datagrids, pathfinding, distance fields, FOV, line of sight, region queries, and grid-field math
+- **`random`** - seeded generators, random values, list randomization, and noise fields
+
+See the [API Reference](docs/api_ref.md) for the full module documentation.
 
 ## First Script
 
-Newt looks for `lua/main.lua` in the project `Resource Directory`.
+Newt runs `lua/main.lua` from the project Resource Directory.
 
 ```lua
 local x, y = 400, 300
@@ -45,20 +49,34 @@ end
 
 ![Platformer example](examples/platformer.gif)
 
-A tiny platformer with movement, gravity, jumping, an ASCII tile map, and collision. ([see example script](examples/platformer.main.lua))
+A tiny platformer: keyboard input, movement, gravity, tile collision, and shape drawing. ([example script](examples/platformer.main.lua))
 
 ![Roguelike visibility example](examples/roguelike_vis.gif)
 
-Expressive tools for roguelikes and grid games: noise caves, regions, FOV, and explored memory. ([see example script](examples/roguelike_vis.main.lua))
+A compact roguelike visibility demo using Newt's `grid` module for cave generation, connected-region queries, and field of view. ([example script](examples/roguelike_vis.main.lua))
 
 
 ## Getting Started
 
-See [Getting Started](docs/getting_started.md) for project layout and path semantics.
+See [Getting Started](docs/getting_started.md) for project setup and per-platform folder layout.
 
 - [GitHub Releases](../../releases)
 - [API Reference](docs/api_ref.md)
 - [Examples](examples/)
+
+## Releases
+
+Prebuilt downloads for Windows and macOS are available on [GitHub Releases](../../releases).
+
+### macOS
+
+MacOS users should run this before first launch:
+
+```sh
+xattr -dr com.apple.quarantine /path/to/Newt.app
+```
+
+Otherwise, macOS may show a misleading message saying that the application is damaged.
 
 ## Platforms
 

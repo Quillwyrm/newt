@@ -1,0 +1,223 @@
+name: newt_macos_arm64_dev_build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  ODIN_VERSION: dev-2026-04
+
+  APP_NAME: newt
+  APP_DISPLAY_NAME: Newt
+  BUNDLE_ID: com.quillwyrm.newt
+  APP_VERSION: 0.0.0
+  MIN_MACOS_VERSION: 15.0
+
+jobs:
+  dev-build:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore Odin cache
+        id: odin-cache
+        uses: actions/cache@v4
+        with:
+          path: odin
+          key: macos-arm64-odin-${{ env.ODIN_VERSION }}
+
+      - name: Install deps
+        run: brew install llvm luajit sdl3 sdl3_ttf
+
+      - name: Build Odin
+        if: steps.odin-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --branch "$ODIN_VERSION" --depth=1 https://github.com/odin-lang/Odin odin
+          cd odin
+          LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config" make release-native
+
+      - name: Set Odin env
+        run: |
+          echo "$GITHUB_WORKSPACE/odin" >> "$GITHUB_PATH"
+          echo "ODIN_ROOT=$GITHUB_WORKSPACE/odin" >> "$GITHUB_ENV"
+
+      - name: Check Odin
+        run: odin version
+
+      - name: Export brew library paths
+        run: |
+          echo "LIBRARY_PATH=/opt/homebrew/lib:$(brew --prefix luajit)/lib:$(brew --prefix sdl3)/lib:$(brew --prefix sdl3_ttf)/lib:$LIBRARY_PATH" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib:$(brew --prefix luajit)/lib:$(brew --prefix sdl3)/lib:$(brew --prefix sdl3_ttf)/lib:$DYLD_FALLBACK_LIBRARY_PATH" >> "$GITHUB_ENV"
+
+      - name: Build miniaudio
+        run: make -C "$ODIN_ROOT/vendor/miniaudio/src"
+
+      - name: Create smoke-test main.lua
+        run: |
+          mkdir -p build/lua
+          cat > build/lua/main.lua <<'EOF'
+          runtime.init = function()
+              local resdir = filesystem.get_resource_directory()
+              local cwd, cwd_err = filesystem.get_working_directory()
+              local charw, charh = graphics.measure_text("@")
+              local winw, winh = window.get_size()
+
+              local out = ""
+              out = out .. "resdir=" .. tostring(resdir) .. "\n"
+              out = out .. "cwd=" .. tostring(cwd or cwd_err) .. "\n"
+              out = out .. "char=" .. tostring(charw) .. "x" .. tostring(charh) .. "\n"
+              out = out .. "window=" .. tostring(winw) .. "x" .. tostring(winh) .. "\n"
+
+              filesystem.write_file(resdir .. "/mac_smoke.txt", out)
+              window.close()
+          end
+          EOF
+
+      - name: Build Newt
+        run: odin build src -out:build/$APP_NAME -minimum-os-version:$MIN_MACOS_VERSION
+
+      - name: Package app bundle
+        run: |
+          set -e
+
+          ICON_SRC="platform/macOS/newt.icns"
+          test -f "$ICON_SRC"
+
+          APP_ROOT="deploy/macos/$APP_NAME.app"
+          APP_CONTENTS="$APP_ROOT/Contents"
+          APP_MACOS="$APP_CONTENTS/MacOS"
+          APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
+          APP_RESOURCES="$APP_CONTENTS/Resources"
+
+          rm -rf "$APP_ROOT"
+          mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES"
+
+          cp "build/$APP_NAME" "$APP_MACOS/$APP_NAME"
+          chmod +x "$APP_MACOS/$APP_NAME"
+
+          cp -R build/lua "$APP_MACOS/"
+          cp "$ICON_SRC" "$APP_RESOURCES/newt.icns"
+
+          cat > "$APP_CONTENTS/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>$APP_NAME</string>
+              <key>CFBundleIdentifier</key>
+              <string>$BUNDLE_ID</string>
+              <key>CFBundleName</key>
+              <string>$APP_DISPLAY_NAME</string>
+              <key>CFBundleDisplayName</key>
+              <string>$APP_DISPLAY_NAME</string>
+              <key>CFBundleIconFile</key>
+              <string>newt</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleVersion</key>
+              <string>$APP_VERSION</string>
+              <key>CFBundleShortVersionString</key>
+              <string>$APP_VERSION</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>$MIN_MACOS_VERSION</string>
+          </dict>
+          </plist>
+          EOF
+
+          bundle_and_rewrite() {
+            local target="$1"
+            local dep
+            local dep_name
+            local dep_dst
+
+            chmod u+w "$target" || true
+
+            while read -r dep; do
+              case "$dep" in
+                /opt/homebrew/*)
+                  dep_name="$(basename "$dep")"
+                  dep_dst="$APP_FRAMEWORKS/$dep_name"
+
+                  if [ ! -e "$dep_dst" ]; then
+                    cp -L "$dep" "$dep_dst"
+                    chmod u+w "$dep_dst" || true
+                    install_name_tool -id "@executable_path/../Frameworks/$dep_name" "$dep_dst" || true
+                    bundle_and_rewrite "$dep_dst"
+                  fi
+
+                  install_name_tool -change "$dep" "@executable_path/../Frameworks/$dep_name" "$target" || true
+                  ;;
+              esac
+            done < <(otool -L "$target" | tail -n +2 | awk '{print $1}')
+          }
+
+          sign_frameworks() {
+            while IFS= read -r -d '' f; do
+              if file "$f" | grep -q 'Mach-O'; then
+                codesign --force --sign - "$f"
+              fi
+            done < <(find "$APP_FRAMEWORKS" -type f -print0)
+          }
+
+          bundle_and_rewrite "$APP_MACOS/$APP_NAME"
+          sign_frameworks
+
+      - name: Show min OS version of main executable
+        run: otool -l "deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME" | grep -A 4 LC_BUILD_VERSION
+
+      - name: Show bundled executable links
+        run: otool -L "deploy/macos/$APP_NAME.app/Contents/MacOS/$APP_NAME"
+
+      - name: Run app smoke test
+        run: |
+          unset DYLD_FALLBACK_LIBRARY_PATH
+          rm -f "deploy/macos/$APP_NAME.app/Contents/MacOS/mac_smoke.txt"
+          open -W -n "$PWD/deploy/macos/$APP_NAME.app"
+
+      - name: Show smoke file
+        run: cat "deploy/macos/$APP_NAME.app/Contents/MacOS/mac_smoke.txt"
+
+      - name: Replace main.lua with hello world
+        run: |
+          cat > "deploy/macos/$APP_NAME.app/Contents/MacOS/lua/main.lua" <<'EOF'
+          runtime.init = function()
+              window.set_title("Welcome to Newt!")
+          end
+          
+          runtime.draw = function()
+              graphics.clear(rgba(25, 20, 20))
+              graphics.draw_text("Hello from Newt!", 16, 16, rgba("#E35100"))
+          end
+          EOF
+
+          rm -f "deploy/macos/$APP_NAME.app/Contents/MacOS/mac_smoke.txt"
+          find "deploy/macos/$APP_NAME.app" -name '.DS_Store' -delete
+          find "deploy/macos/$APP_NAME.app" -name '._*' -delete
+
+      - name: Stage DMG contents
+        run: |
+          rm -rf "deploy/macos/dmg"
+          mkdir -p "deploy/macos/dmg"
+          cp -R "deploy/macos/$APP_NAME.app" "deploy/macos/dmg/"
+          ln -s /Applications "deploy/macos/dmg/Applications"
+
+      - name: Build DMG
+        run: |
+          rm -f "deploy/macos/$APP_NAME-macos-arm64-dev.dmg"
+          hdiutil create \
+            -volname "$APP_DISPLAY_NAME" \
+            -srcfolder "deploy/macos/dmg" \
+            -ov \
+            -format UDZO \
+            "deploy/macos/$APP_NAME-macos-arm64-dev.dmg"
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: deploy/macos/newt-macos-arm64-dev.dmg
+          archive: false
