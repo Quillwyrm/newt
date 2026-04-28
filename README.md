@@ -45,11 +45,11 @@ end
 
 ![Platformer example](examples/platformer.gif)
 
-A tiny platformer with movement, gravity, jumping, an ASCII tile map, and collision. ([see example code](examples/platformer.main.lua))
+A tiny platformer with movement, gravity, jumping, an ASCII tile map, and collision. ([see example script](examples/platformer.main.lua))
 
 ![Roguelike visibility example](examples/roguelike_vis.gif)
 
-Expressive tools for roguelikes and grid games: noise caves, regions, FOV, and explored memory. ([see example code](examples/roguelike_vis.main.lua))
+Expressive tools for roguelikes and grid games: noise caves, regions, FOV, and explored memory. ([see example script](examples/roguelike_vis.main.lua))
 
 
 ## Getting Started
