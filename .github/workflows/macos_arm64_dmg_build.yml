@@ -78,7 +78,7 @@ jobs:
           EOF
 
       - name: Build Newt
-        run: odin build src -out:build/$APP_NAME -minimum-os-version:$MIN_MACOS_VERSION -o:speed
+        run: odin build src -out:build/$APP_NAME -minimum-os-version:$MIN_MACOS_VERSION
 
       - name: Package app bundle
         run: |
