@@ -1,4 +1,4 @@
-name: newt_macos_arm64_dev_build
+name: newt_macos_arm64_dmg_build
 
 on:
   workflow_dispatch:
