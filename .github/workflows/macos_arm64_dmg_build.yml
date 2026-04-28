@@ -1,4 +1,4 @@
-name: newt_macos_arm64_dev_build
+name: newt_macos_arm64_dmg_build
 
 on:
   workflow_dispatch:
@@ -78,7 +78,7 @@ jobs:
           EOF
 
       - name: Build Newt
-        run: odin build src -out:build/$APP_NAME -minimum-os-version:$MIN_MACOS_VERSION
+        run: odin build src -out:build/$APP_NAME -minimum-os-version:$MIN_MACOS_VERSION -o:speed
 
       - name: Package app bundle
         run: |
