@@ -4,6 +4,8 @@ import "core:c"
 import "core:fmt"
 import "core:mem"
 import os "core:os"
+import libc "core:c/libc"
+import win "core:sys/windows"
 import "core:strings"
 import lua "luajit"
 import sdl "vendor:sdl3"
@@ -114,6 +116,42 @@ register_engine_global_api :: proc() {
 // Fatal Path
 // ============================================================================
 
+// platform_write_fatal_stderr mirrors fatal errors to stderr in a GUI-subsystem-safe way.
+// On Windows, Newt is built as a windows-subsystem app, so stderr may be invalid at startup.
+// For fatal reporting, we lazily try attaching to the parent console and write via WriteFile;
+// this preserves terminal-launched error visibility without spawning a console for icon launch.
+// On non-Windows (or no console available), it falls back to fmt.eprintln.
+platform_write_fatal_stderr :: proc(msg: cstring) {
+	if msg == nil do return
+
+	when ODIN_OS == .Windows {
+		// Windows GUI-subsystem processes may start without a valid stderr handle.
+		// AttachConsole(~0) asks Windows to attach us to the parent process console
+		// when one exists (terminal launch). If launched from Explorer, this just fails.
+		ATTACH_PARENT_PROCESS := win.DWORD(~u32(0))
+		_ = win.AttachConsole(ATTACH_PARENT_PROCESS)
+
+		// Re-read stderr after attach. For GUI apps this can become valid only now.
+		h := win.GetStdHandle(win.STD_ERROR_HANDLE)
+		if h != nil && h != win.INVALID_HANDLE_VALUE {
+			// Write directly with Win32 so fatal text reaches the launching terminal
+			// even when fmt.eprintln/std streams were not initialized for GUI startup.
+			written: win.DWORD
+			n := win.DWORD(libc.strlen(msg))
+			_ = win.WriteFile(h, rawptr(msg), n, &written, nil)
+
+			// Add newline for terminal readability.
+			nl: cstring = "\n"
+			_ = win.WriteFile(h, rawptr(nl), win.DWORD(1), &written, nil)
+			return
+		}
+	}
+
+	// Non-Windows path, or Windows with no usable console handle.
+	fmt.eprintln(msg)
+}
+
+
 // Error classes in host:
 // - Lua-facing recoverable runtime failures return nil, err / false, err to Lua.
 // - Uncaught top-level Lua errors and host boot/cannot-continue failures are fatal.
@@ -126,7 +164,7 @@ fatal_engine_error :: proc(error_text: cstring) {
 	if err_text == nil do err_text = "Unknown Engine Error"
 
 	// Keep terminal output for users who launched from shell.
-	fmt.eprintln(err_text)
+    platform_write_fatal_stderr(err_text)
 
 	// Shut down live subsystems so the error screen owns the process cleanly.
 	// fatal_engine_error cleanup
@@ -367,15 +405,13 @@ main :: proc() {
 // == SDL ==
 
     if !sdl.Init({.VIDEO, .GAMEPAD}) {
-        fmt.eprintln("SDL_Init failed:", sdl.GetError())
-        return
+        fatal_engine_error(fmt.caprintf("engine.boot: SDL_Init failed: %s", sdl.GetError()))
     }
-    defer sdl.Quit()
 
     if !ttf.Init() {
-        fmt.eprintln("TTF_Init failed:", sdl.GetError())
-        return
+        fatal_engine_error(fmt.caprintf("engine.boot: TTF_Init failed: %s", sdl.GetError()))
     }
+
     defer ttf.Quit()
 
 // == Lua ==
