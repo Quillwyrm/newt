@@ -17,7 +17,7 @@ Newt is a native script-driven runtime built in Odin. It exposes a clear, compos
 - **`grid`** - datagrids, pathfinding, distance fields, FOV, line of sight, region queries, and grid-field math
 - **`random`** - seeded generators, random values, list randomization, and noise fields
 
-See the [API Reference](docs/api_ref.md) for the full module documentation. For questions, and project chat, join the [Discord](https://discord.gg/SDqZT77wp6).
+See the [API Reference](docs/api_ref.md) for the full module documentation. For questions, and project chat, join the [Discord](https://discord.gg/c49av4P8).
 
 ## First Script
 
