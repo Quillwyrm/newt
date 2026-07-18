@@ -6,8 +6,9 @@ For setup, project layout, and your first `lua/main.lua`, see [Getting Started](
 
 ### Core
 
-- [runtime](runtime.md) - Application callbacks for startup, per-frame updates, and drawing.
-- [window](window.md) - Main window control, sizing, cursor state, clipboard access, and close requests.
+- [runtime](runtime.md) - Application callbacks for startup and the per-frame update loop.
+- [window](window.md) - Main window control, sizing, cursor state, window state, and close requests.
+- [system](system.md) - URLs, message boxes, file dialogs, clipboard, and system information.
 - [filesystem](filesystem.md) - Resource paths, working directory access, file I/O, and directory operations.
 
 ### Input

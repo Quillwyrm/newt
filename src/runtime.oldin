@@ -23,7 +23,6 @@ Renderer: ^sdl.Renderer
 Lua: ^lua.State
 
 Resource_Directory_Path: string
-Runtime_Dt: f64
 
 resolve_resource_path :: proc(path: string) -> string {
     if os.is_absolute_path(path) {
@@ -110,7 +109,7 @@ register_engine_global_api :: proc() {
     // Inject core lua-side primitives
     if lua.L_dostring(Lua, cstring(CORE_LUA_HELPERS)) != lua.OK {
         fatal_engine_error(fmt.caprintf("engine.boot: failed to load core Lua helpers:\n%s", lua.tostring(Lua, -1)))
-    }
+    }    
 }
 
 // ============================================================================
@@ -276,29 +275,9 @@ fatal_engine_error :: proc(error_text: cstring) {
 
 Lua_Binding :: proc "c" (L: ^lua.State) -> c.int
 
-lua_check_cstring :: proc "contextless" (L: ^lua.State, idx: c.int, fn_name, value_name: cstring) -> cstring {
-	len: c.size_t
-	p := lua.L_checklstring(L, idx, &len)
-
-	bytes := cast([^]u8)(p)
-	for i in 0..<int(len) {
-		if bytes[i] == 0 {
-			lua.L_error(L, "%s: %s contains NUL byte", fn_name, value_name)
-			return nil
-		}
-	}
-
-	return p
-}
-
 lua_bind_function :: proc(fn: Lua_Binding, fn_name: cstring) {
     lua.pushcfunction(Lua, fn)
     lua.setfield(Lua, -2, fn_name)
-}
-
-lua_runtime_get_delta_time :: proc "c" (L: ^lua.State) -> c.int {
-    lua.pushnumber(L, lua.Number(Runtime_Dt))
-    return 1
 }
 
 // Registers all Lua-facing engine modules.
@@ -309,7 +288,6 @@ register_lua_api :: proc() {
     register_raster_api()
     register_graphics_api()
     register_window_api()
-    register_system_api()
     register_input_api()
     register_gamepad_api()
     register_audio_api()
@@ -317,7 +295,6 @@ register_lua_api :: proc() {
     register_random_api()
 
     lua.newtable(Lua)
-    lua_bind_function(lua_runtime_get_delta_time, "get_delta_time")
     lua.setglobal(Lua, "runtime")
 }
 
@@ -553,14 +530,12 @@ main :: proc() {
             dt = 0.1
         }
 
-        window_begin_frame()
         input_begin_frame()
         //SDL events
         for sdl.PollEvent(&event) {
             if event.type == .QUIT || event.type == .WINDOW_CLOSE_REQUESTED {
                 Quit_Requested = true
             }
-            window_handle_event(&event)
             input_handle_event(&event)
             gamepad_handle_event(&event)
         }
@@ -568,19 +543,18 @@ main :: proc() {
         gamepad_poll_state()
         
         audio_update()
-
-        Runtime_Dt = dt
+        call_lua_number("update", dt)
 
         sdl.SetRenderDrawColor(Renderer, 0, 0, 0, 255)
         sdl.RenderClear(Renderer)
         Gfx_Ctx.active_sdl_color = u32rgba(0x000000FF)
 
-        call_lua_number("update", dt)
+        call_lua_noargs("draw")
 
         if Gfx_Ctx.transform.group_depth != 0 {
             Gfx_Ctx.transform.group_depth = 0
             Gfx_Ctx.transform.matrix_stack[0] = 1
-            fatal_engine_error("graphics: unclosed transform block at end of runtime.update; missing graphics.end_transform()")
+            fatal_engine_error("graphics: unclosed transform block at end of runtime.draw; missing graphics.end_transform()")
         }
         
         sdl.RenderPresent(Renderer)

@@ -13,6 +13,16 @@ import sdl "vendor:sdl3"
 // App quit state requested by Lua or window events.
 Quit_Requested : bool
 
+Window_State: struct {
+    moved:        bool,
+    resized:      bool,
+    focus_gained: bool,
+    focus_lost:   bool,
+    minimized:    bool,
+    maximized:    bool,
+    restored:     bool,
+}
+
 // Cursor tokens, cached as SDL system cursors.
 // Fixed-size (bounded) cache: no growth, no maps.
 Cursor_Cache : [12]^sdl.Cursor
@@ -55,6 +65,29 @@ read_window_flags :: proc "contextless" (L: ^lua.State, idx: lua.Index) -> (full
         i += 1
     }
     return
+}
+
+window_begin_frame :: proc() {
+    Window_State = {}
+}
+
+window_handle_event :: proc(event: ^sdl.Event) {
+    #partial switch event.type {
+    case .WINDOW_MOVED:
+        Window_State.moved = true
+    case .WINDOW_RESIZED:
+        Window_State.resized = true
+    case .WINDOW_FOCUS_GAINED:
+        Window_State.focus_gained = true
+    case .WINDOW_FOCUS_LOST:
+        Window_State.focus_lost = true
+    case .WINDOW_MINIMIZED:
+        Window_State.minimized = true
+    case .WINDOW_MAXIMIZED:
+        Window_State.maximized = true
+    case .WINDOW_RESTORED:
+        Window_State.restored = true
+    }
 }
 
 window_shutdown :: proc() {
@@ -165,7 +198,7 @@ lua_window_get_position :: proc "c" (L: ^lua.State) -> c.int {
 lua_window_set_title :: proc "c" (L: ^lua.State) -> c.int {
     check_window_safety(L, "window.set_title")
 
-    title_c := lua.L_checkstring(L, 1)
+    title_c := lua_check_cstring(L, 1, "window.set_title", "title")
     sdl.SetWindowTitle(Window, title_c)
 
     return 0
@@ -223,6 +256,101 @@ lua_window_minimize :: proc "c" (L: ^lua.State) -> c.int {
     }
 
     return 0
+}
+
+// window.restore()
+lua_window_restore :: proc "c" (L: ^lua.State) -> c.int {
+    check_window_safety(L, "window.restore")
+
+    if !sdl.RestoreWindow(Window) {
+        lua.L_error(L, "window.restore: failed to restore window: %s", sdl.GetError())
+        return 0
+    }
+
+    return 0
+}
+
+// window.resized() -> bool
+lua_window_resized :: proc "c" (L: ^lua.State) -> c.int {
+    check_window_safety(L, "window.resized")
+
+    lua.pushboolean(L, cast(b32)Window_State.resized)
+    return 1
+}
+
+// window.moved() -> bool
+lua_window_moved :: proc "c" (L: ^lua.State) -> c.int {
+    check_window_safety(L, "window.moved")
+
+    lua.pushboolean(L, cast(b32)Window_State.moved)
+    return 1
+}
+
+// window.is_focused() -> bool
+lua_window_is_focused :: proc "c" (L: ^lua.State) -> c.int {
+    check_window_safety(L, "window.is_focused")
+
+    flags := sdl.GetWindowFlags(Window)
+    lua.pushboolean(L, cast(b32)(.INPUT_FOCUS in flags))
+    return 1
+}
+
+// window.focus_gained() -> bool
+lua_window_focus_gained :: proc "c" (L: ^lua.State) -> c.int {
+    check_window_safety(L, "window.focus_gained")
+
+    lua.pushboolean(L, cast(b32)Window_State.focus_gained)
+    return 1
+}
+
+// window.focus_lost() -> bool
+lua_window_focus_lost :: proc "c" (L: ^lua.State) -> c.int {
+    check_window_safety(L, "window.focus_lost")
+
+    lua.pushboolean(L, cast(b32)Window_State.focus_lost)
+    return 1
+}
+
+// window.minimized() -> bool
+lua_window_minimized :: proc "c" (L: ^lua.State) -> c.int {
+    check_window_safety(L, "window.minimized")
+
+    lua.pushboolean(L, cast(b32)Window_State.minimized)
+    return 1
+}
+
+// window.maximized() -> bool
+lua_window_maximized :: proc "c" (L: ^lua.State) -> c.int {
+    check_window_safety(L, "window.maximized")
+
+    lua.pushboolean(L, cast(b32)Window_State.maximized)
+    return 1
+}
+
+// window.restored() -> bool
+lua_window_restored :: proc "c" (L: ^lua.State) -> c.int {
+    check_window_safety(L, "window.restored")
+
+    lua.pushboolean(L, cast(b32)Window_State.restored)
+    return 1
+}
+
+// window.is_minimized() -> bool
+lua_window_is_minimized :: proc "c" (L: ^lua.State) -> c.int {
+    check_window_safety(L, "window.is_minimized")
+
+    flags := sdl.GetWindowFlags(Window)
+    lua.pushboolean(L, cast(b32)(.MINIMIZED in flags))
+    return 1
+}
+
+// window.is_maximized() -> bool
+lua_window_is_maximized :: proc "c" (L: ^lua.State) -> c.int {
+    check_window_safety(L, "window.is_maximized")
+
+    flags := sdl.GetWindowFlags(Window)
+    lua.pushboolean(L, cast(b32)(.MAXIMIZED in flags))
+    return 1
 }
 
 // == Cursor ==
@@ -316,52 +444,6 @@ lua_window_is_cursor_visible :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// == Clipboard ==
-
-// window.get_clipboard() -> string
-// Must free the SDL buffer via sdl.free (SDL_free).
-lua_window_get_clipboard :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L, "window.get_clipboard")
-
-    p := sdl.GetClipboardText()
-    if p == nil {
-        lua.L_error(L, "window.get_clipboard: failed to get clipboard text: %s", sdl.GetError())
-        return 0
-    }
-
-    // Lua copies the C string into its own string object.
-    lua.pushstring(L, cast(cstring)(p))
-
-    // SDL owns this allocation.
-    sdl.free(cast(rawptr)(p))
-
-    return 1
-}
-
-// window.set_clipboard(text)
-lua_window_set_clipboard :: proc "c" (L: ^lua.State) -> c.int {
-    check_window_safety(L, "window.set_clipboard")
-
-    len: c.size_t
-    p := lua.L_checklstring(L, 1, &len)
-
-    // Reject embedded NUL bytes (SDL takes cstring; otherwise it would truncate silently).
-    bytes := cast([^]u8)(p)
-    for i in 0..<int(len) {
-        if bytes[i] == 0 {
-            lua.L_error(L, "window.set_clipboard: text contains NUL byte")
-            return 0
-        }
-    }
-
-    if !sdl.SetClipboardText(cast(cstring)(p)) {
-        lua.L_error(L, "window.set_clipboard: failed to set clipboard text: %s", sdl.GetError())
-        return 0
-    }
-
-    return 0
-}
-
 // == Lua Registration ==
 
 register_window_api :: proc() {
@@ -383,16 +465,25 @@ register_window_api :: proc() {
     lua_bind_function(lua_window_set_position, "set_position")
     lua_bind_function(lua_window_maximize, "maximize")
     lua_bind_function(lua_window_minimize, "minimize")
+    lua_bind_function(lua_window_restore, "restore")
+
+    // Window state
+    lua_bind_function(lua_window_resized, "resized")
+    lua_bind_function(lua_window_moved, "moved")
+    lua_bind_function(lua_window_is_focused, "is_focused")
+    lua_bind_function(lua_window_focus_gained, "focus_gained")
+    lua_bind_function(lua_window_focus_lost, "focus_lost")
+    lua_bind_function(lua_window_minimized, "minimized")
+    lua_bind_function(lua_window_maximized, "maximized")
+    lua_bind_function(lua_window_restored, "restored")
+    lua_bind_function(lua_window_is_minimized, "is_minimized")
+    lua_bind_function(lua_window_is_maximized, "is_maximized")
 
     // Cursor
     lua_bind_function(lua_window_set_cursor, "set_cursor")
     lua_bind_function(lua_window_cursor_show, "cursor_show")
     lua_bind_function(lua_window_cursor_hide, "cursor_hide")
     lua_bind_function(lua_window_is_cursor_visible, "is_cursor_visible")
-
-    // Clipboard
-    lua_bind_function(lua_window_get_clipboard, "get_clipboard")
-    lua_bind_function(lua_window_set_clipboard, "set_clipboard")
 
     lua.setglobal(Lua, "window")
 }

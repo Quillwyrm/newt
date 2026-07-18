@@ -6,12 +6,13 @@ Newt is a native script-driven runtime built in Odin. It exposes a clear, compos
 
 ## What You Get
 
-- **`runtime`** - game loop callbacks: `init`, `update`, and `draw`
+- **`runtime`** - game loop callbacks: `init` and `update`
 - **`graphics`** - images, shapes, text, fonts, render targets, transforms, clipping, and blend modes
 - **`audio`** - sounds, streams, voices, 2D spatial audio, mixing, panning, filters, and delay
 - **`input`** - keyboard, mouse, cursor, scroll wheel, and text input
 - **`gamepad`** - buttons, sticks, triggers, trigger edges, and rumble
-- **`window`** - size, position, flags, cursor control, clipboard, and close handling
+- **`window`** - size, position, flags, cursor control, window state, and close handling
+- **`system`** - URLs, message boxes, file dialogs, clipboard, and system information
 - **`filesystem`** - resource paths, working paths, file I/O, directory queries, and path operations
 - **`raster`** - CPU pixelmaps, raster drawing, pixel read/write, image queries, Pixelmap I/O, and GPU upload
 - **`grid`** - datagrids, pathfinding, distance fields, FOV, line of sight, region queries, and grid-field math
@@ -36,9 +37,7 @@ runtime.update = function(dt)
     if input.down("d") or input.down("right") then x = x + speed * dt end
     if input.down("w") or input.down("up")    then y = y - speed * dt end
     if input.down("s") or input.down("down")  then y = y + speed * dt end
-end
 
-runtime.draw = function()
     graphics.clear(rgba(20, 30, 20))
     graphics.draw_text("WASD or arrow keys to move", 16, 16, rgba("#00FF00"))
     graphics.draw_rect(x, y, 32, 32, rgba("#00FF00"))

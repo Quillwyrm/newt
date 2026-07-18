@@ -21,14 +21,25 @@ Unless noted otherwise, functions in this module throw on wrong arity or wrong a
 * [`set_flags`](#set_flags)
 * [`maximize`](#maximize)
 * [`minimize`](#minimize)
+* [`restore`](#restore)
 
-**Cursor & Clipboard**
+**Window State**
+* [`resized`](#resized)
+* [`moved`](#moved)
+* [`is_focused`](#is_focused)
+* [`focus_gained`](#focus_gained)
+* [`focus_lost`](#focus_lost)
+* [`minimized`](#minimized)
+* [`maximized`](#maximized)
+* [`restored`](#restored)
+* [`is_minimized`](#is_minimized)
+* [`is_maximized`](#is_maximized)
+
+**Cursor**
 * [`set_cursor`](#set_cursor)
 * [`cursor_show`](#cursor_show)
 * [`cursor_hide`](#cursor_hide)
 * [`is_cursor_visible`](#is_cursor_visible)
-* [`get_clipboard`](#get_clipboard)
-* [`set_clipboard`](#set_clipboard)
 
 ## Lifecycle
 These functions close the window or query close requests.
@@ -153,8 +164,112 @@ Minimizes the window.
 window.minimize()
 ```
 
-## Cursor & Clipboard
-These functions control the cursor and read or write clipboard text.
+---
+### restore
+
+Restores the window from minimized or maximized state.
+
+```lua
+window.restore()
+```
+
+## Window State
+These functions query window events and persistent state.
+
+Event functions return `true` only on the frame where the matching window event was received.
+
+---
+### resized
+
+Returns whether the window was resized this frame.
+
+```lua
+window.resized() -> bool
+```
+
+---
+### moved
+
+Returns whether the window was moved this frame.
+
+```lua
+window.moved() -> bool
+```
+
+---
+### is_focused
+
+Returns whether the window currently has keyboard focus.
+
+```lua
+window.is_focused() -> bool
+```
+
+---
+### focus_gained
+
+Returns whether the window gained keyboard focus this frame.
+
+```lua
+window.focus_gained() -> bool
+```
+
+---
+### focus_lost
+
+Returns whether the window lost keyboard focus this frame.
+
+```lua
+window.focus_lost() -> bool
+```
+
+---
+### minimized
+
+Returns whether the window was minimized this frame.
+
+```lua
+window.minimized() -> bool
+```
+
+---
+### maximized
+
+Returns whether the window was maximized this frame.
+
+```lua
+window.maximized() -> bool
+```
+
+---
+### restored
+
+Returns whether the window was restored this frame.
+
+```lua
+window.restored() -> bool
+```
+
+---
+### is_minimized
+
+Returns whether the window is currently minimized.
+
+```lua
+window.is_minimized() -> bool
+```
+
+---
+### is_maximized
+
+Returns whether the window is currently maximized.
+
+```lua
+window.is_maximized() -> bool
+```
+
+## Cursor
+These functions control the cursor.
 
 ---
 ### set_cursor
@@ -209,25 +324,3 @@ Returns whether the cursor is visible.
 ```lua
 window.is_cursor_visible() -> bool
 ```
-
----
-### get_clipboard
-
-Returns the current clipboard text as a string.
-
-```lua
-window.get_clipboard() -> text
-```
-
----
-### set_clipboard
-
-Sets the clipboard text.
-
-```lua
-window.set_clipboard(text)
-```
-
-#### Error Cases
-
-- Throws if `text` contains a NUL byte.

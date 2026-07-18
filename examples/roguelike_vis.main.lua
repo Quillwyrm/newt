@@ -155,9 +155,7 @@ runtime.update = function()
   elseif move_key_pressed("s") or move_key_pressed("kp2") then try_move(0, 1)
   elseif move_key_pressed("c") or move_key_pressed("kp3") then try_move(1, 1)
   end
-end
 
-runtime.draw = function()
   graphics.set_canvas(Canvas)
   graphics.clear()
 

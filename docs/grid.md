@@ -165,7 +165,6 @@ terrain = grid.new_datagrid_from_pixelmap(pmap, {
 - `color_map` values must fit in a datagrid cell.
 - `default_value` must fit in a datagrid cell.
 
-
 ---
 
 ### get_cell

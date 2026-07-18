@@ -187,9 +187,7 @@ runtime.update = function(dt)
   if player.y > SCREEN_HEIGHT + 200 then
     reset_player()
   end
-end
 
-runtime.draw = function()
   graphics.clear(COLORS.background)
 
   -- Draw level

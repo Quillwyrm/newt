@@ -1,7 +1,7 @@
 # runtime
 
-The `runtime` module contains the main lifecycle callbacks for the application.  
-Define these callbacks to run code during startup, per-frame updates, and drawing.
+The `runtime` module contains the main lifecycle callbacks for the application.
+Define these callbacks to run code during startup and the per-frame update loop. Drawing is done from `runtime.update`.
 
 ## Callbacks
 
@@ -19,23 +19,23 @@ end
 
 ### update
 
-Called once per frame before `runtime.draw`.  
+Called once per frame.
 `dt` is the elapsed time since the previous frame, in seconds.
 
 ```lua
 runtime.update = function(dt)
-    -- runtime logic here
+    -- update and draw here
 end
 ```
 
----
+## Functions
 
-### draw
+### get_delta_time
 
-Called once per frame after `runtime.update`.
+Returns the elapsed time for the current frame, in seconds.
+
+Inside `runtime.update(dt)`, this returns the same value as `dt`.
 
 ```lua
-runtime.draw = function()
-    -- draw calls here
-end
+runtime.get_delta_time() -> dt
 ```
