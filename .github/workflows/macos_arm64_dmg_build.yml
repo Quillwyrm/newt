@@ -218,7 +218,7 @@ jobs:
               window.set_title("Welcome to Newt!")
           end
 
-          runtime.draw = function()
+          runtime.update = function()
               graphics.clear(rgba(25, 20, 20))
               graphics.draw_text("Hello from Newt!", 16, 16, rgba("#E35100"))
           end
