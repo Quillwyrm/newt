@@ -516,6 +516,13 @@ main :: proc() {
         Window = nil
         fatal_engine_error(fmt.caprintf("engine.boot: SDL_CreateRenderer failed: %s", sdl.GetError()))
     }
+
+    pixel_density := sdl.GetWindowPixelDensity(Window)
+
+    if !sdl.SetRenderScale(Renderer, pixel_density, pixel_density) {
+        fatal_engine_error(fmt.caprintf("engine.boot: SDL_SetRenderScale failed: %s", sdl.GetError()))
+    }
+
     //sync Renderer blend mode with engine global ctx
     sdl.SetRenderDrawBlendMode(Renderer, Gfx_Ctx.active_blend_mode)
 
