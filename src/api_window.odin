@@ -46,7 +46,7 @@ read_window_flags :: proc "contextless" (L: ^lua.State, idx: lua.Index) -> (full
             lua.pop(L, 1)
             break
         }
-        
+
         len: c.size_t
         p := lua.L_checklstring(L, -1, &len)
         s := transmute(string)mem.Raw_String{data = cast([^]byte)(p), len = int(len)}
@@ -190,6 +190,15 @@ lua_window_get_position :: proc "c" (L: ^lua.State) -> c.int {
     lua.pushinteger(L, cast(lua.Integer)(x))
     lua.pushinteger(L, cast(lua.Integer)(y))
     return 2
+}
+
+// window.get_display_scale() -> float
+lua_window_get_display_scale :: proc "c" (L: ^lua.State) -> c.int {
+	check_window_safety(L, "window.get_display_scale")
+
+	scale := sdl.GetWindowDisplayScale(Window)
+	lua.pushnumber(L, cast(lua.Number)scale)
+	return 1
 }
 
 // == Setters ==
@@ -458,6 +467,7 @@ register_window_api :: proc() {
     // Getters
     lua_bind_function(lua_window_get_size, "get_size")
     lua_bind_function(lua_window_get_position, "get_position")
+    lua_bind_function(lua_window_get_display_scale, "get_display_scale")
 
     // Setters
     lua_bind_function(lua_window_set_title, "set_title")
