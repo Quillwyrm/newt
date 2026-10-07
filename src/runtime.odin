@@ -376,9 +376,9 @@ call_lua_number :: proc(func_name: cstring, arg: f64) {
         lua.pop(Lua, 3)
         fatal_engine_error(fmt.caprintf("runtime.%s is not a function", func_name))
     }
-    
+
     lua.pushnumber(Lua, lua.Number(arg))
-    
+
     if lua.pcall(Lua, 1, 0, cast(c.int)msg_handler_idx) != lua.OK {
         fatal_engine_error(fmt.caprintf("Lua error:\n%s", lua.tostring(Lua, -1)))
     }
@@ -463,7 +463,7 @@ main :: proc() {
         fatal_engine_error(fmt.caprintf("engine.boot: failed to get executable directory: %v", err))
     }
     defer delete(Resource_Directory_Path)
-    
+
     configure_lua_package_path()
 
     font_err, font_ok := graphics_init_default_font()
@@ -503,7 +503,7 @@ main :: proc() {
     input_init()
     gamepad_init()
 
-    default_window_flags: sdl.WindowFlags = {.HIDDEN}
+    default_window_flags: sdl.WindowFlags = {.HIDDEN,  .HIGH_PIXEL_DENSITY}
 
     Window = sdl.CreateWindow(DEFAULT_WINDOW_TITLE, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, default_window_flags)
     if Window == nil {
@@ -566,7 +566,7 @@ main :: proc() {
         }
         input_poll_state()
         gamepad_poll_state()
-        
+
         audio_update()
 
         Runtime_Dt = dt
@@ -582,8 +582,8 @@ main :: proc() {
             Gfx_Ctx.transform.matrix_stack[0] = 1
             fatal_engine_error("graphics: unclosed transform block at end of runtime.update; missing graphics.end_transform()")
         }
-        
+
         sdl.RenderPresent(Renderer)
-        
+
     }
 }
