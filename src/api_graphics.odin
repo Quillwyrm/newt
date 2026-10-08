@@ -253,7 +253,7 @@ graphics_init_default_font :: proc() -> (cstring, bool) {
 		return err, false
 	}
 
-	handle := ttf.OpenFontIO(stream, true, BUILTIN_DEFAULT_FONT_SIZE)
+	handle := ttf.OpenFontIO(stream, true, BUILTIN_DEFAULT_FONT_SIZE * sdl.GetWindowPixelDensity(Window))
 	if handle == nil {
 		err := sdl.GetError()
 		if err == nil do err = "TTF_OpenFontIO failed"
@@ -283,7 +283,8 @@ load_text_texture_from_surface :: proc(surf: ^sdl.Surface) -> (TextCacheEntry, c
 	sdl.SetTextureBlendMode(texture, {.BLEND})
 	sdl.SetTextureScaleMode(texture, Gfx_Ctx.default_scale_mode)
 
-	return TextCacheEntry{texture = texture, width = f32(surf.w), height = f32(surf.h)}, nil, true
+	density := sdl.GetWindowPixelDensity(Window)
+	return TextCacheEntry{texture = texture, width = f32(surf.w) / density, height = f32(surf.h) / density}, nil, true
 }
 
 trim_font_text_cache :: proc(font: ^Font) {
@@ -940,7 +941,7 @@ lua_graphics_load_font :: proc "c" (L: ^lua.State) -> c.int {
 		return 2
 	}
 
-	handle := ttf.OpenFont(path_c, size)
+	handle := ttf.OpenFont(path_c, size * sdl.GetWindowPixelDensity(Window))
 	if handle == nil {
 		lua.pushnil(L)
 
@@ -1175,12 +1176,13 @@ lua_graphics_draw_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
 		ttf.SetFontWrapAlignment(font.handle, align)
 
 		surf := ttf.RenderText_Blended_Wrapped(
-			font.handle,
-			text_c,
-			text_len,
-			sdl.Color{255, 255, 255, 255},
-			wrap_width,
+			font.handle, 
+			text_c, 
+			text_len, 
+			sdl.Color{255, 255, 255, 255}, 
+			c.int(f32(wrap_width) * sdl.GetWindowPixelDensity(Window))
 		)
+		
 		if surf == nil {
 			delete(owned_key.text)
 
@@ -1287,7 +1289,8 @@ lua_graphics_get_font_height :: proc "c" (L: ^lua.State) -> c.int {
 	}
 
 	height := ttf.GetFontHeight(font.handle)
-	lua.pushinteger(L, cast(lua.Integer)height)
+	density := sdl.GetWindowPixelDensity(Window)
+	lua.pushnumber(L, lua.Number(f32(height) / density))
 	return 1
 }
 
@@ -1319,7 +1322,8 @@ lua_graphics_get_font_ascent :: proc "c" (L: ^lua.State) -> c.int {
 	}
 
 	ascent := ttf.GetFontAscent(font.handle)
-	lua.pushinteger(L, cast(lua.Integer)ascent)
+	density := sdl.GetWindowPixelDensity(Window)
+	lua.pushnumber(L, lua.Number(f32(ascent) / density))
 	return 1
 }
 
@@ -1351,7 +1355,8 @@ lua_graphics_get_font_descent :: proc "c" (L: ^lua.State) -> c.int {
 	}
 
 	descent := ttf.GetFontDescent(font.handle)
-	lua.pushinteger(L, cast(lua.Integer)descent)
+	density := sdl.GetWindowPixelDensity(Window)
+	lua.pushnumber(L, lua.Number(f32(descent) / density))
 	return 1
 }
 
@@ -1383,7 +1388,8 @@ lua_graphics_get_font_line_skip :: proc "c" (L: ^lua.State) -> c.int {
 	}
 
 	line_skip := ttf.GetFontLineSkip(font.handle)
-	lua.pushinteger(L, cast(lua.Integer)line_skip)
+	density := sdl.GetWindowPixelDensity(Window)
+	lua.pushnumber(L, lua.Number(f32(line_skip) / density))
 	return 1
 }
 
@@ -1441,8 +1447,9 @@ lua_graphics_measure_text :: proc "c" (L: ^lua.State) -> c.int {
 		return 0
 	}
 
-	lua.pushinteger(L, cast(lua.Integer)w)
-	lua.pushinteger(L, cast(lua.Integer)h)
+	density := sdl.GetWindowPixelDensity(Window)
+	lua.pushnumber(L, lua.Number(f32(w) / density))
+	lua.pushnumber(L, lua.Number(f32(h) / density))
 	return 2
 }
 
@@ -1491,8 +1498,11 @@ lua_graphics_measure_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
 		return 0
 	}
 
+	density := sdl.GetWindowPixelDensity(Window)
+	scaled_wrap_width := c.int(f32(wrap_width) * density)
+	
 	w, h: c.int
-	if !ttf.GetStringSizeWrapped(font.handle, text_c, text_len, wrap_width, &w, &h) {
+	if !ttf.GetStringSizeWrapped(font.handle, text_c, text_len, scaled_wrap_width, &w, &h) {
 		err := sdl.GetError()
 		if err != nil {
 			lua.L_error(L, "graphics.measure_text_wrap: failed to measure wrapped text: %s", err)
@@ -1502,8 +1512,8 @@ lua_graphics_measure_text_wrap :: proc "c" (L: ^lua.State) -> c.int {
 		return 0
 	}
 
-	lua.pushinteger(L, cast(lua.Integer)w)
-	lua.pushinteger(L, cast(lua.Integer)h)
+	lua.pushnumber(L, lua.Number(f32(w) / density))
+	lua.pushnumber(L, lua.Number(f32(h) / density))
 	return 2
 }
 
@@ -1552,15 +1562,18 @@ lua_graphics_measure_text_fit :: proc "c" (L: ^lua.State) -> c.int {
 		return 0
 	}
 
+	density := sdl.GetWindowPixelDensity(Window)
+	scaled_max_width := c.int(f32(max_width) * density)
+	
 	measured_width: c.int
 	measured_length: c.size_t
 	if !ttf.MeasureString(
-		font.handle,
-		text_c,
-		text_len,
-		max_width,
-		&measured_width,
-		&measured_length,
+    	font.handle,
+    	text_c,
+    	text_len,
+    	scaled_max_width,
+    	&measured_width,
+    	&measured_length,
 	) {
 		err := sdl.GetError()
 		if err != nil {
@@ -1571,7 +1584,7 @@ lua_graphics_measure_text_fit :: proc "c" (L: ^lua.State) -> c.int {
 		return 0
 	}
 
-	lua.pushinteger(L, cast(lua.Integer)measured_width)
+	lua.pushnumber(L, lua.Number(f32(measured_width) / density))
 	lua.pushinteger(L, cast(lua.Integer)measured_length)
 	return 2
 }

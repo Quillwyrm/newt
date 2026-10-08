@@ -466,18 +466,6 @@ main :: proc() {
 
     configure_lua_package_path()
 
-    font_err, font_ok := graphics_init_default_font()
-    if !font_ok {
-        sdl.DestroyRenderer(Renderer)
-        Renderer = nil
-        sdl.DestroyWindow(Window)
-        Window = nil
-        fatal_engine_error(fmt.caprintf(
-            "engine.boot: failed to initialize built-in default font: %s",
-            font_err,
-        ))
-    }
-
 // == script Boot ==
 
     main_path, err2 := os.join_path({Resource_Directory_Path, "lua", "main.lua"}, context.temp_allocator)
@@ -540,6 +528,23 @@ main :: proc() {
 
     if !sdl.ShowWindow(Window) {
         fatal_engine_error(fmt.caprintf("engine.boot: SDL_ShowWindow failed: %s", sdl.GetError()))
+    }
+
+    Window = sdl.CreateWindow(DEFAULT_WINDOW_TITLE, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, default_window_flags)
+    if Window == nil {
+        fatal_engine_error(fmt.caprintf("engine.boot: SDL_CreateWindow failed: %s", sdl.GetError()))
+    }
+
+    font_err, font_ok := graphics_init_default_font()
+    if !font_ok {
+        sdl.DestroyRenderer(Renderer)
+        Renderer = nil
+        sdl.DestroyWindow(Window)
+        Window = nil
+        fatal_engine_error(fmt.caprintf(
+            "engine.boot: failed to initialize built-in default font: %s",
+            font_err,
+        ))
     }
 
 // == Main Loop ==
